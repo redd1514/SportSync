@@ -1,0 +1,542 @@
+@custom-variant dark (&:is(.dark *));
+@custom-variant light (&:is(.light *));
+
+:root {
+  --font-size: 16px;
+
+  /* JRC SportSync Custom Theme Variables */
+  --jrc-orange: #FF8C00;
+  --jrc-blue: #0047AB;
+  --jrc-yellow: #FFD700;
+}
+
+/* Light Theme - Premium Sports Design */
+.light {
+  --app-bg: #FAFBFC;
+  --app-bg-gradient-start: #FFFFFF;
+  --app-bg-gradient-end: #F0F4F8;
+  --app-surface: #FFFFFF;
+  --app-surface-glass: rgba(255, 255, 255, 0.7);
+  --app-surface-2: #FAFAFA;
+  --app-surface-3: #F0F0F0;
+  --app-border: rgba(0, 0, 0, 0.06);
+  --app-border-glass: rgba(0, 0, 0, 0.08);
+  --app-text: #0F172A;
+  --app-text-secondary: #475569;
+  --app-text-tertiary: #94A3B8;
+  --app-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --app-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --app-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --app-glow-orange: rgba(255, 140, 0, 0.2);
+  --app-glow-blue: rgba(0, 71, 171, 0.2);
+
+  --background: #FAFBFC;
+  --foreground: #0F172A;
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
+  --primary: #FF8C00;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+  --muted: #F8FAFC;
+  --muted-foreground: #64748B;
+  --accent: #FFF7ED;
+  --accent-foreground: #0F172A;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(0, 0, 0, 0.06);
+  --input: rgba(0, 0, 0, 0.04);
+  --input-background: #F8FAFC;
+  --switch-background: #E2E8F0;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: rgba(255, 140, 0, 0.3);
+  --radius: 0.75rem;
+}
+
+/* Dark Theme - Premium Sports Design */
+.dark {
+  --app-bg: #0D0D0D;
+  --app-bg-gradient-start: #0D0D0D;
+  --app-bg-gradient-end: #090909;
+  --app-surface: #141414;
+  --app-surface-glass: rgba(20, 20, 20, 0.8);
+  --app-surface-2: #1E1E1E;
+  --app-surface-3: #282828;
+  --app-border: rgba(255, 255, 255, 0.06);
+  --app-border-glass: rgba(255, 255, 255, 0.08);
+  --app-text: #F0F0F0;
+  --app-text-secondary: #888888;
+  --app-text-tertiary: #444444;
+  --app-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --app-shadow-md: 0 4px 20px rgba(0, 0, 0, 0.5);
+  --app-shadow-lg: 0 8px 36px rgba(0, 0, 0, 0.65);
+  --app-glow-orange: rgba(255, 140, 0, 0.3);
+  --app-glow-blue: rgba(0, 71, 171, 0.3);
+
+  --background: #0D0D0D;
+  --foreground: #F0F0F0;
+  --card: #141414;
+  --card-foreground: #F0F0F0;
+  --popover: #1E1E1E;
+  --popover-foreground: #F0F0F0;
+  --primary: #FF8C00;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1E1E1E;
+  --secondary-foreground: #F0F0F0;
+  --muted: #141414;
+  --muted-foreground: #888888;
+  --accent: rgba(255, 140, 0, 0.1);
+  --accent-foreground: #F0F0F0;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.04);
+  --input-background: #1E1E1E;
+  --switch-background: #333333;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: rgba(255, 140, 0, 0.4);
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+}
+
+/**
+ * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
+ */
+@layer base {
+  :where(:not(:has([class*=' text-']), :not(:has([class^='text-'])))) {
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+  }
+}
+
+html {
+  font-size: var(--font-size);
+  scroll-behavior: smooth;
+}
+
+/* Mobile PWA Utilities */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe area for iOS notch / dynamic island */
+.py-safe {
+  padding-top: env(safe-area-inset-top, 12px);
+  padding-bottom: env(safe-area-inset-bottom, 12px);
+}
+
+/* Prevent text selection on tap in mobile UI */
+.mobile-app * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth momentum scrolling on iOS */
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Premium Glassmorphism Effects */
+.glass-panel {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.glass-card {
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+}
+
+.glass-light {
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+}
+
+/* Gradient Overlays */
+.gradient-overlay-dark {
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 100%);
+}
+
+.gradient-overlay-light {
+  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 100%);
+}
+
+/* Smooth Transitions */
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-bounce {
+  transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Hover Lift Effect */
+.hover-lift {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+.dark .hover-lift:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Shimmer Effect for Loading */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  animation: shimmer 2s infinite;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Glow Effects */
+.glow-orange {
+  box-shadow: 0 0 20px var(--app-glow-orange),
+              0 0 40px var(--app-glow-orange);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px var(--app-glow-blue),
+              0 0 40px var(--app-glow-blue);
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--app-text-tertiary);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--app-text-secondary);
+}
+
+/* Map canvas dark scrollbar */
+.map-canvas-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.map-canvas-scroll::-webkit-scrollbar-track { background: #0D0D0D; }
+.map-canvas-scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 6px; }
+.map-canvas-scroll::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* Sidebar thin scrollbar */
+.sidebar-scroll::-webkit-scrollbar { width: 3px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* ── Map builder palette/inspector thin scrollbar ── */
+.palette-scroll { overflow-y: auto; overscroll-behavior: contain; }
+.palette-scroll::-webkit-scrollbar { width: 3px; }
+.palette-scroll::-webkit-scrollbar-track { background: transparent; }
+.palette-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 6px; }
+.palette-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+.palette-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+
+/* ── Mesh gradient animation for home hero ── */
+@keyframes meshBlob1 {
+  0%,100% { transform: translate(0%,0%) scale(1); }
+  33%      { transform: translate(8%,-6%) scale(1.08); }
+  66%      { transform: translate(-6%,8%) scale(0.95); }
+}
+@keyframes meshBlob2 {
+  0%,100% { transform: translate(0%,0%) scale(1); }
+  33%      { transform: translate(-10%,6%) scale(1.1); }
+  66%      { transform: translate(7%,-9%) scale(0.92); }
+}
+@keyframes meshBlob3 {
+  0%,100% { transform: translate(0%,0%) scale(1); }
+  50%      { transform: translate(5%,5%) scale(1.06); }
+}
+.mesh-blob-1 { animation: meshBlob1 18s ease-in-out infinite; }
+.mesh-blob-2 { animation: meshBlob2 22s ease-in-out infinite; }
+.mesh-blob-3 { animation: meshBlob3 26s ease-in-out infinite; }
+
+/* ── Infinite marquee ── */
+@keyframes marqueeScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track { animation: marqueeScroll 35s linear infinite; }
+.marquee-track:hover { animation-play-state: paused; }
+
+/* ── Sport slice hover expand ── */
+.sport-slice { transition: flex 0.5s cubic-bezier(0.34,1.56,0.64,1); }
+
+/* ── Stagger reveal — add animation-delay via data-stagger or nth-child ── */
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes revealFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.reveal-up   { animation: revealUp  0.45s cubic-bezier(0.4,0,0.2,1) both; }
+.reveal-fade { animation: revealFade 0.4s ease both; }
+/* Stagger helpers: add to list items */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.10s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.20s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.30s; }
+
+/* ── Subtle card hover glow ── */
+.card-hover {
+  transition: transform 0.25s cubic-bezier(0.4,0,0.2,1),
+              box-shadow 0.25s cubic-bezier(0.4,0,0.2,1),
+              border-color 0.25s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+}
+.card-hover-orange:hover {
+  border-color: rgba(249,115,22,0.28) !important;
+  box-shadow: 0 8px 28px rgba(249,115,22,0.08), 0 2px 8px rgba(0,0,0,0.3);
+}
+.card-hover-blue:hover {
+  border-color: rgba(37,99,235,0.28) !important;
+  box-shadow: 0 8px 28px rgba(37,99,235,0.08), 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* ── Active nav pill indicator ── */
+@keyframes navPulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+.nav-active-dot {
+  animation: navPulse 2.5s ease-in-out infinite;
+}
+
+/* ── Skeleton loading shimmer ── */
+@keyframes skeletonWave {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #141414 25%, #1E1E1E 50%, #141414 75%);
+  background-size: 800px 100%;
+  animation: skeletonWave 1.6s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ── Focus ring ── */
+.focus-ring:focus-visible {
+  outline: 2px solid rgba(249,115,22,0.5);
+  outline-offset: 2px;
+}
+
+/* ── Interactive button press ── */
+.btn-press { transition: transform 0.12s ease, opacity 0.12s ease; }
+.btn-press:active { transform: scale(0.96); }
+
+/* ── Subtle inner glow on surface cards ── */
+.surface-card {
+  background: #141414;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.surface-card-2 {
+  background: #1E1E1E;
+  border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+}
+
+/* ═══════════════════════════════════════════════════
+   LIGHT MODE — comprehensive overrides
+   Applied when <html class="light">
+═══════════════════════════════════════════════════ */
+
+/* Core background surfaces */
+html.light .bg-\[\#0A0A0A\] { background-color: #f0f2f5 !important; }
+html.light .bg-\[\#0D0D0D\] { background-color: #f0f2f5 !important; }
+html.light .bg-\[\#13141A\] { background-color: #f0f2f5 !important; }
+html.light .bg-\[\#0E0E0E\] { background-color: #e8edf2 !important; }
+html.light .bg-\[\#111\]    { background-color: #e2e8ee !important; }
+html.light .bg-\[\#111111\] { background-color: #e2e8ee !important; }
+html.light .bg-\[\#141414\] { background-color: #edf1f5 !important; }
+html.light .bg-\[\#1C1E27\] { background-color: #ffffff !important; }
+html.light .bg-\[\#1A1A1A\] { background-color: #ffffff !important; }
+html.light .bg-\[\#1E1E1E\] { background-color: #ffffff !important; }
+html.light .bg-\[\#252836\] { background-color: #f5f7fa !important; }
+html.light .bg-\[\#252525\] { background-color: #f5f7fa !important; }
+
+/* Body & global */
+html.light body              { background-color: #f0f2f5 !important; color: #111827 !important; }
+html.light .bg-background    { background-color: #f0f2f5 !important; }
+
+/* Text */
+html.light .text-white        { color: #111827 !important; }
+html.light .text-gray-300     { color: #374151 !important; }
+html.light .text-gray-400     { color: #6b7280 !important; }
+html.light .text-gray-500     { color: #9ca3af !important; }
+html.light .text-gray-600     { color: #9ca3af !important; }
+html.light .text-gray-700     { color: #d1d5db !important; }
+
+/* Borders */
+html.light .border-white\/\[0\.05\]   { border-color: rgba(0,0,0,0.06) !important; }
+html.light .border-white\/\[0\.06\]   { border-color: rgba(0,0,0,0.07) !important; }
+html.light .border-white\/5           { border-color: rgba(0,0,0,0.06) !important; }
+html.light .border-white\/6           { border-color: rgba(0,0,0,0.07) !important; }
+html.light .border-white\/8           { border-color: rgba(0,0,0,0.08) !important; }
+html.light .border-white\/10          { border-color: rgba(0,0,0,0.1)  !important; }
+html.light .border-white\/20          { border-color: rgba(0,0,0,0.15) !important; }
+
+/* Sidebar & nav buttons – keep white base */
+html.light .bg-white\/5   { background-color: rgba(0,0,0,0.04) !important; }
+html.light .bg-white\/6   { background-color: rgba(0,0,0,0.05) !important; }
+html.light .bg-white\/8   { background-color: rgba(0,0,0,0.07) !important; }
+html.light .hover\:bg-white\/5:hover  { background-color: rgba(0,0,0,0.04) !important; }
+html.light .hover\:bg-white\/6:hover  { background-color: rgba(0,0,0,0.05) !important; }
+html.light .hover\:bg-white\/8:hover  { background-color: rgba(0,0,0,0.07) !important; }
+
+/* Overlays */
+html.light .bg-black\/70  { background-color: rgba(0,0,0,0.5) !important; }
+html.light .bg-black\/80  { background-color: rgba(0,0,0,0.6) !important; }
+
+/* Input fields */
+html.light input, html.light textarea, html.light select {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  border-color: rgba(0,0,0,0.12) !important;
+}
+html.light input::placeholder { color: #9ca3af !important; }
+html.light textarea::placeholder { color: #9ca3af !important; }
+
+/* Scrollbar */
+html.light ::-webkit-scrollbar-track  { background: #e8edf2 !important; }
+html.light ::-webkit-scrollbar-thumb  { background: #c4cdd8 !important; }
+html.light ::-webkit-scrollbar-thumb:hover { background: #9aa5b3 !important; }
+
+/* Recharts tooltips */
+html.light .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #ffffff !important;
+  border-color: rgba(0,0,0,0.1) !important;
+}
+
+/* Keep map builder always dark (it's a canvas tool) */
+html.light .bg-\[\#0A0A0A\].flex.flex-col.h-full { background-color: #0A0A0A !important; }

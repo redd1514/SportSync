@@ -1,0 +1,57 @@
+{
+  "name": "JRC SportSync",
+  "short_name": "SportSync",
+  "description": "JRC Ballpark Multi-Sport Facility Booking System — Where Every Game & Event Comes to Life",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen"],
+  "background_color": "#0D0D0D",
+  "theme_color": "#FF8C00",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["sports", "lifestyle", "entertainment", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Book a Court",
+      "short_name": "Book",
+      "description": "Quickly book a court at JRC Ballpark",
+      "url": "/?tab=book",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Assistant",
+      "short_name": "AI Help",
+      "description": "Chat with the JRC AI concierge",
+      "url": "/?tab=ai",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot1.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Home Screen"
+    }
+  ],
+  "prefer_related_applications": false,
+  "mobile_web_app_capable": true,
+  "apple_mobile_web_app_capable": "yes",
+  "apple_mobile_web_app_status_bar_style": "black-translucent"
+}
