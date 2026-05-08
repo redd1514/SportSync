@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { supabase } from "../utils/supabase/client";
 
 const _TODAY = new Date().toISOString().split('T')[0];
 
@@ -110,8 +111,13 @@ interface UserContextType {
   isLoggedIn: boolean;
   isAdmin: boolean;
   isStaff: boolean;
-  login: (email: string, password: string) => boolean;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>;
+  verifyEmailCode: (email: string, code: string) => Promise<{ error: string | null }>;
+  resendVerificationCode: (email: string) => Promise<{ error: string | null }>;
+  logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (password: string) => Promise<{ error: string | null }>;
   cancellationRequests: CancellationRequest[];
   addCancellationRequest: (request: CancellationRequest) => void;
   updateCancellationRequest: (id: string, updates: Partial<CancellationRequest>) => void;
@@ -124,14 +130,17 @@ interface UserContextType {
   calcCourtPrice: (sport: string, date: string, time24: string) => number;
   isLoading: boolean;
   error: string | null;
+  authFlow: "none" | "password_recovery";
+  clearAuthFlow: () => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authFlow, setAuthFlow] = useState<"none" | "password_recovery">("none");
   const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [cancellationRequests, setCancellationRequests] = useState<CancellationRequest[]>([]);
@@ -155,6 +164,53 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
 
+  // 1. Listen for real Supabase sessions when the app loads
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email || "",
+          name: session.user.user_metadata?.full_name || "Real User",
+          phone: "+63 000 000 0000",
+          favoriteSports: [],
+          loyaltyPoints: 0,
+          totalBookings: 0,
+          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
+          role: "user" 
+        });
+      }
+      setIsLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthFlow("password_recovery");
+      }
+      if (event === "SIGNED_OUT") {
+        setAuthFlow("none");
+      }
+
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email || "",
+          name: session.user.user_metadata?.full_name || "Real User",
+          phone: "+63 000 000 0000",
+          favoriteSports: [],
+          loyaltyPoints: 0,
+          totalBookings: 0,
+          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
+          role: "user"
+        } as UserProfile);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   const addStaff = (staff: StaffAccount) => {
     setStaffAccounts(prev => [...prev, staff]);
   };
@@ -163,52 +219,121 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setStaffAccounts(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
   };
 
-  const login = (email: string, password: string): boolean => {
-    if (email && password && email.length > 0 && password.length > 0) {
-      // Check staff account
-      const staffAccount = staffAccounts.find(s => (s.email === email || s.username === email) && s.password === password);
-      
-      let demoUser: UserProfile;
-      if (staffAccount) {
-        demoUser = {
-          id: staffAccount.id,
-          name: staffAccount.name,
-          email: staffAccount.email,
-          phone: "+63 000 000 0000",
-          favoriteSports: [],
-          loyaltyPoints: 0,
-          totalBookings: 0,
-          memberSince: new Date().toISOString().split('T')[0],
-          accountStatus: staffAccount.status,
-          role: staffAccount.role,
-          permissions: staffAccount.permissions
-        };
-      } else {
-        const isAdmin = email === "admin@jrc.com";
-        // Use consistent IDs based on email so state isn't lost across logins in demo
-        const demoUserId = isAdmin ? "admin_u1" : `user_${email.replace(/[^a-zA-Z0-9]/g, '')}`;
-        demoUser = {
-          id: demoUserId,
-          name: isAdmin ? "Admin User" : email.split('@')[0] || "User",
-          email: email,
-          phone: "+63 912 345 6789",
-          favoriteSports: ["Basketball", "Badminton"],
-          loyaltyPoints: 12,
-          totalBookings: 12,
-          memberSince: "2025-11-15",
-          accountStatus: "active",
-          role: isAdmin ? "admin" : "user"
-        };
-      }
-      setUser(demoUser);
-      return true;
+  // 2. Hybrid Login Function (Now with hardcoded Staff demo)
+  const login = async (email: string, password: string) => {
+    if (!email || !password) return { error: "Please fill in all fields" };
+
+    // --- DEMO ACCOUNTS CHECK ---
+    const isAdminDemo = email === "admin@jrc.com" && password === "admin123";
+    const isUserDemo  = email === "user@jrc.com"  && password === "user123";
+    const isStaffDemo = email === "staff@jrc.com" && password === "password123";
+
+    if (isAdminDemo || isUserDemo || isStaffDemo) {
+      let role: "admin" | "user" | "staff" = "user";
+      let name = "User Demo";
+      let id = `user_${email.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+      if (isAdminDemo) { role = "admin"; name = "Admin Demo"; id = "admin_u1"; }
+      else if (isStaffDemo) { role = "staff"; name = "Staff Demo"; id = "staff_u1"; }
+
+      setUser({
+        id,
+        name,
+        email,
+        phone: "+63 912 345 6789",
+        favoriteSports: ["Basketball", "Badminton"],
+        loyaltyPoints: 12,
+        totalBookings: 12,
+        memberSince: "2025-11-15",
+        accountStatus: "active",
+        role
+      });
+      return { error: null }; // Success!
     }
-    return false;
+
+    // --- REAL SUPABASE CHECK ---
+    // If it's not one of the 3 demo accounts above, try real Supabase Login
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error: error?.message || null };
   };
 
-  const logout = () => {
-    setUser(null);
+  // 3. Real Supabase Sign Up
+  const signUp = async (email: string, password: string, name: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name },
+        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined
+      }
+    });
+    return { error: error?.message || null };
   };
+
+  const verifyEmailCode = async (email: string, code: string) => {
+    const token = code.trim();
+    if (!token) return { error: "Please enter the verification code." };
+
+    let { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: "email"
+    });
+
+    // Some projects use signup OTP type for verification.
+    if (error) {
+      const retry = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: "signup"
+      });
+      error = retry.error;
+    }
+
+    return { error: error?.message || null };
+  };
+
+  const resendVerificationCode = async (email: string) => {
+    let { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: {
+        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined
+      }
+    });
+
+    // Fallback for projects configured around generic email OTP.
+    if (error) {
+      const retry = await supabase.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false }
+      });
+      error = retry.error;
+    }
+
+    return { error: error?.message || null };
+  };
+
+  // 4. Hybrid Logout
+  const logout = async () => {
+    await supabase.auth.signOut(); // Clears real session
+    setUser(null); // Clears demo session
+  };
+
+  // 5. Reset Password
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined
+    });
+    return { error: error?.message || null };
+  };
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    return { error: error?.message || null };
+  };
+
+  const clearAuthFlow = () => setAuthFlow("none");
 
   const addBooking = (booking: Booking) => {
     setBookings(prev => [booking, ...prev]);
@@ -258,7 +383,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const calcCourtPrice = (sport: string, date: string, time24: string): number => {
-    const dayOfWeek = new Date(date + 'T00:00:00').getDay(); // 0=Sun, 6=Sat
+    const dayOfWeek = new Date(date + 'T00:00:00').getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const isEvening = parseInt(time24.split(':')[0]) >= 18;
 
@@ -267,7 +392,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const rates = systemSettings.courtRates[sportKey];
 
     if (!rates) {
-      // Default fallback
       if (sport === 'Basketball' || sport === 'Volleyball')
         return isWeekend ? (isEvening ? 850 : 550) : (isEvening ? 750 : 450);
       if (sport === 'Badminton' || sport === 'Pickleball') return 300;
@@ -294,9 +418,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
       deleteBooking,
       isLoggedIn: !!user,
       isAdmin: user?.role === "admin" || user?.email === "admin@jrc.com",
-      isStaff: user?.role === "staff",
+      isStaff: user?.role === "staff" || user?.email === "staff@jrc.com",
       login,
+      signUp,
+      verifyEmailCode,
+      resendVerificationCode,
       logout,
+      resetPassword,
+      updatePassword,
       cancellationRequests,
       addCancellationRequest,
       updateCancellationRequest,
@@ -308,7 +437,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
       updateUser,
       calcCourtPrice,
       isLoading,
-      error
+      error,
+      authFlow,
+      clearAuthFlow
     }}>
       {children}
     </UserContext.Provider>

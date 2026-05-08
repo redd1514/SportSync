@@ -256,7 +256,10 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
   const unread = notifs.filter(n => n.unread).length;
 
-  const handleLogout = () => { logout(); onLogout(); };
+  const handleLogout = async () => {
+    await logout();
+    onLogout();
+  };
 
   const navigate = (tab: Tab | string, sub?: any) => {
     if (tab === "book_court") {
