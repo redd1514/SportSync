@@ -111,10 +111,15 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
   const [coachSub,    setCoachSub]    = useState<CoachSub>("browse");
   const [aiOpen,      setAiOpen]      = useState(false);
   const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
-  const { isAdmin, isStaff }          = useUser();
+  const { isAdmin, isStaff, logout }  = useUser();
 
-  if (isAdmin) return <ConsolidatedAdminDashboard onLogout={onLogout} />;
-  if (isStaff) return <ConsolidatedStaffDashboard onLogout={onLogout} />;
+  const handleLogout = async () => {
+    await logout();
+    onLogout();
+  };
+
+  if (isAdmin) return <ConsolidatedAdminDashboard onLogout={handleLogout} />;
+  if (isStaff) return <ConsolidatedStaffDashboard onLogout={handleLogout} />;
 
   /* ── Booking sub-screens ── */
   const bookingSubTabs = [

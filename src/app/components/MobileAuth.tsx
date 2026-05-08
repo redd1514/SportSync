@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   CheckCircle, Eye, EyeOff, User, Shield, Lock, Mail, ArrowRight,
@@ -20,6 +20,16 @@ const TP     = "#E8E8EA";
 const TS     = "#9294A0";
 const ORANGE = "#F97316";
 const BLUE   = "#2563EB";
+
+function detectRecoveryFromUrl() {
+  if (typeof window === "undefined") return false;
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashRaw = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  const hashParams = new URLSearchParams(hashRaw);
+
+  return searchParams.get("type") === "recovery" || hashParams.get("type") === "recovery";
+}
 
 const DEMO_ACCOUNTS = [
   { role: "User Account",  email: "user@jrc.com",  password: "user123",     color: ORANGE,  bg: "rgba(249,115,22,0.08)",  Icon: User },
@@ -89,49 +99,211 @@ function AuthInput({ icon: Icon, type, value, onChange, placeholder, onKeyDown, 
 }
 
 export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
-  const [isSignUp, setIsSignUp]         = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(() => detectRecoveryFromUrl());
+  const [authStep, setAuthStep]         = useState<"signin" | "signup" | "verify-email" | "forgot-password" | "reset-sent" | "update-password">(
+    () => detectRecoveryFromUrl() ? "update-password" : "signin"
+  );
   const [email, setEmail]               = useState("");
   const [password, setPassword]         = useState("");
   const [confirmPassword, setConfirm]   = useState("");
   const [name, setName]                 = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationTargetEmail, setVerificationTargetEmail] = useState("");
+  const [pendingPassword, setPendingPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError]               = useState("");
   const [success, setSuccess]           = useState("");
   const [showPassword, setShowPw]       = useState(false);
   const [showDemos, setShowDemos]       = useState(false);
   const [loading, setLoading]           = useState(false);
-  const { login } = useUser();
+
+  const isSignUp = authStep === "signup";
+  const isSignIn = authStep === "signin";
+  const isVerifyStep = authStep === "verify-email";
+  const isForgotPasswordStep = authStep === "forgot-password";
+  const isResetSentStep = authStep === "reset-sent";
+  const isUpdatePasswordStep = authStep === "update-password";
+
+  const { login, signUp, verifyEmailCode, resendVerificationCode, resetPassword, updatePassword, logout, isLoggedIn, authFlow, clearAuthFlow } = useUser();
 
   const bgImage = "https://images.unsplash.com/photo-1720217262350-2dec57765d26?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiYXNrZXRiYWxsJTIwY291cnQlMjBpbmRvb3IlMjBhY3Rpb24lMjBwbGF5ZXJzfGVufDF8fHx8MTc3NzkxMDU2Mnww&ixlib=rb-4.1.0&q=80&w=1080";
 
+  useEffect(() => {
+    if (isLoggedIn && !recoveryMode && !isUpdatePasswordStep) {
+      onLoginSuccess();
+    }
+  }, [isLoggedIn, onLoginSuccess, recoveryMode, isUpdatePasswordStep]);
+
+  useEffect(() => {
+    if (authFlow === "password_recovery") {
+      setRecoveryMode(true);
+      setAuthStep("update-password");
+      setError("");
+      setSuccess("Reset token verified. Create your new password.");
+    }
+  }, [authFlow]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (detectRecoveryFromUrl()) {
+      setRecoveryMode(true);
+      setAuthStep("update-password");
+      setError("");
+      setSuccess("Reset token verified. Create your new password.");
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+    }
+  }, []);
+
   const fill = (a: typeof DEMO_ACCOUNTS[0]) => {
-    setEmail(a.email); setPassword(a.password); setError(""); setSuccess(""); setIsSignUp(false); setShowDemos(false);
+    setEmail(a.email); setPassword(a.password); setError(""); setSuccess(""); setAuthStep("signin"); setShowDemos(false);
   };
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     setError(""); setSuccess("");
     if (!email || !password) { setError("Please fill in all fields"); return; }
+    
     setLoading(true);
-    setTimeout(() => {
-      const ok = login(email, password);
-      if (ok) { setSuccess("Welcome back! Loading your dashboard…"); setTimeout(onLoginSuccess, 700); }
-      else { setError("Invalid credentials. Use a demo account below."); setLoading(false); }
-    }, 600);
+    
+    // Call the hybrid login
+    const { error: authError } = await login(email, password);
+    
+    setLoading(false);
+
+    if (authError) {
+      setError(authError); 
+    } else {
+      setSuccess("Welcome back! Loading your dashboard…"); 
+      setTimeout(onLoginSuccess, 700);
+    }
   };
 
-  const handleSignUp = () => {
+  const handleSignUp = async () => {
     setError(""); setSuccess("");
     if (!name || !email || !password || !confirmPassword) { setError("Please fill in all fields"); return; }
     if (password !== confirmPassword) { setError("Passwords do not match"); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    
     setLoading(true);
+    
+    const { error: authError } = await signUp(email, password, name);
+
+    setLoading(false);
+
+    if (authError) {
+      setError(authError);
+    } else {
+      setVerificationTargetEmail(email);
+      setPendingPassword(password);
+      setVerificationCode("");
+      setAuthStep("verify-email");
+      setSuccess("Account created. Enter the code sent to your email to verify your account.");
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    setError("");
+    setSuccess("");
+    if (!verificationCode.trim()) {
+      setError("Please enter the verification code.");
+      return;
+    }
+
+    setLoading(true);
+    const { error: verifyError } = await verifyEmailCode(verificationTargetEmail, verificationCode);
+    if (verifyError) {
+      setLoading(false);
+      setError(verifyError);
+      return;
+    }
+
+    const { error: loginError } = await login(verificationTargetEmail, pendingPassword);
+    setLoading(false);
+
+    if (loginError) {
+      setError(loginError);
+      return;
+    }
+
+    setSuccess("Email verified. Redirecting to your dashboard...");
+    setTimeout(onLoginSuccess, 800);
+  };
+
+  const handleResendCode = async () => {
+    setError("");
+    setSuccess("");
+    if (!verificationTargetEmail) {
+      setError("No email found for verification. Please sign up again.");
+      return;
+    }
+
+    setLoading(true);
+    const { error: resendError } = await resendVerificationCode(verificationTargetEmail);
+    setLoading(false);
+    if (resendError) {
+      setError(resendError);
+      return;
+    }
+
+    setSuccess("A new verification code was sent to your email.");
+  };
+
+  const handleResetPassword = async () => {
+    setError("");
+    setSuccess("");
+    if (!email) {
+      setError("Please enter your email address first.");
+      return;
+    }
+    setLoading(true);
+    const { error: resetError } = await resetPassword(email);
+    setLoading(false);
+    
+    if (resetError) setError(resetError);
+    else {
+      setAuthStep("reset-sent");
+      setSuccess("Password reset link sent! Check your email.");
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    setError("");
+    setSuccess("");
+
+    if (!newPassword || !confirmNewPassword) {
+      setError("Please fill in all fields.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    const { error: updateError } = await updatePassword(newPassword);
+    setLoading(false);
+
+    if (updateError) {
+      setError(updateError);
+      return;
+    }
+
+    setSuccess("Password updated successfully. You can now sign in.");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    await logout();
+    clearAuthFlow();
+    setRecoveryMode(false);
     setTimeout(() => {
-      const ok = login(email, password);
-      if (ok) { setSuccess("Account created! Welcome to JRC SportSync!"); setTimeout(onLoginSuccess, 900); }
-      else {
-        setSuccess("Account created! Please sign in.");
-        setTimeout(() => { setIsSignUp(false); setName(""); setPassword(""); setConfirm(""); setSuccess(""); setLoading(false); }, 1500);
-      }
-    }, 700);
+      setAuthStep("signin");
+      setSuccess("");
+    }, 2200);
   };
 
   return (
@@ -261,13 +433,27 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
             {/* Desktop heading */}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
               className="hidden lg:block mb-7">
-              <h2 style={{ color: TP, fontSize: 30, fontWeight: 900 }}>{isSignUp ? "Create Account" : "Welcome Back"}</h2>
-              <p style={{ color: TS, fontSize: 14, marginTop: 6 }}>{isSignUp ? "Join JRC SportSync today" : "Sign in to your dashboard"}</p>
+              <h2 style={{ color: TP, fontSize: 30, fontWeight: 900 }}>
+                {isSignUp ? "Create Account" : isVerifyStep ? "Verify Email" : isForgotPasswordStep ? "Forgot Password" : isResetSentStep ? "Reset Link Sent" : isUpdatePasswordStep ? "Set New Password" : "Welcome Back"}
+              </h2>
+              <p style={{ color: TS, fontSize: 14, marginTop: 6 }}>
+                {isSignUp
+                  ? "Join JRC SportSync today"
+                  : isVerifyStep
+                    ? "Confirm your account using the code from your email"
+                    : isForgotPasswordStep
+                      ? "Request a secure password reset link"
+                      : isResetSentStep
+                        ? "Check your inbox to continue"
+                        : isUpdatePasswordStep
+                          ? "Set a new password for your account"
+                        : "Sign in to your dashboard"}
+              </p>
             </motion.div>
 
             {/* Demo accounts (sign in only) */}
             <AnimatePresence>
-              {!isSignUp && (
+              {isSignIn && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mb-5">
                   <button
                     onClick={() => setShowDemos(!showDemos)}
@@ -311,7 +497,7 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
             {/* Form card */}
             <motion.div
-              key={isSignUp ? "signup" : "signin"}
+              key={authStep}
               initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
               className="rounded-3xl border p-6 shadow-2xl"
               style={{ background: `${SURF}cc`, borderColor: BORDER, backdropFilter: "blur(24px)" }}
@@ -365,10 +551,10 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
                     <p className="text-center" style={{ fontSize: 14, color: TS }}>
                       Already have an account?{" "}
-                      <button onClick={() => { setIsSignUp(false); setError(""); setSuccess(""); }} style={{ color: ORANGE, fontWeight: 800 }}>Sign In</button>
+                      <button onClick={() => { setAuthStep("signin"); setError(""); setSuccess(""); }} style={{ color: ORANGE, fontWeight: 800 }}>Sign In</button>
                     </p>
                   </motion.div>
-                ) : (
+                ) : isSignIn ? (
                   <motion.div key="si" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
                     <div className="text-center mb-1 lg:hidden">
                       <h2 style={{ color: TP, fontSize: 20, fontWeight: 900 }}>Welcome Back</h2>
@@ -385,6 +571,17 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
                       <AuthInput icon={Lock} type={showPassword ? "text" : "password"} value={password} onChange={setPassword} placeholder="Your password"
                         onKeyDown={e => e.key === "Enter" && handleSignIn()}
                         rightElement={<button type="button" onClick={() => setShowPw(!showPassword)} style={{ color: TS }}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>} />
+                        
+                      <div className="flex justify-end mt-2">
+                        <button 
+                          type="button" 
+                          onClick={() => { setAuthStep("forgot-password"); setError(""); setSuccess(""); }}
+                          style={{ color: TS, fontSize: 11, fontWeight: 700 }}
+                          className="hover:text-white transition-colors"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
                     </motion.div>
 
                     {error   && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl px-4 py-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", fontSize: 13 }}>{error}</motion.div>}
@@ -404,8 +601,142 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
                     <p className="text-center" style={{ fontSize: 14, color: TS }}>
                       Don't have an account?{" "}
-                      <button onClick={() => { setIsSignUp(true); setError(""); setSuccess(""); }} style={{ color: ORANGE, fontWeight: 800 }}>Sign Up</button>
+                      <button onClick={() => { setAuthStep("signup"); setError(""); setSuccess(""); }} style={{ color: ORANGE, fontWeight: 800 }}>Sign Up</button>
                     </p>
+                  </motion.div>
+                ) : isVerifyStep ? (
+                  <motion.div key="verify" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
+                    <div className="text-center mb-1 lg:hidden">
+                      <h2 style={{ color: TP, fontSize: 20, fontWeight: 900 }}>Verify Your Email</h2>
+                      <p style={{ color: TS, fontSize: 13 }}>Enter the code sent to {verificationTargetEmail}</p>
+                    </div>
+
+                    <div className="rounded-2xl px-4 py-3" style={{ background: `${BLUE}14`, border: `1px solid ${BLUE}30` }}>
+                      <p style={{ color: TP, fontSize: 13 }}>
+                        A verification code has been sent to <span style={{ color: ORANGE, fontWeight: 700 }}>{verificationTargetEmail}</span>.
+                      </p>
+                    </div>
+
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                      <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Verification Code</label>
+                      <AuthInput icon={Mail} type="text" value={verificationCode} onChange={setVerificationCode} placeholder="Enter 6-digit code"
+                        onKeyDown={e => e.key === "Enter" && handleVerifyCode()} />
+                    </motion.div>
+
+                    {error && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl px-4 py-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", fontSize: 13 }}>{error}</motion.div>}
+                    {success && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 rounded-xl px-4 py-3" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", color: "#4ade80", fontSize: 13 }}><CheckCircle size={14} />{success}</motion.div>}
+
+                    <motion.button whileHover={{ scale: 1.02, boxShadow: `0 12px 32px ${BLUE}50` }} whileTap={{ scale: 0.97 }}
+                      onClick={handleVerifyCode} disabled={loading}
+                      className="w-full rounded-2xl py-4 text-white flex items-center justify-center gap-2"
+                      style={{ background: loading ? "#333" : `linear-gradient(135deg, ${BLUE}, #1d4ed8)`, fontSize: 15, fontWeight: 800, boxShadow: `0 8px 24px ${BLUE}40` }}>
+                      {loading ? (
+                        <motion.div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
+                          animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: "linear" }} />
+                      ) : (
+                        <><CheckCircle size={16} /> Verify Code</>
+                      )}
+                    </motion.button>
+
+                    <div className="flex items-center justify-between">
+                      <button onClick={handleResendCode} style={{ color: ORANGE, fontWeight: 800, fontSize: 13 }}>
+                        Resend Code
+                      </button>
+                      <button onClick={() => { setAuthStep("signin"); setError(""); setSuccess(""); }} style={{ color: TS, fontWeight: 700, fontSize: 13 }}>
+                        Back to Sign In
+                      </button>
+                    </div>
+                  </motion.div>
+                ) : isForgotPasswordStep ? (
+                  <motion.div key="forgot" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
+                    <div className="text-center mb-1 lg:hidden">
+                      <h2 style={{ color: TP, fontSize: 20, fontWeight: 900 }}>Forgot Password</h2>
+                      <p style={{ color: TS, fontSize: 13 }}>We will send a reset link to your email</p>
+                    </div>
+
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                      <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Email</label>
+                      <AuthInput icon={Mail} type="email" value={email} onChange={setEmail} placeholder="your@email.com" onKeyDown={e => e.key === "Enter" && handleResetPassword()} />
+                    </motion.div>
+
+                    {error && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl px-4 py-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", fontSize: 13 }}>{error}</motion.div>}
+                    {success && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 rounded-xl px-4 py-3" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", color: "#4ade80", fontSize: 13 }}><CheckCircle size={14} />{success}</motion.div>}
+
+                    <motion.button whileHover={{ scale: 1.02, boxShadow: `0 12px 32px ${ORANGE}50` }} whileTap={{ scale: 0.97 }}
+                      onClick={handleResetPassword} disabled={loading}
+                      className="w-full rounded-2xl py-4 text-white flex items-center justify-center gap-2"
+                      style={{ background: loading ? "#333" : `linear-gradient(135deg, ${ORANGE}, #ea6b00)`, fontSize: 15, fontWeight: 800, boxShadow: `0 8px 24px ${ORANGE}40` }}>
+                      {loading ? (
+                        <motion.div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
+                          animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: "linear" }} />
+                      ) : (
+                        <><Mail size={15} /> Send Reset Link</>
+                      )}
+                    </motion.button>
+
+                    <p className="text-center" style={{ fontSize: 14, color: TS }}>
+                      Remembered your password?{" "}
+                      <button onClick={() => { setAuthStep("signin"); setError(""); setSuccess(""); }} style={{ color: ORANGE, fontWeight: 800 }}>Back to Sign In</button>
+                    </p>
+                  </motion.div>
+                ) : isUpdatePasswordStep ? (
+                  <motion.div key="update-password" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
+                    <div className="text-center mb-1 lg:hidden">
+                      <h2 style={{ color: TP, fontSize: 20, fontWeight: 900 }}>Set New Password</h2>
+                      <p style={{ color: TS, fontSize: 13 }}>Choose a new secure password</p>
+                    </div>
+
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                      <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>New Password</label>
+                      <AuthInput icon={Lock} type={showPassword ? "text" : "password"} value={newPassword} onChange={setNewPassword} placeholder="Min. 6 characters"
+                        rightElement={<button type="button" onClick={() => setShowPw(!showPassword)} style={{ color: TS }}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>} />
+                    </motion.div>
+
+                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                      <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Confirm New Password</label>
+                      <AuthInput icon={Lock} type="password" value={confirmNewPassword} onChange={setConfirmNewPassword} placeholder="Re-enter new password"
+                        onKeyDown={e => e.key === "Enter" && handleUpdatePassword()} />
+                    </motion.div>
+
+                    {error && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl px-4 py-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", fontSize: 13 }}>{error}</motion.div>}
+                    {success && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 rounded-xl px-4 py-3" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", color: "#4ade80", fontSize: 13 }}><CheckCircle size={14} />{success}</motion.div>}
+
+                    <motion.button whileHover={{ scale: 1.02, boxShadow: `0 12px 32px ${BLUE}50` }} whileTap={{ scale: 0.97 }}
+                      onClick={handleUpdatePassword} disabled={loading}
+                      className="w-full rounded-2xl py-4 text-white flex items-center justify-center gap-2"
+                      style={{ background: loading ? "#333" : `linear-gradient(135deg, ${BLUE}, #1d4ed8)`, fontSize: 15, fontWeight: 800, boxShadow: `0 8px 24px ${BLUE}40` }}>
+                      {loading ? (
+                        <motion.div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
+                          animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: "linear" }} />
+                      ) : (
+                        <><CheckCircle size={16} /> Update Password</>
+                      )}
+                    </motion.button>
+                  </motion.div>
+                ) : (
+                  <motion.div key="reset-sent" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
+                    <div className="text-center py-4">
+                      <motion.div
+                        className="mx-auto mb-4 w-16 h-16 rounded-full flex items-center justify-center"
+                        style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.35)" }}
+                        initial={{ scale: 0.7, opacity: 0 }}
+                        animate={{ scale: [0.8, 1.06, 1], opacity: 1 }}
+                        transition={{ duration: 0.5 }}
+                      >
+                        <CheckCircle size={30} color="#4ade80" />
+                      </motion.div>
+                      <h3 style={{ color: TP, fontSize: 20, fontWeight: 900, marginBottom: 8 }}>Reset Link Sent</h3>
+                      <p style={{ color: TS, fontSize: 14 }}>
+                        We sent a password reset link to <span style={{ color: ORANGE, fontWeight: 700 }}>{email}</span>.
+                      </p>
+                    </div>
+
+                    <motion.button whileHover={{ scale: 1.02, boxShadow: `0 12px 32px ${ORANGE}50` }} whileTap={{ scale: 0.97 }}
+                      onClick={() => { setAuthStep("signin"); setError(""); setSuccess(""); }}
+                      className="w-full rounded-2xl py-4 text-white flex items-center justify-center gap-2"
+                      style={{ background: `linear-gradient(135deg, ${ORANGE}, #ea6b00)`, fontSize: 15, fontWeight: 800, boxShadow: `0 8px 24px ${ORANGE}40` }}>
+                      <Play size={14} fill="white" /> Back to Sign In
+                    </motion.button>
                   </motion.div>
                 )}
               </AnimatePresence>

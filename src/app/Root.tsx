@@ -13,6 +13,17 @@ import { FloatingAIChat } from "./components/FloatingAIChat";
 import { useUser } from "./contexts/UserContext";
 
 type AppState = "splash" | "auth" | "app";
+const RECOVERY_PENDING_KEY = "auth_recovery_pending";
+
+function isRecoveryFlowInUrl() {
+  if (typeof window === "undefined") return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.get("type") === "recovery") return true;
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  if (!hash) return false;
+  const params = new URLSearchParams(hash);
+  return params.get("type") === "recovery";
+}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => {
@@ -46,10 +57,68 @@ function AppWithAI({ appState, isMobile, onLogout }: { appState: string; isMobil
   );
 }
 
-export default function Root() {
+function RootContent() {
   const [appState, setAppState] = useState<AppState>("splash");
   const isMobile = useIsMobile();
+  const { isLoggedIn, authFlow } = useUser();
+  const [isRecoveryPending, setIsRecoveryPending] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const fromStorage = window.sessionStorage.getItem(RECOVERY_PENDING_KEY) === "1";
+    const fromUrl = isRecoveryFlowInUrl();
+    if (fromUrl) window.sessionStorage.setItem(RECOVERY_PENDING_KEY, "1");
+    return fromStorage || fromUrl;
+  });
 
+  useEffect(() => {
+    if (appState === "splash") return;
+    if (isRecoveryPending || authFlow === "password_recovery") {
+      setAppState("auth");
+      return;
+    }
+    setAppState(isLoggedIn ? "app" : "auth");
+  }, [isLoggedIn, appState, isRecoveryPending, authFlow]);
+
+  const handleSplashComplete = () => {
+    if (isRecoveryFlowInUrl()) {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(RECOVERY_PENDING_KEY, "1");
+      }
+      setIsRecoveryPending(true);
+      setAppState("auth");
+      return;
+    }
+    setAppState(isLoggedIn && !isRecoveryPending && authFlow !== "password_recovery" ? "app" : "auth");
+  };
+
+  return (
+    <>
+      {/* Splash Screen — always shown first */}
+      {appState === "splash" && (
+        <div className="fixed inset-0 z-50 bg-[#0D0D0D]">
+          <SplashScreen onComplete={handleSplashComplete} />
+        </div>
+      )}
+
+      {/* Auth Screen — Login / Sign Up */}
+      {appState === "auth" && (
+        <MobileAuth
+          onLoginSuccess={() => {
+            if (typeof window !== "undefined") {
+              window.sessionStorage.removeItem(RECOVERY_PENDING_KEY);
+            }
+            setIsRecoveryPending(false);
+            setAppState("app");
+          }}
+        />
+      )}
+
+      {/* Authenticated App — Mobile or Desktop shell based on screen size */}
+      <AppWithAI appState={appState} isMobile={isMobile} onLogout={() => setAppState("auth")} />
+    </>
+  );
+}
+
+export default function Root() {
   return (
     <ThemeProvider>
       <UserProvider key="force-hmr-remount-v2">
@@ -57,20 +126,7 @@ export default function Root() {
           <AddonsProvider>
             <FacilityMapProvider>
               <AnnouncementsProvider>
-                {/* Splash Screen — always shown first */}
-                {appState === "splash" && (
-                  <div className="fixed inset-0 z-50 bg-[#0D0D0D]">
-                    <SplashScreen onComplete={() => setAppState("auth")} />
-                  </div>
-                )}
-
-                {/* Auth Screen — Login / Sign Up */}
-                {appState === "auth" && (
-                  <MobileAuth onLoginSuccess={() => setAppState("app")} />
-                )}
-
-                {/* Authenticated App — Mobile or Desktop shell based on screen size */}
-                <AppWithAI appState={appState} isMobile={isMobile} onLogout={() => setAppState("auth")} />
+                <RootContent />
               </AnnouncementsProvider>
             </FacilityMapProvider>
           </AddonsProvider>

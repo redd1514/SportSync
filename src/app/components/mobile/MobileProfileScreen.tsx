@@ -289,8 +289,8 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
       : (b.status === "completed" || b.status === "cancelled")
   );
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     onLogout();
   };
 
