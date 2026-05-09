@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
   Clock, MapPin, User, CheckCircle, XCircle, DollarSign,
   AlertTriangle, Check, X, AlertCircle, Zap, Receipt,
-  Layers, ChevronDown,
+  Layers, ChevronDown, Loader2
 } from 'lucide-react';
 import { 
   format, addDays, subDays, startOfMonth, endOfMonth, 
@@ -17,6 +17,8 @@ import { ALL_COURTS, SPORTS_INFO } from '../sportsData';
 import { getSportColor, SportIcon } from '../SportIcons';
 import { useAddons } from '../../contexts/AddonsContext';
 import { useFacilityMap } from '../../contexts/FacilityMapContext';
+import { useAdminAPI } from '../../hooks/useAdminAPI';
+import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { SectionLoader } from '../shared/LoadingScreen';
 
 type ViewMode = 'monthly' | 'weekly' | 'daily';
@@ -41,11 +43,54 @@ const STATUS_BORDER_COLORS: Record<string, string> = {
 };
 
 export function AdminBookingCalendar() {
-  const { bookings, updateBooking, deleteBooking, cancellationRequests, updateCancellationRequest } = useUser();
+  const { bookings: staticBookings, updateBooking, deleteBooking, cancellationRequests, updateCancellationRequest } = useUser();
   const { requests, updateRequestStatus } = useCoaching();
   const { allSportNames, customSports } = useAddons();
   const { maps } = useFacilityMap();
+  const { getAllBookings } = (useAdminAPI as any)();
+  const { createBooking, checkAvailability } = (useBookingAPI as any)();
   const [currentDate, setCurrentDate] = useState(new Date());
+  
+  const [apiBookings, setApiBookings] = useState<any[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+
+  useEffect(() => {
+    const fetchBookings = async () => {
+      setLoadingBookings(true);
+      try {
+        let filters = {};
+        if (viewMode === 'daily') {
+          filters = { date: format(currentDate, 'yyyy-MM-dd') };
+        } else if (viewMode === 'weekly') {
+          const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+          filters = { start: format(start, 'yyyy-MM-dd'), end: format(addDays(start, 6), 'yyyy-MM-dd') };
+        } else {
+          const start = startOfMonth(currentDate);
+          const end = endOfMonth(currentDate);
+          filters = { start: format(start, 'yyyy-MM-dd'), end: format(end, 'yyyy-MM-dd') };
+        }
+        const data = await getAllBookings(filters);
+        setApiBookings(data || []);
+      } catch (err) {
+        console.error("Failed to load admin bookings:", err);
+      } finally {
+        setLoadingBookings(false);
+      }
+    };
+    fetchBookings();
+  }, [currentDate, viewMode, getAllBookings]);
+
+  // Merge static bookings with fetched ones for display
+  const bookings = useMemo(() => {
+    const combined = [...staticBookings];
+    apiBookings.forEach(ab => {
+      const idx = combined.findIndex(sb => sb.id === ab.id);
+      if (idx > -1) combined[idx] = { ...combined[idx], ...ab };
+      else combined.push(ab);
+    });
+    return combined;
+  }, [apiBookings, staticBookings]);
+
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);

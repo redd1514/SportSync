@@ -1,22 +1,25 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Activity, Calendar, Inbox, Shield, Menu, X, LogOut,
   MapPin, AlertTriangle, Check, Plus, Bell, Users,
   DollarSign, Clock, UserCheck, Map, ChevronLeft, ChevronRight, CheckCircle,
   QrCode, Search, ShieldCheck, ScanLine, Building2, GraduationCap,
-  Megaphone, XCircle, MessageSquare, User, Layers, Phone,
+  Megaphone, XCircle, MessageSquare, User, Layers, Phone, Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../../contexts/UserContext';
 import { useCoaching } from '../../contexts/CoachingContext';
 import { useAnnouncements } from '../../contexts/AnnouncementsContext';
 import { AdminBookingCalendar } from './AdminBookingCalendar';
+import { useStaffAPI } from '../../hooks/useStaffAPI';
+import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { ALL_COURTS, SPORTS_INFO } from '../sportsData';
 import { useFacilityMap, getSportMapColor } from '../../contexts/FacilityMapContext';
 import type { CourtBlock } from '../../contexts/FacilityMapContext';
 import { getSportColor, SportIcon } from '../SportIcons';
 import { FacilityMapViewer } from '../shared/FacilityMapViewer';
 import { CustomDateTimePicker } from '../shared/CustomDateTimePicker';
+import { StaffInbox } from './StaffInbox';
 
 type StaffTab = 'operations' | 'calendar' | 'inbox';
 
@@ -227,10 +230,27 @@ function TicketVerification() {
 
 // ── Live Operations ──────────────────────────────────────────────────────────
 function LiveOperations() {
-  const { bookings, cancellationRequests } = useUser();
   const { maps } = useFacilityMap();
   const [view, setView] = useState<'map' | 'list' | 'verify'>('map');
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
+
+  const { getStaffOperations, loading: apiLoading } = (useStaffAPI as any)();
+  const [operationsData, setOperationsData] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const res = await getStaffOperations(todayStr);
+        setOperationsData(res);
+      } catch (err) {
+        console.error("Failed to fetch staff operations:", err);
+      }
+    };
+    fetchData();
+    const interval = setInterval(fetchData, 45000); // refresh every 45s
+    return () => clearInterval(interval);
+  }, [getStaffOperations]);
 
   const publishedMaps = useMemo(() => maps.filter(m => m.isPublished), [maps]);
   const activeMap = selectedMapId
@@ -238,11 +258,10 @@ function LiveOperations() {
     : publishedMaps[0];
   const publishedLayout = activeMap?.blocks ?? [];
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayBookings = bookings.filter(b => b.date === todayStr);
-  const totalRevToday = todayBookings.reduce((s, b) => s + b.amount, 0);
-  const openCourts = publishedLayout.filter(c => c.status !== 'maintenance').length;
-  const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length;
+  const todayBookingsCount = operationsData?.bookingsCount || 0;
+  const totalRevToday = operationsData?.revenue || 0;
+  const openCourts = operationsData?.activeCourts || 0;
+  const pendingCancellations = operationsData?.pendingRequests || 0;
 
   const sportGroups = publishedLayout
     .filter(c => c.status !== 'maintenance') // hide maintenance courts from list
@@ -919,7 +938,7 @@ export function ConsolidatedStaffDashboard({ onLogout }: { onLogout: () => void 
     switch (activeTab) {
       case 'operations': return <LiveOperations />;
       case 'calendar':   return <StaffCalendar />;
-      case 'inbox':      return <FrontDeskInbox />;
+      case 'inbox':      return <StaffInbox />;
     }
   };
 

@@ -1,5 +1,5 @@
 import { FacilityMapBuilder } from './FacilityMapBuilder';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AdminBookingCalendar } from './AdminBookingCalendar';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -10,7 +10,7 @@ import {
   Users, AlertTriangle, Plus, Award, Check, X, UserX, UserCheck,
   Menu, LogOut, ChevronRight, ChevronLeft, ChevronDown, Clock, CheckCircle, BarChart2,
   Building, Tag, GraduationCap, Megaphone, Wrench, PlusCircle, Trash2,
-  XCircle, Phone,
+  XCircle, Phone, Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../../contexts/UserContext';
@@ -25,6 +25,7 @@ import { CustomDateTimePicker } from '../shared/CustomDateTimePicker';
 import { useAddons } from '../../contexts/AddonsContext';
 import { useFacilityMap } from '../../contexts/FacilityMapContext';
 import { useAnnouncements, type Announcement } from '../../contexts/AnnouncementsContext';
+import { useAdminAPI } from '../../hooks/useAdminAPI';
 
 type AdminTab = 'executive' | 'facility' | 'calendar' | 'settings';
 
@@ -122,13 +123,52 @@ function StatusBadge({ status }: { status: string }) {
 type ExecSubTab = 'overview' | 'analytics' | 'users' | 'payments' | 'loyalty';
 
 function ExecutiveOverview() {
-  const { bookings, transactions, allUsers, updateUser, cancellationRequests } = useUser();
+  const { allUsers: staticUsers, updateUser, cancellationRequests } = useUser();
+  const { getAnalytics, getAllBookings, getAllUsers, getPaymentTransactions, getLoyaltyProgram } = (useAdminAPI as any)();
   const [sub, setSub] = useState<ExecSubTab>('overview');
   const [userConfirm, setUserConfirm] = useState<{ id: string; name: string; action: 'suspend' | 'activate' } | null>(null);
 
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [apiBookings, setApiBookings] = useState<any[]>([]);
+  const [apiUsers, setApiUsers] = useState<any[]>([]);
+  const [apiPayments, setApiPayments] = useState<any[]>([]);
+  const [apiLoyalty, setApiLoyalty] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        if (sub === 'overview' || sub === 'analytics') {
+          const now = new Date();
+          const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+          const data = await getAnalytics({ start, end });
+          setAnalyticsData(data);
+          const bookings = await getAllBookings({ date: new Date().toISOString().split('T')[0] });
+          setApiBookings(bookings || []);
+        } else if (sub === 'users') {
+          const users = await getAllUsers();
+          setApiUsers(users || []);
+        } else if (sub === 'payments') {
+          const payments = await getPaymentTransactions();
+          setApiPayments(payments || []);
+        } else if (sub === 'loyalty') {
+          const loyalty = await getLoyaltyProgram();
+          setApiLoyalty(loyalty || null);
+        }
+      } catch (err) {
+        console.error("Failed to fetch admin data:", err);
+      }
+    };
+    fetchData();
+  }, [sub, getAnalytics, getAllBookings, getAllUsers, getPaymentTransactions, getLoyaltyProgram]);
+
+  const bookings = apiBookings.length > 0 ? apiBookings : []; // Fallback logic can be fine-tuned
+  const allUsers = apiUsers.length > 0 ? apiUsers : staticUsers;
+  const transactions = apiPayments;
+
   const todayStr = new Date().toISOString().split('T')[0];
   const todayBookings = bookings.filter(b => b.date === todayStr);
-  const totalRevToday = todayBookings.reduce((s, b) => s + b.amount, 0);
+  const totalRevToday = analyticsData?.revenue?.[0]?.amount || todayBookings.reduce((s, b) => s + b.amount, 0);
   const openCourts = 9;
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length;
 

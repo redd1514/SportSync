@@ -14,6 +14,7 @@ import { projectId, publicAnonKey } from "../../utils/supabase/info";
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useAddons } from "../../contexts/AddonsContext";
+import { useBookingAPI } from "../../hooks/useBookingAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { getDynamicPrice, RATE_CARD, SPORTS_INFO, type AddOn } from "../sportsData";
 
@@ -245,6 +246,7 @@ export function MobileBooking() {
   const { user, addBooking, bookings } = useUser();
   const { requests, updateRequestStatus, activeRequestId, setActiveRequestId, coaches } = useCoaching();
   const { addonsBySport } = useAddons();
+  const { createBooking, checkAvailability, loading: apiLoading, error: apiError } = useBookingAPI();
 
   const unlinkedRequest = useMemo(() => {
     if (!activeRequestId) return undefined;
@@ -450,41 +452,22 @@ export function MobileBooking() {
     setBookingError(null);
     try {
       const dateStr = format(selectedDate, "yyyy-MM-dd");
-      const response = await fetch(`${SERVER_URL}/bookings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${publicAnonKey}` },
-        body: JSON.stringify({ date: dateStr, sport: selectedSport.name, time: startSlot, duration: selectedDuration, email: userEmail }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Booking failed");
-    } catch {
-      // Optimistic update
-    }
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-    // Mark all occupied slots as booked
-    const occupiedSlots = activeTimeSlots.slice(startIdx, startIdx + selectedDuration);
-    setBookedSlots(prev => Array.from(new Set([...prev, ...occupiedSlots])));
-    
-    if (user) {
-      const newBookingId = `BK${Date.now()}`;
+      const endLabelOption = endTimeOptions.find(o => o.duration === selectedDuration);
+      const endLabel = endLabelOption ? endLabelOption.endTimeLabel : "";
       
-      let addonsString = Array.from(selectedAddOns)
-        .map(id => addOnList.find(a => a.id === id)?.label)
-        .filter(Boolean)
-        .join(", ");
-        
-      if (unlinkedRequest) {
-        const coachStr = `Coaching (${unlinkedRequest.coachName})`;
-        addonsString = addonsString ? `${addonsString}, ${coachStr}` : coachStr;
+      const isAvailable = await checkAvailability(selectedSport.name, dateStr, startSlot, endLabel);
+      if (!isAvailable) {
+        setBookingError("Slot unavailable");
+        setIsBooking(false);
+        return;
       }
       
-      // Determine the next available court number
+      // Determine the next available court number for the ID
       const SPORT_CAPACITY: Record<string, number> = {
         Basketball: 1, Volleyball: 1, Badminton: 3, Pickleball: 3, Billiards: 4, "Table Tennis": 4
       };
       const capacity = SPORT_CAPACITY[selectedSport.name] || 1;
       let assignedCourt = `${selectedSport.name} 1`;
-      
       for (let i = 1; i <= capacity; i++) {
         const cName = `${selectedSport.name} ${i}`;
         const isFree = !bookings.some(b => {
@@ -505,26 +488,43 @@ export function MobileBooking() {
           break;
         }
       }
-      
+
+      let addonsArray = Array.from(selectedAddOns).map(id => {
+        const addon = addOnList.find(a => a.id === id);
+        return addon ? addon.label : id;
+      });
+      if (unlinkedRequest) {
+        addonsArray.push(`Coaching (${unlinkedRequest.coachName})`);
+      }
+
+      const response = await createBooking({
+        user_id: user?.id || "guest",
+        court_id: assignedCourt,
+        booking_date: dateStr,
+        start_time: startSlot,
+        end_time: endLabel,
+        addons: addonsArray
+      });
+
       // Simulate GCash Gateway Processing
       await new Promise(resolve => setTimeout(resolve, 2500));
 
-      const transactionId = `TXN-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const transactionId = `TXN-${response.id || Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
       const booking = {
-        id: newBookingId,
+        id: response.id || `BK${Date.now()}`,
         sport: selectedSport.name,
         date: dateStr,
         time: startSlot,
         duration: selectedDuration,
         court: assignedCourt,
         status: "confirmed" as const,
-        amount: confirmPrice,
+        amount: response.total_price || confirmPrice,
         paymentStatus: "paid" as const,
         paymentProofUrl: transactionId,
         createdAt: new Date().toISOString(),
-        customerName: user.name,
-        addOns: addonsString || undefined,
+        customerName: user?.name,
+        addOns: addonsArray.join(", ") || undefined,
       };
       
       addBooking(booking);
@@ -532,12 +532,16 @@ export function MobileBooking() {
 
       // Link the booking to the coaching request if it exists
       if (unlinkedRequest) {
-        updateRequestStatus(unlinkedRequest.id, "confirmed", newBookingId, transactionId);
+        updateRequestStatus(unlinkedRequest.id, "confirmed", booking.id, transactionId);
         setActiveRequestId(null);
       }
+      
+      setStep("success");
+    } catch (err: any) {
+      setBookingError(err.message || "Booking failed");
+    } finally {
+      setIsBooking(false);
     }
-    setIsBooking(false);
-    setStep("success");
   };
 
   const resetBooking = () => {

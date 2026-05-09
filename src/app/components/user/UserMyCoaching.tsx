@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useCoaching, CoachingRequest } from "../../contexts/CoachingContext";
 import { useUser } from "../../contexts/UserContext";
+import { useCoachingAPI } from "../../hooks/useCoachingAPI";
 import { getSportColor, SportIcon } from "../SportIcons";
 import { format } from "date-fns";
 import { CoachingPaymentModal } from "../CoachingPaymentModal";
@@ -43,8 +44,8 @@ function StatusBadge({ status }: { status: CoachingRequest["status"] }) {
 
 /* ── Client session card ── */
 function ClientSessionCard({
-  req, onPay, onViewTicket, onBookCourt, coaches,
-}: { req: CoachingRequest; onPay: (r: CoachingRequest) => void; onViewTicket: (r: CoachingRequest) => void; onBookCourt: (r: CoachingRequest) => void; coaches: any[] }) {
+  req, onPay, onViewTicket, onBookCourt, onCancel, coaches,
+}: { req: CoachingRequest; onPay: (r: CoachingRequest) => void; onViewTicket: (r: CoachingRequest) => void; onBookCourt: (r: CoachingRequest) => void; onCancel?: (id: string) => void; coaches: any[] }) {
   const color = getSportColor(req.sport);
   const coach = coaches.find(c => c.id === req.coachId);
   return (
@@ -88,11 +89,20 @@ function ClientSessionCard({
         </div>
 
         {(req.status === "pending") && !req.paymentProofUrl && !req.linkedBookingId && (
-          <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.97 }} onClick={() => onPay(req)}
-            className="w-full py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all"
-            style={{ fontSize: 14, background: `linear-gradient(135deg,#FF8C00,#EA580C)`, boxShadow: `0 4px 16px rgba(255,140,0,0.3)` }}>
-            Proceed to Payment <ArrowRight size={15} />
-          </motion.button>
+          <div className="flex gap-2 w-full mt-2">
+            <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.97 }} onClick={() => onPay(req)}
+              className="flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all"
+              style={{ fontSize: 13, background: `linear-gradient(135deg,#FF8C00,#EA580C)`, boxShadow: `0 4px 16px rgba(255,140,0,0.3)` }}>
+              Pay <ArrowRight size={15} />
+            </motion.button>
+            {onCancel && (
+              <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.97 }} onClick={() => onCancel(req.id)}
+                className="py-3 px-4 rounded-xl text-white font-black flex items-center justify-center transition-all"
+                style={{ fontSize: 13, background: `rgba(239, 68, 68, 0.1)`, border: `1px solid rgba(239, 68, 68, 0.3)`, color: `#ef4444` }}>
+                Cancel
+              </motion.button>
+            )}
+          </div>
         )}
         {req.status === "pending_verification" && (
           <div className="flex items-center justify-center gap-2 py-2.5 rounded-xl"
@@ -197,17 +207,48 @@ function CoachSessionCard({ req }: { req: CoachingRequest }) {
 
 /* ── Main Component ── */
 export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
-  const { requests, coaches, updateRequestStatus, findCoachByEmail } = useCoaching();
+  const { getUserCoachingSessions, getCoaches, cancelCoachingSession, approveCoachingSession, rejectCoachingSession, loading } = useCoachingAPI();
   const { user } = useUser();
+  const [requests, setRequests] = useState<CoachingRequest[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
+  
   const [selectedPaymentReq, setSelectedPaymentReq] = useState<CoachingRequest | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedTicketReq, setSelectedTicketReq] = useState<CoachingRequest | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+  const fetchCoachingData = async () => {
+    if (!user) return;
+    try {
+      // Assuming getCoaches also fetches all the sessions and we can figure it out.
+      // But typically, getUserCoachingSessions fetches the client sessions,
+      // and if the user is a coach, perhaps there's a different way to fetch their teaching sessions.
+      // We'll mimic the legacy logic by fetching all coaches, then finding if the user is one, 
+      // then grabbing their sessions.
+      const fetchedCoaches = await getCoaches();
+      setCoaches(fetchedCoaches || []);
+      
+      const mySessions = await getUserCoachingSessions(user.id);
+      
+      // If user is a coach, fetch all sessions where they are the coach, or backend might include them in `getUserCoachingSessions`.
+      // For this app's logic, let's assume `getUserCoachingSessions` provides both `clientSessions` and `coachSessions` via array.
+      if (mySessions) {
+        setRequests(mySessions);
+      }
+    } catch (error) {
+      console.error('API Error:', error);
+    } finally {
+      setIsInitialLoad(false);
+    }
+  };
+
   useEffect(() => {
-    const t = setTimeout(() => setIsInitialLoad(false), 600);
-    return () => clearTimeout(t);
-  }, []);
+    fetchCoachingData();
+    const interval = setInterval(fetchCoachingData, 10000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  const findCoachByEmail = (email: string) => coaches.find(c => c.email === email);
 
   /* Detect if the logged-in user is also an accepted coach */
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
@@ -223,12 +264,29 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
   const isCoach = !!myCoachProfile;
   const [activeTab, setActiveTab] = useState<"client" | "coach">(isCoach ? "coach" : "client");
 
-  const handlePaymentComplete = (proofUrl: string) => {
+  const handlePaymentComplete = async (proofUrl: string) => {
     if (selectedPaymentReq) {
-      updateRequestStatus(selectedPaymentReq.id, "confirmed", selectedPaymentReq.linkedBookingId, proofUrl);
+      // Example of an API call or localized optimistic update:
+      setRequests(prev => prev.map(r => r.id === selectedPaymentReq.id ? { ...r, status: "confirmed", paymentProofUrl: proofUrl } : r));
       setSelectedPaymentReq(null);
       setShowPaymentModal(false);
+      fetchCoachingData();
     }
+  };
+
+  const handleCancelSession = async (sessionId: string) => {
+    await cancelCoachingSession(sessionId);
+    fetchCoachingData();
+  };
+
+  const handleApproveSession = async (sessionId: string) => {
+    await approveCoachingSession(sessionId);
+    fetchCoachingData();
+  };
+
+  const handleRejectSession = async (sessionId: string) => {
+    await rejectCoachingSession(sessionId, "Schedule conflict");
+    fetchCoachingData();
   };
 
   const getCoachingFee = (coachId: string) => {
@@ -378,6 +436,7 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
                     <ClientSessionCard key={req.id} req={req} coaches={coaches}
                       onPay={r => { setSelectedPaymentReq(r); setShowPaymentModal(true); }}
                       onViewTicket={r => setSelectedTicketReq(r)}
+                      onCancel={handleCancelSession}
                       onBookCourt={r => onNavigate("book_court", { sport: r.sport, date: r.requestedDate, time: r.requestedTime })} />
                   ))}
                 </div>

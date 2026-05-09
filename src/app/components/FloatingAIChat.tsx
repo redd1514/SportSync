@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useBookingAPI } from '../hooks/useBookingAPI';
+import { useFacilityAPI } from '../hooks/useFacilityAPI';
 import {
   Send, Sparkles, RotateCcw, ChevronDown, X, MapPin, CalendarDays, Clock,
   DollarSign, Trophy, GraduationCap, XCircle, CreditCard, ArrowRight,
@@ -93,6 +95,8 @@ function useIsMobile() {
 }
 
 export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?: (tab: string) => void; forceOpen?: boolean; onClose?: () => void }) {
+  const { checkAvailability } = useBookingAPI();
+  const { getCourtStatuses } = useFacilityAPI();
   const [isExpanded, setIsExpanded] = useState(false);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Msg[]>([

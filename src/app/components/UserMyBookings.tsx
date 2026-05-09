@@ -1,24 +1,39 @@
-import React, { useState } from 'react';
-import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight, Loader2 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
+import { useBookingAPI } from '../hooks/useBookingAPI';
 import { SportIcon, getSportColor } from './SportIcons';
 import { format } from 'date-fns';
 import { CustomDateTimePicker } from './shared/CustomDateTimePicker';
 
 export function UserMyBookings() {
-  const { user, bookings, updateBooking, addCancellationRequest } = useUser();
+  const { user, updateBooking, addCancellationRequest } = useUser();
+  const { getUserBookings, cancelBooking, getQRCodeUrl, loading, error: apiError } = (useBookingAPI as any)();
+  
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<string | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
+  const [apiBookings, setApiBookings] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchBookings = async () => {
+      if (user?.id) {
+        try {
+          const fetched = await getUserBookings(user.id);
+          setApiBookings(fetched || []);
+        } catch (e) {
+          console.error("Failed to load bookings:", e);
+        }
+      }
+    };
+    fetchBookings();
+  }, [user?.id, getUserBookings]);
 
   // Show ALL bookings (upcoming + past + cancelled) for history
-  const userBookings = bookings.filter(b =>
-    b.customerName === user?.name ||
-    (b as any).userId === user?.id
-  );
+  const userBookings = apiBookings;
   
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -38,25 +53,36 @@ export function UserMyBookings() {
     return parseBookingDate(b.date) < today;
   });
 
-  const handleCancelRequest = () => {
+  const handleCancelRequest = async () => {
     if (!selectedBooking || !cancellationReason) return;
 
-    const request = {
-      id: `CR${Date.now()}`,
-      bookingId: selectedBooking,
-      reason: cancellationReason,
-      requestedAt: new Date().toISOString(),
-      status: 'pending' as const
-    };
+    try {
+      await cancelBooking(selectedBooking, cancellationReason);
+      
+      // Update local state optimistic
+      setApiBookings(prev => prev.map(b => 
+        b.id === selectedBooking ? { ...b, cancellationRequested: true, cancellationReason } : b
+      ));
+      
+      const request = {
+        id: `CR${Date.now()}`,
+        bookingId: selectedBooking,
+        reason: cancellationReason,
+        requestedAt: new Date().toISOString(),
+        status: 'pending' as const
+      };
 
-    addCancellationRequest(request);
-    updateBooking(selectedBooking, { cancellationRequested: true, cancellationReason });
-    
-    setShowCancelModal(false);
-    setSelectedBooking(null);
-    setCancellationReason('');
-    
-    alert('Cancellation request submitted! Admin will review your request.');
+      addCancellationRequest(request);
+      updateBooking(selectedBooking, { cancellationRequested: true, cancellationReason });
+      
+      setShowCancelModal(false);
+      setSelectedBooking(null);
+      setCancellationReason('');
+      
+      alert('Cancellation request submitted! Admin will review your request.');
+    } catch (e: any) {
+      alert(`Failed to cancel: ${e.message}`);
+    }
   };
 
   const handleReschedule = () => {
@@ -92,10 +118,12 @@ export function UserMyBookings() {
     );
   };
 
-  const BookingCard = ({ booking }: { booking: typeof bookings[0] }) => {
+  const BookingCard = ({ booking }: { booking: any }) => {
     const color = getSportColor(booking.sport);
     const isPast = booking.status === 'completed';
     const canModify = !isPast && !booking.cancellationRequested;
+
+    const qrUrl = booking.id ? getQRCodeUrl(booking.id) : null;
 
     return (
       <div 
@@ -142,9 +170,15 @@ export function UserMyBookings() {
             <div className="flex items-center gap-3">
               <span className="text-gray-500" style={{ fontSize: 15 }}>Amount:</span>
               <span className="text-green-400 font-black" style={{ fontSize: 18 }}>
-                ₱{booking.amount.toLocaleString()}
+                ₱{booking.amount?.toLocaleString() || '0'}
               </span>
             </div>
+            
+            {qrUrl && (
+              <div className="mt-2 flex items-center justify-center bg-white p-2 rounded-lg max-w-[120px] mx-auto">
+                <img src={qrUrl} alt="Booking QR Code" className="w-[100px] h-[100px]" />
+              </div>
+            )}
           </div>
 
           <div className="mt-auto">
@@ -203,6 +237,19 @@ export function UserMyBookings() {
             View and manage your court reservations
           </p>
         </div>
+
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="animate-spin text-[#0047AB] mb-4" size={32} />
+            <p className="text-gray-400" style={{ fontSize: 15 }}>Loading bookings...</p>
+          </div>
+        ) : apiError ? (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center mb-8">
+            <AlertCircle size={24} className="text-red-400 mx-auto mb-2" />
+            <h3 className="text-red-400 font-bold mb-1" style={{ fontSize: 16 }}>Failed to load bookings</h3>
+            <p className="text-gray-400" style={{ fontSize: 14 }}>{apiError}</p>
+          </div>
+        ) : null}
 
         {/* Summary Stats */}
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-8">
