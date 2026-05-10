@@ -6,9 +6,31 @@ import { SportIcon, getSportColor } from './SportIcons';
 import { format } from 'date-fns';
 import { CustomDateTimePicker } from './shared/CustomDateTimePicker';
 
+// Helper functions
+const getSportFromCourtId = (courtId: string): string => {
+  const courtMap: Record<string, string> = {
+    'basketball1': 'Basketball', 'basketball2': 'Basketball',
+    'volleyball1': 'Volleyball', 'volleyball2': 'Volleyball',
+    'badminton1': 'Badminton', 'badminton2': 'Badminton', 'badminton3': 'Badminton',
+    'pickleball1': 'Pickleball', 'pickleball2': 'Pickleball', 'pickleball3': 'Pickleball',
+    'billiards1': 'Billiards', 'billiards2': 'Billiards', 'billiards3': 'Billiards', 'billiards4': 'Billiards',
+    'tabletennnis1': 'Table Tennis', 'tabletennnis2': 'Table Tennis', 'tabletennnis3': 'Table Tennis', 'tabletennnis4': 'Table Tennis',
+    'court1': 'Basketball', 'court2': 'Volleyball', 'court3': 'Badminton',
+  };
+  return courtMap[courtId.toLowerCase()] || 'Sports';
+};
+
+const calculateDuration = (startTime: string, endTime: string): number => {
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  const startTotal = startHour * 60 + startMin;
+  const endTotal = endHour * 60 + endMin;
+  return Math.round((endTotal - startTotal) / 60);
+};
+
 export function UserMyBookings() {
-  const { user, updateBooking, addCancellationRequest } = useUser();
-  const { getUserBookings, cancelBooking, getQRCodeUrl, loading, error: apiError } = (useBookingAPI as any)();
+  const { user, updateBooking, addCancellationRequest, bookings: contextBookings } = useUser();
+  const { cancelBooking, getQRCodeUrl, loading, error: apiError } = useBookingAPI();
   
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -16,24 +38,11 @@ export function UserMyBookings() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
-  const [apiBookings, setApiBookings] = useState<any[]>([]);
 
-  useEffect(() => {
-    const fetchBookings = async () => {
-      if (user?.id) {
-        try {
-          const fetched = await getUserBookings(user.id);
-          setApiBookings(fetched || []);
-        } catch (e) {
-          console.error("Failed to load bookings:", e);
-        }
-      }
-    };
-    fetchBookings();
-  }, [user?.id, getUserBookings]);
+  console.log('[MyBookings] Context bookings:', contextBookings);
 
   // Show ALL bookings (upcoming + past + cancelled) for history
-  const userBookings = apiBookings;
+  const userBookings = contextBookings || [];
   
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -229,30 +238,31 @@ export function UserMyBookings() {
     <div className="min-h-full bg-[#0D0D0D] p-4 md:p-6 pb-8 md:pb-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-white mb-2" style={{ fontSize: 28, fontWeight: 900 }}>
-            My Bookings
-          </h1>
-          <p className="text-gray-500" style={{ fontSize: 14 }}>
-            View and manage your court reservations
-          </p>
+        <div className="mb-8 flex justify-between items-start">
+          <div>
+            <h1 className="text-white mb-2" style={{ fontSize: 28, fontWeight: 900 }}>
+              My Bookings
+            </h1>
+            <p className="text-gray-500" style={{ fontSize: 14 }}>
+              View and manage your court reservations ({userBookings.length} bookings)
+            </p>
+          </div>
         </div>
 
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="animate-spin text-[#0047AB] mb-4" size={32} />
-            <p className="text-gray-400" style={{ fontSize: 15 }}>Loading bookings...</p>
+        {userBookings.length === 0 ? (
+          <div className="text-center py-16">
+            <Calendar size={48} className="text-gray-600 mx-auto mb-4" />
+            <h3 className="text-white font-black mb-2" style={{ fontSize: 18 }}>
+              No bookings yet
+            </h3>
+            <p className="text-gray-500" style={{ fontSize: 14 }}>
+              Start by booking a court to see your reservations here
+            </p>
           </div>
-        ) : apiError ? (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center mb-8">
-            <AlertCircle size={24} className="text-red-400 mx-auto mb-2" />
-            <h3 className="text-red-400 font-bold mb-1" style={{ fontSize: 16 }}>Failed to load bookings</h3>
-            <p className="text-gray-400" style={{ fontSize: 14 }}>{apiError}</p>
-          </div>
-        ) : null}
-
-        {/* Summary Stats */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-8">
+        ) : (
+          <>
+            {/* Summary Stats */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-8">
           <div className="bg-[#1A1A1A] rounded-2xl p-3 sm:p-5 border border-white/5 flex flex-col items-center sm:items-start text-center sm:text-left">
             <Calendar size={20} className="text-[#FF8C00] mb-1 sm:mb-2" />
             <p className="text-white font-black" style={{ fontSize: 20 }}>
@@ -270,7 +280,7 @@ export function UserMyBookings() {
           <div className="bg-[#1A1A1A] rounded-2xl p-3 sm:p-5 border border-white/5 flex flex-col items-center sm:items-start text-center sm:text-left">
             <AlertCircle size={20} className="text-yellow-400 mb-1 sm:mb-2" />
             <p className="text-white font-black" style={{ fontSize: 20 }}>
-              {bookings.filter(b => b.cancellationRequested).length}
+              {userBookings.filter(b => b.cancellationRequested).length}
             </p>
             <p className="text-gray-400" style={{ fontSize: 11 }}>Pending</p>
           </div>
@@ -303,19 +313,9 @@ export function UserMyBookings() {
             </div>
           </div>
         )}
-
-        {/* Empty State */}
-        {userBookings.length === 0 && (
-          <div className="text-center py-16">
-            <Calendar size={48} className="text-gray-600 mx-auto mb-4" />
-            <h3 className="text-white font-black mb-2" style={{ fontSize: 18 }}>
-              No bookings yet
-            </h3>
-            <p className="text-gray-500" style={{ fontSize: 14 }}>
-              Start by booking a court to see your reservations here
-            </p>
-          </div>
+          </>
         )}
+
       </div>
 
       {/* Cancel Modal */}

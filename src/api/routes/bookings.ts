@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { bookingService } from '../services/bookingService';
+import { bookingService } from '../services/bookingService.ts';
 import { BookingRequest } from '../types';
 
 const bookingsRouter = new Hono();

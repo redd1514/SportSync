@@ -404,7 +404,6 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
               )}
             </motion.div>
           )}
-
           {/* ── CLIENT SESSIONS TAB (or default) ── */}
           {(!isCoach || activeTab === "client") && (
             <motion.div key="client" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type { ReactNode } from "react";
 import {
@@ -7,6 +7,7 @@ import {
   X, Phone, Mail, QrCode, RefreshCw, AlertTriangle,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useUserAPI } from "../../hooks/useUserAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -270,14 +271,44 @@ function QRTicketDialog({ booking, onClose }: {
 
 export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const { user, bookings, logout, updateBooking, addCancellationRequest } = useUser();
+  const { getUserProfile, getUserLoyaltyPoints, updateUserProfile } = useUserAPI();
   const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<typeof bookings[0] | null>(null);
   const [rescheduleTarget, setRescheduleTarget] = useState<typeof bookings[0] | null>(null);
   const [qrTarget, setQrTarget] = useState<typeof bookings[0] | null>(null);
+  const [profileData, setProfileData] = useState<any>(null);
+  const [loyaltyData, setLoyaltyData] = useState<any>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
   const isAdmin = user?.email === "admin@jrc.com";
+
+  // Fetch profile data from API on mount
+  const loadProfileData = async () => {
+    if (!user?.id) return;
+    setIsLoadingProfile(true);
+    try {
+      const profile = await getUserProfile(user.id);
+      setProfileData(profile);
+      const loyalty = await getUserLoyaltyPoints(user.id);
+      setLoyaltyData(loyalty);
+    } catch (error) {
+      console.error('Error loading profile data:', error);
+    } finally {
+      setIsLoadingProfile(false);
+    }
+  };
+
+  const fetchProfileOnMount = async () => {
+    if (user?.id) {
+      await loadProfileData();
+    }
+  };
+
+  useEffect(() => {
+    fetchProfileOnMount();
+  }, [user?.id]);
 
   const userBookings = bookings.filter(b => 
     b.customerName === user?.name || (b as any).userId === user?.id

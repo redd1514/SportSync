@@ -50,6 +50,7 @@ export function AdminBookingCalendar() {
   const { getAllBookings } = (useAdminAPI as any)();
   const { createBooking, checkAvailability } = (useBookingAPI as any)();
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<ViewMode>('daily');
   
   const [apiBookings, setApiBookings] = useState<any[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
@@ -91,7 +92,6 @@ export function AdminBookingCalendar() {
     return combined;
   }, [apiBookings, staticBookings]);
 
-  const [viewMode, setViewMode] = useState<ViewMode>('daily');
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   React.useEffect(() => { const t = setTimeout(() => setIsInitialLoad(false), 600); return () => clearTimeout(t); }, []);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export const useFacilityAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -61,6 +61,39 @@ export const useFacilityAPI = () => {
     });
   };
 
+  const getFacilityInfo = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/facilities`);
+      if (!response.ok) throw new Error('Failed to fetch facility info');
+      return await response.json();
+    } catch (err) {
+      console.error('Error fetching facility info:', err);
+      return {
+        name: 'JRC Sports Complex',
+        address: 'Valenzuela City, Metro Manila',
+        hours: '7:00 AM - 12:00 MN',
+        phone: '+63 (2) 1234-5678',
+      };
+    }
+  };
+
+  const getCourtStatuses = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/facilities/courts/status`);
+      if (!response.ok) throw new Error('Failed to fetch court statuses');
+      return await response.json();
+    } catch (err) {
+      console.error('Error fetching court statuses:', err);
+      return [
+        { id: 'basketball1', name: 'Basketball 1', status: 'available', sport: 'Basketball' },
+        { id: 'basketball2', name: 'Basketball 2', status: 'available', sport: 'Basketball' },
+        { id: 'volleyball1', name: 'Volleyball 1', status: 'available', sport: 'Volleyball' },
+        { id: 'badminton1', name: 'Badminton 1', status: 'available', sport: 'Badminton' },
+        { id: 'pickleball1', name: 'Pickleball 1', status: 'occupied', sport: 'Pickleball' },
+      ];
+    }
+  };
+
   return {
     getFacilityMap,
     getCourtDetails,
@@ -69,6 +102,8 @@ export const useFacilityAPI = () => {
     updateFacilityLayout,
     addCourt,
     updateCourtStatus,
+    getFacilityInfo,
+    getCourtStatuses,
     loading,
     error
   };

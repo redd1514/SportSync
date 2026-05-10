@@ -1,0 +1,122 @@
+### ============================================
+### JRC SportSync API Testing
+### ============================================
+### Use REST Client extension in VS Code
+### Install: humao.rest-client
+
+### HEALTH CHECK
+GET http://localhost:3000/health
+
+### ROOT/INFO
+GET http://localhost:3000/
+
+### ============================================
+### BOOKINGS ENDPOINTS
+### ============================================
+
+### Get user bookings
+GET http://localhost:3000/api/bookings/u1
+
+### Check court availability
+GET http://localhost:3000/api/bookings/court1/availability?date=2026-05-15&startTime=14:00&endTime=15:00
+
+### Create a booking
+POST http://localhost:3000/api/bookings
+Content-Type: application/json
+
+{
+  "user_id": "u1",
+  "court_id": "court1",
+  "booking_date": "2026-05-15",
+  "start_time": "14:00",
+  "end_time": "15:00",
+  "addons": []
+}
+
+### Cancel booking
+DELETE http://localhost:3000/api/bookings/b1
+
+### ============================================
+### COACHES ENDPOINTS
+### ============================================
+
+### List all coaches
+GET http://localhost:3000/api/coaches
+
+### Request coaching session
+POST http://localhost:3000/api/coaches/sessions
+Content-Type: application/json
+
+{
+  "coach_id": "c1",
+  "user_id": "u1",
+  "sport_id": "basketball",
+  "session_date": "2026-05-20",
+  "start_time": "16:00",
+  "end_time": "17:00"
+}
+
+### ============================================
+### PAYMENTS ENDPOINTS
+### ============================================
+
+### Process payment
+POST http://localhost:3000/api/payments
+Content-Type: application/json
+
+{
+  "booking_id": "b1",
+  "amount": 450,
+  "payment_method": "gcash"
+}
+
+### Get payment details
+GET http://localhost:3000/api/payments/pay_123456
+
+### ============================================
+### USERS ENDPOINTS
+### ============================================
+
+### Get user profile
+GET http://localhost:3000/api/users/u1
+
+### Update user profile
+PUT http://localhost:3000/api/users/u1
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "phone": "+63 9XX XXX XXXX"
+}
+
+### Get loyalty points
+GET http://localhost:3000/api/users/u1/loyalty
+
+### Get user booking history
+GET http://localhost:3000/api/users/u1/bookings
+
+### ============================================
+### ADMIN ENDPOINTS
+### ============================================
+
+### Get analytics
+GET http://localhost:3000/api/admin/analytics
+
+### Get pending requests (cancellations & coaching verifications)
+GET http://localhost:3000/api/admin/pending-requests
+
+### Verify coaching payment
+POST http://localhost:3000/api/admin/verify-payment
+Content-Type: application/json
+
+{
+  "id": "cp1"
+}
+
+### Approve cancellation request
+POST http://localhost:3000/api/admin/approve-cancellation
+Content-Type: application/json
+
+{
+  "id": "cr1"
+}

@@ -25,7 +25,7 @@ const QUICK_CHIPS: { label: string; q: string; Icon: any }[] = [
   { label: 'Location',        q: 'Where are you located?',             Icon: MapPin },
 ];
 
-function getAIResponse(input: string): { text: string; link?: Msg['link'] } {
+function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[]): { text: string; link?: Msg['link'] } {
   const q = input.toLowerCase();
 
   if (/basketball/.test(q) && /rate|price|cost|how much/.test(q))
@@ -46,6 +46,13 @@ function getAIResponse(input: string): { text: string; link?: Msg['link'] } {
       text: '2026 Rates at JRC Ballpark:\n\nBasketball / Volleyball\n• Weekday Day (7AM–5PM): ₱450/hr\n• Weekday Evening (5PM–12MN): ₱750/hr\n• Weekend Day: ₱550/hr\n• Weekend Evening: ₱850/hr\n\nBadminton / Pickleball: ₱300/hr flat\nBilliards / Table Tennis: ₱100/hr flat\n\nAll rates include facility access. Add-ons available at booking.',
       link: { label: 'Book a Court Now', action: 'booking' },
     };
+  if (/available|avail|court/.test(q))
+    return {
+      text: courtStatuses && courtStatuses.length > 0
+        ? `Available courts right now:\n\n${courtStatuses.filter((c: any) => c.status === 'available').map((c: any) => `• ${c.name} — ${c.sport}`).join('\n')}\n\nTap below to book immediately.`
+        : 'Loading court availability... Check back in a moment.',
+      link: { label: 'View Courts', action: 'booking' },
+    };
   if (/book|reserve|court|slot/.test(q))
     return {
       text: 'Booking is easy!\n\n1. Go to the Facility Map tab\n2. Select your preferred date & time\n3. Tap any available (green) court\n4. Choose your session length\n5. Add optional extras\n6. Pay via GCash and get your QR ticket\n\nYour QR ticket is required for check-in at the front desk.',
@@ -62,7 +69,11 @@ function getAIResponse(input: string): { text: string; link?: Msg['link'] } {
       link: { label: 'Go to My Bookings', action: 'mybookings' },
     };
   if (/hour|time|open|close|schedule|operating/.test(q))
-    return { text: 'JRC Sports Complex is open daily:\n\n7:00 AM – 12:00 MN\n\nPeak hours are 5–9 PM on weekdays. Book in advance to secure your court!' };
+    return { 
+      text: facilityInfo?.hours 
+        ? `JRC Sports Complex hours:\n\n${facilityInfo.hours}\n\nPeak hours are 5–9 PM on weekdays. Book in advance to secure your court!`
+        : 'JRC Sports Complex is open daily:\n\n7:00 AM – 12:00 MN\n\nPeak hours are 5–9 PM on weekdays. Book in advance to secure your court!' 
+    };
   if (/loyalty|point|reward|free/.test(q))
     return { text: 'Loyalty Rewards:\n\n• Earn 1 point per booking\n• 10 points = 1 FREE session\n• Points never expire\n• Valid on any sport, any day\n\nCheck your points in Profile → Loyalty Rewards.' };
   if (/coach|train|lesson/.test(q))
@@ -71,7 +82,11 @@ function getAIResponse(input: string): { text: string; link?: Msg['link'] } {
       link: { label: 'Browse Coaching Hub', action: 'coaching' },
     };
   if (/location|where|address|direction/.test(q))
-    return { text: 'JRC Sports Complex\nValenzuela City, Metro Manila\n\nOpen 7AM – 12MN daily. Check the Facility Map for details.' };
+    return { 
+      text: facilityInfo?.address 
+        ? `JRC Sports Complex\n${facilityInfo.address}\n\nOpen 7AM – 12MN daily. Check the Facility Map for details.`
+        : 'JRC Sports Complex\nValenzuela City, Metro Manila\n\nOpen 7AM – 12MN daily. Check the Facility Map for details.' 
+    };
   if (/payment|pay|gcash|card|cash/.test(q))
     return { text: 'Payment methods:\n\nGCash — online bookings (full payment required)\nCash on-site — walk-in bookings (pay at front desk)\n\nYou\'ll receive a digital QR ticket after payment.' };
   if (/equipment|racket|ball|paddle|rent/.test(q))
@@ -96,9 +111,11 @@ function useIsMobile() {
 
 export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?: (tab: string) => void; forceOpen?: boolean; onClose?: () => void }) {
   const { checkAvailability } = useBookingAPI();
-  const { getCourtStatuses } = useFacilityAPI();
+  const { getCourtStatuses, getFacilityInfo } = useFacilityAPI();
   const [isExpanded, setIsExpanded] = useState(false);
   const [message, setMessage] = useState('');
+  const [facilityInfo, setFacilityInfo] = useState<any>(null);
+  const [courtStatuses, setCourtStatuses] = useState<any[]>([]);
   const [messages, setMessages] = useState<Msg[]>([
     { role: 'ai', text: 'Hello! I\'m your JRC AI Concierge. Ask me about court bookings, pricing, coaching, hours, or anything else. How can I help?', ts: new Date() },
   ]);
@@ -107,6 +124,21 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
   const isMobile = useIsMobile();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch facility info and court statuses on mount
+  useEffect(() => {
+    const loadFacilityData = async () => {
+      try {
+        const info = await getFacilityInfo();
+        const courts = await getCourtStatuses();
+        setFacilityInfo(info);
+        setCourtStatuses(courts || []);
+      } catch (error) {
+        console.error('Error loading facility data:', error);
+      }
+    };
+    loadFacilityData();
+  }, []);
 
   useEffect(() => {
     if (isExpanded) {
@@ -133,10 +165,11 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
     setIsTyping(true);
     setTimeout(() => {
       setIsTyping(false);
-      const resp = getAIResponse(text);
+      // Use facility info in AI response if available
+      const resp = getAIResponse(text, facilityInfo, courtStatuses);
       setMessages(prev => [...prev, { role: 'ai', text: resp.text, ts: new Date(), link: resp.link }]);
     }, 800 + Math.random() * 600);
-  }, []);
+  }, [facilityInfo, courtStatuses]);
 
   const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 

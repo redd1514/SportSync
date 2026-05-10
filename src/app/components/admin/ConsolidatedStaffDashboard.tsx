@@ -273,7 +273,7 @@ function LiveOperations() {
 
   const KPIs = [
     { label: "Today's Revenue", value: `₱${totalRevToday.toLocaleString()}`, icon: DollarSign, color: '#FF8C00', bg: '#2A1F0A' },
-    { label: "Today's Bookings", value: todayBookings.length, icon: Calendar, color: '#22c55e', bg: '#0A2010' },
+    { label: "Today's Bookings", value: todayBookingsCount, icon: Calendar, color: '#22c55e', bg: '#0A2010' },
     { label: 'Courts Active', value: `${openCourts}/${publishedLayout.length}`, icon: MapPin, color: '#0047AB', bg: '#0A1525' },
     { label: 'Pending Requests', value: pendingCancellations, icon: AlertTriangle, color: '#a855f7', bg: '#1A0A25' },
   ];
