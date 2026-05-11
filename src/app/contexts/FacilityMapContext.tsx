@@ -119,6 +119,18 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
   const [maps, setMaps] = useState<FacilityMap[]>([DEFAULT_DEMO_MAP]);
   const [mapsBootstrapped, setMapsBootstrapped] = useState(false);
 
+  // Ensure demo map is always present and published
+  const ensureDemoMapExists = useCallback((currentMaps: FacilityMap[]) => {
+    const hasDemo = currentMaps.some(m => m.id === DEMO_MAP_ID);
+    if (!hasDemo) {
+      return [DEFAULT_DEMO_MAP, ...currentMaps];
+    }
+    // Ensure demo map is published
+    return currentMaps.map(m =>
+      m.id === DEMO_MAP_ID ? { ...m, isPublished: true } : m
+    );
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -127,17 +139,16 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
         const remote = await fetchAppData<FacilityMap[]>(FACILITY_MAPS_KV_KEY);
         if (cancelled) return;
         if (Array.isArray(remote) && remote.length > 0) {
-          const hasDemo = remote.some((m) => m.id === DEMO_MAP_ID);
-          setMaps(hasDemo ? remote : [DEFAULT_DEMO_MAP, ...remote]);
+          const ensured = ensureDemoMapExists(remote);
+          setMaps(ensured);
         } else {
           try {
             const saved = typeof window !== 'undefined' ? localStorage.getItem('jrc_facility_maps_v2') : null;
             if (saved) {
               const parsed: FacilityMap[] = JSON.parse(saved);
-              const hasDemo = parsed.some((m) => m.id === DEMO_MAP_ID);
-              const next = hasDemo ? parsed : [DEFAULT_DEMO_MAP, ...parsed];
-              setMaps(next);
-              await putAppData(FACILITY_MAPS_KV_KEY, next);
+              const ensured = ensureDemoMapExists(parsed);
+              setMaps(ensured);
+              await putAppData(FACILITY_MAPS_KV_KEY, ensured);
               localStorage.removeItem('jrc_facility_maps_v2');
             }
           } catch {
@@ -156,15 +167,16 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ensureDemoMapExists]);
 
   useEffect(() => {
     if (!mapsBootstrapped) return;
     const t = window.setTimeout(() => {
-      void putAppData(FACILITY_MAPS_KV_KEY, maps);
+      const ensured = ensureDemoMapExists(maps);
+      void putAppData(FACILITY_MAPS_KV_KEY, ensured);
     }, 650);
     return () => window.clearTimeout(t);
-  }, [maps, mapsBootstrapped]);
+  }, [maps, mapsBootstrapped, ensureDemoMapExists]);
 
   const createMap = useCallback((
     meta: { name: string; branch: string; location: string; canvasW: number; canvasH: number }

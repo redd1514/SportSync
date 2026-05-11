@@ -15,7 +15,6 @@ import { useFacilityMap, getSportMapColor, LiveStatus } from '../../contexts/Fac
 import { useUser, Booking } from '../../contexts/UserContext';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { useAddons } from '../../contexts/AddonsContext';
-import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { SPORTS_INFO, AddOn } from '../sportsData';
 import { SportIcon } from '../SportIcons';
 
@@ -23,10 +22,6 @@ import { SportIcon } from '../SportIcons';
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 4;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-function genRefCode(): string {
-  return `JRC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-}
 
 function addDurationToTime(startTime: string, durationHours: number): string {
   const parts = startTime.split(':');
@@ -1016,7 +1011,6 @@ interface FacilityMapViewerProps {
 
 export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange }: FacilityMapViewerProps) {
   const { maps, getCourtLiveStatus } = useFacilityMap();
-  const { bookings, addBooking, user, calcCourtPrice } = useUser();
   const { createBooking } = useBookingAPI();
   const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi } = useUser();
   const { createDeskBooking } = useBookingAPI();
@@ -1277,7 +1271,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
     };
     try {
       const out = await createDeskBooking(payload);
-      addBooking(out.booking as Booking);
+      addBooking(out.booking as unknown as Booking);
       await refreshBookingsFromApi();
     } catch (err) {
       console.error('[FacilityMapViewer] desk booking failed, using local copy', err);
@@ -1618,4 +1612,5 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
       </AnimatePresence>
     </div>
   );
+  }
 }

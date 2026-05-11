@@ -26,23 +26,25 @@ app.use('*', logger());
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // Root endpoint
-app.get('/', (c) => c.json({
-  app: 'JRC SportSync API', 
-  version: '1.0.0',
+// Root endpoint
+app.get('/', (c) => {
+  return c.json({
+    app: 'JRC SportSync API',
+    version: '1.0.0',
     endpoints: {
-    health: '/health',
-    bookings: '/api/bookings',
-    coaches: '/api/coaches',
-    coachApplications: '/api/coach-applications',
-    appData: '/api/app-data',
-    payments: '/api/payments',
-    users: '/api/users',
-    admin: '/api/admin',
-    staff: '/api/staff'
-    admin: '/api/admin',
-    facilities: '/api/facilities',
-  }
-}));
+      health: '/health',
+      bookings: '/api/bookings',
+      coaches: '/api/coaches',
+      coachApplications: '/api/coach-applications',
+      appData: '/api/app-data',
+      payments: '/api/payments',
+      users: '/api/users',
+      staff: '/api/staff',
+      admin: '/api/admin',
+      facilities: '/api/facilities',
+    },
+  });
+});
 
 // Routes
 app.route('/api/bookings', bookingsRouter);
@@ -105,8 +107,8 @@ app.post('/api/coach-applications', async (c) => {
     return c.json(created, 201);
   } catch (error: any) {
     return c.json({ error: error.message || 'Failed to submit application' }, 400);
-  }
-});
+  } // <--- You were likely missing this brace
+}); // <--- And this closing for the .post() call
 
 app.route('/api/coach-applications', coachApplicationsPatchRouter);
 app.route('/api/app-data', appDataRouter);
