@@ -1,5 +1,12 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { supabase } from "../utils/supabase/client";
+import { getApiBaseUrl } from "../utils/apiBase";
+import { fetchAppData, putAppData } from "../utils/appDataClient";
+
+const SYSTEM_SETTINGS_KV_KEY = "system_settings_v1";
+const DEMO_USER_STORAGE_KEY = 'sportsync_demo_user';
+/** Legacy key from older builds; cleared on logout. */
+const DEMO_USER_LOGGED_OUT_KEY = 'sportsync_demo_user_logged_out';
 
 const _TODAY = new Date().toISOString().split('T')[0];
 
@@ -138,6 +145,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
+  const authEpochRef = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authFlow, setAuthFlow] = useState<"none" | "password_recovery">("none");
@@ -161,38 +169,123 @@ export function UserProvider({ children }: { children: ReactNode }) {
       tableTennis: { flat: 100 },
     },
   });
+  const [systemSettingsKvReady, setSystemSettingsKvReady] = useState(false);
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchAppData<Partial<SystemSettings> & { businessHours?: SystemSettings["businessHours"]; courtRates?: SystemSettings["courtRates"] }>(
+          SYSTEM_SETTINGS_KV_KEY,
+        );
+        if (cancelled || !remote || typeof remote !== "object") return;
+        if (remote.businessHours && remote.courtRates) {
+          setSystemSettings((prev) => ({
+            ...prev,
+            ...remote,
+            businessHours: { ...prev.businessHours, ...remote.businessHours },
+            courtRates: { ...prev.courtRates, ...remote.courtRates },
+          }));
+        }
+      } catch {
+        /* keep defaults */
+      } finally {
+        if (!cancelled) setSystemSettingsKvReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!systemSettingsKvReady) return;
+    const t = window.setTimeout(() => {
+      void putAppData(SYSTEM_SETTINGS_KV_KEY, systemSettings);
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [systemSettings, systemSettingsKvReady]);
+
+  const clearPersistedDemoKeys = () => {
+    try {
+      localStorage.removeItem(DEMO_USER_STORAGE_KEY);
+      localStorage.removeItem(DEMO_USER_LOGGED_OUT_KEY);
+    } catch {}
+  };
+
+  const syncUserProfile = async (profile: { id: string; email: string; name: string; phone?: string; role?: string }) => {
+    try {
+      const payload = {
+        auth_id: profile.id,
+        email: profile.email,
+        full_name: profile.name,
+        phone: profile.phone || null,
+        role: profile.role || 'user',
+      };
+      console.log('[UserContext] Syncing user profile:', payload);
+      
+      const response = await fetch(`${getApiBaseUrl()}/api/users/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      
+      const responseData = await response.json();
+      if (!response.ok) {
+        console.error('[UserContext] Sync failed:', response.status, responseData);
+        return null;
+      }
+      console.log('[UserContext] Sync successful:', responseData);
+      return responseData;
+    } catch (error) {
+      console.error('[UserContext] Sync error:', error);
+      return null;
+    }
+  };
+
+  const normalizeBooking = (booking: any): Booking => ({
+    id: booking.id,
+    sport: booking.sport || 'Court Booking',
+    date: booking.date || booking.booking_date || '',
+    time: booking.time || booking.start_time || '',
+    duration: booking.duration || booking.duration_hours || 1,
+    court: booking.court || booking.court_id || '',
+    status: booking.status || 'pending',
+    amount: booking.amount || booking.total_price || 0,
+    paymentStatus: booking.paymentStatus || booking.payment_status || 'pending',
+    paymentProofUrl: booking.paymentProofUrl || booking.payment_proof_url,
+    createdAt: booking.createdAt || booking.created_at || new Date().toISOString(),
+    customerName: booking.customerName || booking.customer_name,
+    customerPhone: booking.customerPhone || booking.customer_phone,
+    addOns: booking.addOns || booking.add_ons,
+    cancellationRequested: booking.cancellationRequested || booking.cancellation_requested,
+    cancellationReason: booking.cancellationReason || booking.cancellation_reason,
+    refCode: booking.refCode || booking.ref_code,
+    checkInStatus: booking.checkInStatus || booking.check_in_status,
+    checkInTime: booking.checkInTime || booking.check_in_time,
+  });
+
+  const loadBookingsForUser = async (userId: string) => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${encodeURIComponent(userId)}`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      return Array.isArray(data) ? data.map(normalizeBooking) : [];
+    } catch {
+      return [];
+    }
+  };
+
   // 1. Listen for real Supabase sessions when the app loads
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    (async () => {
+      const epoch = authEpochRef.current;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (authEpochRef.current !== epoch) return;
       if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email || "",
-          name: session.user.user_metadata?.full_name || "Real User",
-          phone: "+63 000 000 0000",
-          favoriteSports: [],
-          loyaltyPoints: 0,
-          totalBookings: 0,
-          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
-          role: "user" 
-        });
-      }
-      setIsLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setAuthFlow("password_recovery");
-      }
-      if (event === "SIGNED_OUT") {
-        setAuthFlow("none");
-      }
-
-      if (session?.user) {
-        setUser({
+        const nextUser = {
           id: session.user.id,
           email: session.user.email || "",
           name: session.user.user_metadata?.full_name || "Real User",
@@ -202,9 +295,46 @@ export function UserProvider({ children }: { children: ReactNode }) {
           totalBookings: 0,
           memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
           role: "user"
-        } as UserProfile);
+        };
+        const syncedUser = await syncUserProfile({ id: nextUser.id, email: nextUser.email, name: nextUser.name, phone: nextUser.phone, role: nextUser.role });
+        if (authEpochRef.current !== epoch) return;
+        const resolvedUser = syncedUser ? { ...nextUser, id: syncedUser.id } : nextUser;
+        setUser(resolvedUser);
+        loadBookingsForUser(resolvedUser.id).then(setBookings);
+      }
+      setIsLoading(false);
+    })();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthFlow("password_recovery");
+      }
+      if (event === "SIGNED_OUT") {
+        setAuthFlow("none");
+      }
+
+      const epoch = authEpochRef.current;
+      if (session?.user) {
+        const nextUser = {
+          id: session.user.id,
+          email: session.user.email || "",
+          name: session.user.user_metadata?.full_name || "Real User",
+          phone: "+63 000 000 0000",
+          favoriteSports: [],
+          loyaltyPoints: 0,
+          totalBookings: 0,
+          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
+          role: "user"
+        } as UserProfile;
+        syncUserProfile({ id: nextUser.id, email: nextUser.email, name: nextUser.name, phone: nextUser.phone, role: nextUser.role }).then((syncedUser) => {
+          if (authEpochRef.current !== epoch) return;
+          const resolvedUser = syncedUser ? { ...nextUser, id: syncedUser.id } : nextUser;
+          setUser(resolvedUser);
+          loadBookingsForUser(resolvedUser.id).then(setBookings);
+        });
       } else {
         setUser(null);
+        setBookings([]);
       }
     });
 
@@ -229,6 +359,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const isStaffDemo = email === "staff@jrc.com" && password === "password123";
 
     if (isAdminDemo || isUserDemo || isStaffDemo) {
+      const epoch = authEpochRef.current;
       let role: "admin" | "user" | "staff" = "user";
       let name = "User Demo";
       let id = `user_${email.replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -236,8 +367,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (isAdminDemo) { role = "admin"; name = "Admin Demo"; id = "admin_u1"; }
       else if (isStaffDemo) { role = "staff"; name = "Staff Demo"; id = "staff_u1"; }
 
+      const syncedUser = await syncUserProfile({ id, email, name, phone: "+63 912 345 6789", role });
+      if (authEpochRef.current !== epoch) return { error: null };
+      const resolvedId = syncedUser?.id || id;
       setUser({
-        id,
+        id: resolvedId,
         name,
         email,
         phone: "+63 912 345 6789",
@@ -248,6 +382,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         accountStatus: "active",
         role
       });
+      const demoBookings = await loadBookingsForUser(resolvedId);
+      setBookings(demoBookings);
       return { error: null }; // Success!
     }
 
@@ -316,8 +452,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   // 4. Hybrid Logout
   const logout = async () => {
+    authEpochRef.current += 1;
     await supabase.auth.signOut(); // Clears real session
     setUser(null); // Clears demo session
+    setBookings([]);
+    clearPersistedDemoKeys();
   };
 
   // 5. Reset Password

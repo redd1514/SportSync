@@ -68,11 +68,6 @@ export function UserMyBookings() {
     try {
       await cancelBooking(selectedBooking, cancellationReason);
       
-      // Update local state optimistic
-      setApiBookings(prev => prev.map(b => 
-        b.id === selectedBooking ? { ...b, cancellationRequested: true, cancellationReason } : b
-      ));
-      
       const request = {
         id: `CR${Date.now()}`,
         bookingId: selectedBooking,

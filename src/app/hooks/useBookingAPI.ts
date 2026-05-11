@@ -1,6 +1,5 @@
 import { useState } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/apiBase';
 
 export const useBookingAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -10,7 +9,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -30,7 +29,7 @@ export const useBookingAPI = () => {
   const checkAvailability = async (courtId: string, date: string, startTime: string, endTime: string) => {
     try {
       const response = await fetch(
-        `${API_BASE}/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}`
+        `${getApiBaseUrl()}/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}`
       );
       const data = await response.json();
       return data.available;
@@ -44,7 +43,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings/${userId}`);
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${userId}`);
       if (!response.ok) throw new Error('Failed to fetch bookings');
       const bookings = await response.json();
       return bookings || [];
@@ -60,7 +59,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings/${bookingId}`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),

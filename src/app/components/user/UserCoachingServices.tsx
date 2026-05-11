@@ -164,13 +164,10 @@ const DUMMY_RATINGS: Record<string, { rating: number; reviews: number; specialti
 
 /* ─── Main Component ──────────────────────────────────────────────── */
 export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) => void }) {
-  const { coaches, addRequest, setActiveRequestId, findCoachByEmail, updateRequestStatus } = useCoaching();
+  const { coaches, addRequest, setActiveRequestId, findCoachByEmail, updateRequestStatus, isLoading: coachesLoading } = useCoaching();
   const { user } = useUser();
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : null;
   const isAcceptedCoach = !!myCoachProfile;
-
-  /* Loading state */
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   /* Filter state */
   const [selectedSport, setSelectedSport] = useState<string>("All");
@@ -244,12 +241,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
 
   const coachMeta = (id: string) => DUMMY_RATINGS[id] || { rating: 4.5, reviews: 20, specialties: [] };
 
-  React.useEffect(() => {
-    const t = setTimeout(() => setIsInitialLoad(false), 600);
-    return () => clearTimeout(t);
-  }, []);
-
-  if (isInitialLoad) {
+  if (coachesLoading) {
     return (
       <div className="flex flex-col h-full items-center justify-center bg-[#131314]">
         <SectionLoader label="Loading coaches…" accentColor="#F97316" />

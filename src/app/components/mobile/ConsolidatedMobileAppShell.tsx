@@ -188,7 +188,7 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
         );
 
       case "account":
-        return <AccountActivityScreen onLogout={onLogout} />;
+        return <AccountActivityScreen onLogout={handleLogout} />;
     }
   };
 

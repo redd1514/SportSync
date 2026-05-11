@@ -1,23 +1,51 @@
 import { Hono } from 'hono';
+import { coachService } from '../services/coachService.ts';
 
 const coachesRouter = new Hono();
 
-// GET /api/coaches - List all coaches (mock data)
-coachesRouter.get('/', async (c) => {
-  const coaches = [
-    { id: 'c1', name: 'Juan Santos', sport: 'Basketball', hourlyRate: 800, rating: 4.8 },
-    { id: 'c2', name: 'Maria Cruz', sport: 'Volleyball', hourlyRate: 700, rating: 4.9 },
-  ];
-  return c.json(coaches);
-});
-
-// POST /api/coaches/sessions - Request coaching
+// Register static paths before /:id patterns.
+// POST /api/coaches/sessions — request coaching (stub until sessions API is wired)
 coachesRouter.post('/sessions', async (c) => {
   try {
     const body = await c.req.json();
     return c.json({ id: `cs${Date.now()}`, ...body, status: 'pending', created_at: new Date().toISOString() }, 201);
   } catch (error: any) {
     return c.json({ error: error.message }, 400);
+  }
+});
+
+// GET /api/coaches and POST /api/coaches are registered on the main app in server.ts (reliable with Vite proxy).
+
+// PUT /api/coaches/:id — update coach
+coachesRouter.put('/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const updated = await coachService.updateCoach(id, {
+      name: body.name !== undefined ? String(body.name).trim() : undefined,
+      email: body.email !== undefined ? String(body.email).trim() : undefined,
+      sport: body.sport !== undefined ? String(body.sport).trim() : undefined,
+      hourlyRate: body.hourlyRate !== undefined ? Number(body.hourlyRate) : undefined,
+      description: body.description !== undefined ? String(body.description) : undefined,
+      availableDays: body.availableDays !== undefined ? body.availableDays : undefined,
+      timeRange: body.timeRange !== undefined ? String(body.timeRange) : undefined,
+      isAvailable: body.isAvailable !== undefined ? Boolean(body.isAvailable) : undefined,
+      image: body.image !== undefined ? (body.image ? String(body.image) : undefined) : undefined,
+    });
+    return c.json(updated);
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to update coach' }, 400);
+  }
+});
+
+// DELETE /api/coaches/:id — delete or soft-hide if coaching_sessions exist
+coachesRouter.delete('/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    await coachService.deleteCoach(id);
+    return c.json({ success: true });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to delete coach' }, 400);
   }
 });
 

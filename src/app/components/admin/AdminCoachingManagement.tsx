@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useCoaching, Coach, CoachingRequest } from "../../contexts/CoachingContext";
 import { useUser } from "../../contexts/UserContext";
 import { useAddons } from "../../contexts/AddonsContext";
@@ -10,8 +10,26 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { getSportColor } from "../SportIcons";
 import type { CoachApplication } from "../user/CoachApplicationForm";
+import { getApiBaseUrl } from "../../utils/apiBase";
 
 type Tab = "coaches" | "requests" | "applications";
+
+function mapApiToCoachApplication(row: Record<string, unknown>): CoachApplication {
+  return {
+    id: String(row.id),
+    userId: String(row.userId ?? ""),
+    userName: String(row.userName ?? ""),
+    userEmail: String(row.userEmail ?? ""),
+    sport: String(row.sport ?? ""),
+    experience: String(row.experience ?? ""),
+    bio: String(row.bio ?? ""),
+    availability: Array.isArray(row.availability) ? (row.availability as string[]) : [],
+    requestedRate: Number(row.requestedRate) || 0,
+    certifications: String(row.certifications ?? ""),
+    status: (row.status as CoachApplication["status"]) || "pending",
+    submittedAt: String(row.submittedAt ?? new Date().toISOString()),
+  };
+}
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -84,7 +102,8 @@ function MiniDatePicker({ onSelect, selected }: { onSelect: (d: string) => void;
           if (!day) return <div key={`e-${idx}`} />;
           const dStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const isPast = dStr < todayStr;
-          const isSel = selected.includes(dStr);
+          const sel = selected ?? [];
+          const isSel = sel.includes(dStr);
           return (
             <button key={day} type="button" disabled={isPast} onClick={() => onSelect(dStr)}
               className="aspect-square rounded-md flex items-center justify-center font-black transition-all disabled:opacity-20"
@@ -99,7 +118,8 @@ function MiniDatePicker({ onSelect, selected }: { onSelect: (d: string) => void;
 }
 
 export function AdminCoachingManagement() {
-  const { coaches, requests, updateRequestStatus, addCoach, updateCoach, deleteCoach } = useCoaching();
+  const { coaches: coachesRaw, requests, updateRequestStatus, addCoach, updateCoach, deleteCoach } = useCoaching();
+  const coaches = coachesRaw ?? [];
   const { updateBooking } = useUser();
   const { allSportNames } = useAddons();
   const [activeTab, setActiveTab] = useState<Tab>("requests");
@@ -108,9 +128,61 @@ export function AdminCoachingManagement() {
   const [verifyingRequest, setVerifyingRequest] = useState<CoachingRequest | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ req: CoachingRequest; action: 'confirmed' | 'rejected' } | null>(null);
   const [appConfirm, setAppConfirm] = useState<{ app: CoachApplication; action: 'approved' | 'rejected' } | null>(null);
-  const [applications, setApplications] = useState<CoachApplication[]>(() => {
-    try { return JSON.parse(localStorage.getItem("jrc_coach_applications") || "[]"); } catch { return []; }
-  });
+  const [applications, setApplications] = useState<CoachApplication[]>([]);
+
+  const loadApplications = useCallback(async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/coach-applications`);
+      const data = await res.json().catch(() => []);
+      let list: CoachApplication[] = Array.isArray(data) ? data.map(mapApiToCoachApplication) : [];
+      if (list.length === 0 && typeof window !== "undefined") {
+        try {
+          const legacy = JSON.parse(localStorage.getItem("jrc_coach_applications") || "[]");
+          if (Array.isArray(legacy) && legacy.length > 0) {
+            for (const app of legacy as CoachApplication[]) {
+              const resM = await fetch(`${getApiBaseUrl()}/api/coach-applications`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  userId: app.userId,
+                  userName: app.userName,
+                  userEmail: app.userEmail,
+                  sport: app.sport,
+                  experience: app.experience,
+                  bio: app.bio,
+                  availability: app.availability,
+                  requestedRate: app.requestedRate,
+                  certifications: app.certifications,
+                }),
+              });
+              const created = await resM.json().catch(() => ({}));
+              const newId = (created as { id?: string }).id;
+              if (resM.ok && newId && (app.status === "approved" || app.status === "rejected")) {
+                await fetch(`${getApiBaseUrl()}/api/coach-applications/${encodeURIComponent(newId)}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: app.status }),
+                });
+              }
+            }
+            localStorage.removeItem("jrc_coach_applications");
+            const res2 = await fetch(`${getApiBaseUrl()}/api/coach-applications`);
+            const data2 = await res2.json().catch(() => []);
+            list = Array.isArray(data2) ? data2.map(mapApiToCoachApplication) : [];
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      setApplications(list);
+    } catch {
+      setApplications([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadApplications();
+  }, [loadApplications]);
   const [appFilter, setAppFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   // Form state
@@ -135,10 +207,12 @@ export function AdminCoachingManagement() {
   const openEditModal = (coach: Coach) => {
     setEditingCoach(coach);
     setName(coach.name); setSport(coach.sport);
-    setRate(coach.hourlyRate.toString()); setDesc(coach.description);
-    setDays(coach.availableDays); setIsAvail(coach.isAvailable);
+    setRate(String(coach.hourlyRate ?? '')); setDesc(coach.description ?? '');
+    setDays(Array.isArray(coach.availableDays) ? coach.availableDays : []);
+    setIsAvail(coach.isAvailable !== false);
     setDateMode('specific');
-    const [start, end] = coach.timeRange.split(' - ');
+    const range = coach.timeRange || '08:00 AM - 05:00 PM';
+    const [start, end] = range.split(' - ');
     // Convert 12h to 24h
     const to24 = (s: string) => {
       const match = s.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -158,10 +232,10 @@ export function AdminCoachingManagement() {
     return `${hr}:${String(m).padStart(2,'0')} ${ap}`;
   };
 
-  const handleSaveCoach = (e: React.FormEvent) => {
+  const handleSaveCoach = async (e: React.FormEvent) => {
     e.preventDefault();
     const timeRange = `${fmt12(startTime)} - ${fmt12(endTime)}`;
-    let availableDays = days;
+    let availableDays = Array.isArray(days) ? days : [];
     if (dateMode === 'recurring') {
       // Generate next 4 weeks of selected weekdays
       const result: string[] = [];
@@ -175,12 +249,21 @@ export function AdminCoachingManagement() {
       availableDays = result;
     }
     const data = { name, sport, hourlyRate: parseInt(rate) || 0, description: desc, availableDays, timeRange, isAvailable: isAvail };
-    if (editingCoach) updateCoach(editingCoach.id, data); else addCoach(data);
-    setShowCoachModal(false);
+    try {
+      if (editingCoach) await updateCoach(editingCoach.id, data);
+      else await addCoach(data);
+      setShowCoachModal(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not save coach";
+      alert(msg);
+    }
   };
 
   const handleDateSelect = (d: string) => {
-    setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+    setDays((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      return list.includes(d) ? list.filter((x) => x !== d) : [...list, d];
+    });
   };
 
   const INPUT = "w-full bg-[#131314] border border-white/10 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-[#F97316]";
@@ -305,7 +388,14 @@ export function AdminCoachingManagement() {
                     className="p-1.5 rounded-lg bg-[#252525] text-gray-400 hover:text-white hover:bg-[#333] transition-colors">
                     <Edit2 size={13} />
                   </button>
-                  <button onClick={() => deleteCoach(coach.id)}
+                  <button onClick={async () => {
+                    if (!confirm("Remove this coach from the directory?")) return;
+                    try {
+                      await deleteCoach(coach.id);
+                    } catch (err: unknown) {
+                      alert(err instanceof Error ? err.message : "Delete failed");
+                    }
+                  }}
                     className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
                     <Trash2 size={13} />
                   </button>
@@ -348,20 +438,20 @@ export function AdminCoachingManagement() {
                       </div>
                       <span className="text-gray-300" style={{ fontSize: 12 }}>{coach.timeRange}</span>
                     </div>
-                    {coach.availableDays.length > 0 && (
+                    {(coach.availableDays ?? []).length > 0 && (
                       <div className="flex items-start gap-2">
                         <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: `${sc}15` }}>
                           <Calendar size={12} style={{ color: sc }} />
                         </div>
                         <div className="flex flex-wrap gap-1">
-                          {coach.availableDays.slice(0, 3).map(d => (
+                          {(coach.availableDays ?? []).slice(0, 3).map(d => (
                             <span key={d} className="px-2 py-0.5 rounded-md font-black" style={{ fontSize: 10, background: 'rgba(255,255,255,0.06)', color: '#aaa' }}>
                               {isNaN(Date.parse(d)) ? d : new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </span>
                           ))}
-                          {coach.availableDays.length > 3 && (
+                          {(coach.availableDays ?? []).length > 3 && (
                             <span className="px-2 py-0.5 rounded-md font-black" style={{ fontSize: 10, background: `${sc}20`, color: sc }}>
-                              +{coach.availableDays.length - 3}
+                              +{(coach.availableDays ?? []).length - 3}
                             </span>
                           )}
                         </div>
@@ -396,7 +486,7 @@ export function AdminCoachingManagement() {
                 {f} {f === "all" ? `(${applications.length})` : `(${applications.filter(a => a.status === f).length})`}
               </button>
             ))}
-            <button onClick={() => setApplications(JSON.parse(localStorage.getItem("jrc_coach_applications") || "[]"))}
+            <button type="button" onClick={() => void loadApplications()}
               className="ml-auto px-3 py-1.5 rounded-xl border font-black text-gray-400 hover:text-white transition-all"
               style={{ fontSize: 12, background: "#1E1E1F", borderColor: "rgba(255,255,255,0.1)" }}>
               Refresh
@@ -621,11 +711,11 @@ export function AdminCoachingManagement() {
 
                     {dateMode === 'specific' && (
                       <div>
-                        <label className="block text-gray-500 mb-2 font-black" style={{ fontSize: 10, letterSpacing: 0.5 }}>SELECT AVAILABLE DATES ({days.length} selected)</label>
-                        <MiniDatePicker onSelect={handleDateSelect} selected={days} />
-                        {days.length > 0 && (
+                        <label className="block text-gray-500 mb-2 font-black" style={{ fontSize: 10, letterSpacing: 0.5 }}>SELECT AVAILABLE DATES ({(days ?? []).length} selected)</label>
+                        <MiniDatePicker onSelect={handleDateSelect} selected={days ?? []} />
+                        {(days ?? []).length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
-                            {days.slice(0, 5).map(d => (
+                            {(days ?? []).slice(0, 5).map(d => (
                               <div key={d} className="flex items-center gap-1 bg-[#252525] rounded-lg px-2 py-1">
                                 <span className="text-gray-300" style={{ fontSize: 10 }}>{new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                 <button type="button" onClick={() => handleDateSelect(d)} className="text-gray-600 hover:text-red-400 transition-colors">
@@ -633,7 +723,7 @@ export function AdminCoachingManagement() {
                                 </button>
                               </div>
                             ))}
-                            {days.length > 5 && <span className="text-gray-500 py-1" style={{ fontSize: 11 }}>+{days.length - 5} more</span>}
+                            {(days ?? []).length > 5 && <span className="text-gray-500 py-1" style={{ fontSize: 11 }}>+{(days ?? []).length - 5} more</span>}
                           </div>
                         )}
                       </div>
@@ -682,14 +772,36 @@ export function AdminCoachingManagement() {
                 <button onClick={() => setAppConfirm(null)}
                   className="flex-1 py-3 rounded-xl bg-[#252525] text-gray-300 font-black hover:bg-[#2e2e2e] transition-colors border border-white/5"
                   style={{ fontSize: 13 }}>Cancel</button>
-                <button onClick={() => {
-                  if (appConfirm.action === 'approved') {
-                    addCoach({ name: appConfirm.app.userName, email: appConfirm.app.userEmail, sport: appConfirm.app.sport, hourlyRate: appConfirm.app.requestedRate || 800, description: appConfirm.app.bio, availableDays: appConfirm.app.availability || [], timeRange: '08:00 AM - 06:00 PM', isAvailable: true });
+                <button type="button" onClick={async () => {
+                  try {
+                    if (appConfirm.action === 'approved') {
+                      await addCoach({
+                        name: appConfirm.app.userName,
+                        email: appConfirm.app.userEmail,
+                        sport: appConfirm.app.sport,
+                        hourlyRate: appConfirm.app.requestedRate || 800,
+                        description: appConfirm.app.bio,
+                        availableDays: appConfirm.app.availability || [],
+                        timeRange: '08:00 AM - 06:00 PM',
+                        isAvailable: true,
+                      });
+                    }
+                    const patchRes = await fetch(
+                      `${getApiBaseUrl()}/api/coach-applications/${encodeURIComponent(appConfirm.app.id)}`,
+                      {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ status: appConfirm.action }),
+                      },
+                    );
+                    const patchBody = await patchRes.json().catch(() => ({}));
+                    if (!patchRes.ok) throw new Error((patchBody as { error?: string }).error || "Could not update application");
+                    const mapped = mapApiToCoachApplication(patchBody as Record<string, unknown>);
+                    setApplications((prev) => prev.map((a) => (a.id === appConfirm.app.id ? mapped : a)));
+                    setAppConfirm(null);
+                  } catch (err: unknown) {
+                    alert(err instanceof Error ? err.message : 'Could not approve application');
                   }
-                  const updated = applications.map(a => a.id === appConfirm.app.id ? { ...a, status: appConfirm.action } : a);
-                  setApplications(updated);
-                  localStorage.setItem('jrc_coach_applications', JSON.stringify(updated));
-                  setAppConfirm(null);
                 }}
                   className="flex-1 py-3 rounded-xl text-white font-black transition-all hover:brightness-110"
                   style={{ fontSize: 13, background: appConfirm.action === 'approved' ? 'linear-gradient(135deg,#22c55e,#16a34a)' : 'linear-gradient(135deg,#ef4444,#dc2626)' }}>

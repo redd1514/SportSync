@@ -1,6 +1,5 @@
 import { useState } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/apiBase';
 
 export const useFacilityAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -10,7 +9,7 @@ export const useFacilityAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}${url}`, {
+      const response = await fetch(`${getApiBaseUrl()}${url}`, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
       });
@@ -63,7 +62,7 @@ export const useFacilityAPI = () => {
 
   const getFacilityInfo = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/facilities`);
+      const response = await fetch(`${getApiBaseUrl()}/api/facilities`);
       if (!response.ok) throw new Error('Failed to fetch facility info');
       return await response.json();
     } catch (err) {
@@ -79,7 +78,7 @@ export const useFacilityAPI = () => {
 
   const getCourtStatuses = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/facilities/courts/status`);
+      const response = await fetch(`${getApiBaseUrl()}/api/facilities/courts/status`);
       if (!response.ok) throw new Error('Failed to fetch court statuses');
       return await response.json();
     } catch (err) {

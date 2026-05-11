@@ -1,0 +1,170 @@
+{
+  "name": "JRC SportSync",
+  "short_name": "SportSync",
+  "description": "Sports facility reservation and management system. Book courts, fields, and facilities with ease.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#020617",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "categories": ["sports", "productivity"],
+
+  "icons": [
+    {
+      "src": "/pwa-icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-192x192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/icon-512x512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+
+  "screenshots": [
+    {
+      "src": "/pwa-screenshots/screenshot-narrow-1.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Home screen"
+    },
+    {
+      "src": "/pwa-screenshots/screenshot-narrow-2.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Booking screen"
+    },
+    {
+      "src": "/pwa-screenshots/screenshot-wide-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Home screen desktop"
+    },
+    {
+      "src": "/pwa-screenshots/screenshot-wide-2.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Booking screen desktop"
+    }
+  ],
+
+  "shortcuts": [
+    {
+      "name": "View My Bookings",
+      "short_name": "Bookings",
+      "description": "View and manage your sports facility bookings",
+      "url": "/my-bookings?utm_source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-icons/shortcut-bookings-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "/pwa-icons/shortcut-bookings-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Make a New Booking",
+      "short_name": "New Booking",
+      "description": "Create a new sports facility booking",
+      "url": "/booking/new?utm_source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-icons/shortcut-new-booking-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        },
+        {
+          "src": "/pwa-icons/shortcut-new-booking-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "View Coaches",
+      "short_name": "Coaches",
+      "description": "Browse available sports coaches",
+      "url": "/coaches?utm_source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-icons/shortcut-coaches-96.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+
+  "share_target": {
+    "action": "/api/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

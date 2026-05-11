@@ -1,5 +1,8 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { SPORT_ADDONS as INITIAL_SPORT_ADDONS, AddOn } from "../components/sportsData";
+import { fetchAppData, putAppData } from "../utils/appDataClient";
+
+const SPORT_ADDONS_KV_KEY = "sport_addons_v1";
 
 export interface SportMeta {
   name: string;
@@ -26,11 +29,63 @@ interface AddonsContextType {
 
 const AddonsContext = createContext<AddonsContextType | null>(null);
 
+function mergeAddonsFromRemote(
+  remote: Record<string, AddOn[]>,
+): Record<string, AddOn[]> {
+  const merged: Record<string, AddOn[]> = { ...INITIAL_SPORT_ADDONS };
+  for (const k of Object.keys(merged)) {
+    if (remote[k] && Array.isArray(remote[k])) merged[k] = remote[k];
+  }
+  for (const k of Object.keys(remote)) {
+    if (!merged[k]) merged[k] = remote[k];
+  }
+  return merged;
+}
+
 export function AddonsProvider({ children }: { children: ReactNode }) {
   const [addonsBySport, setAddonsBySport] = useState<Record<string, AddOn[]>>(INITIAL_SPORT_ADDONS);
   const [customSports, setCustomSports] = useState<SportMeta[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [kvReady, setKvReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const remote = await fetchAppData<{ addonsBySport?: Record<string, AddOn[]>; customSports?: SportMeta[] }>(
+          SPORT_ADDONS_KV_KEY,
+        );
+        if (cancelled) return;
+        if (remote && typeof remote.addonsBySport === "object" && remote.addonsBySport !== null) {
+          setAddonsBySport(mergeAddonsFromRemote(remote.addonsBySport));
+        }
+        if (remote && Array.isArray(remote.customSports)) {
+          setCustomSports(remote.customSports);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load add-ons");
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          setKvReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!kvReady) return;
+    const t = window.setTimeout(() => {
+      void putAppData(SPORT_ADDONS_KV_KEY, { addonsBySport, customSports });
+    }, 650);
+    return () => window.clearTimeout(t);
+  }, [addonsBySport, customSports, kvReady]);
 
   const updateAddon = (sport: string, id: string, data: Partial<AddOn>) => {
     setAddonsBySport(prev => {

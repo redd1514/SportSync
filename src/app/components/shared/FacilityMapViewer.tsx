@@ -11,6 +11,7 @@ import { getLocalDateString } from '../../utils/date';
 import { useFacilityMap, getSportMapColor, LiveStatus } from '../../contexts/FacilityMapContext';
 import { useUser, Booking } from '../../contexts/UserContext';
 import { useAddons } from '../../contexts/AddonsContext';
+import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { SPORTS_INFO, AddOn } from '../sportsData';
 import { SportIcon } from '../SportIcons';
 
@@ -21,6 +22,17 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 function genRefCode(): string {
   return `JRC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+function addDurationToTime(startTime: string, durationHours: number): string {
+  const parts = startTime.split(':');
+  const h = parseInt(parts[0] || '0', 10);
+  const m = parseInt(parts[1] || '0', 10);
+  const totalMinutes = h * 60 + m + durationHours * 60;
+  const wrapped = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const eh = Math.floor(wrapped / 60);
+  const em = wrapped % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
 }
 
 const STATUS_COLORS: Record<LiveStatus, { fill: string; stroke: string; label: string }> = {
@@ -390,7 +402,8 @@ interface BookingModalProps {
     court: string; sport: string; date: string; time: string; duration: number;
     addOns: string; paymentMethod: string; refCode: string;
     customerName?: string; customerPhone?: string; amount: number;
-  }) => void;
+    addonIds: string[];
+  }) => void | Promise<void>;
   initialDate?: string;
   initialTime?: string;
 }
@@ -460,13 +473,13 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const handleTimeChange = (t: string) => { setTime(t); setDuration(0); setEndHour(null); };
   const handleDurationSelect = (dur: number, endH: number) => { setDuration(dur); setEndHour(endH); };
 
-  const doConfirm = () => {
+  const doConfirm = async () => {
     const addOnLabels = Array.from(selectedAddons).map(id => {
       const a = sportAddons.find(a => a.id === id);
       if (!a) return id;
       return (a as any).perHour ? `${a.label} (x${duration}h)` : a.label;
     }).join(', ');
-    onConfirm({
+    await onConfirm({
       court: courtName, sport, date, time, duration,
       addOns: [addOnLabels, mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
       paymentMethod: mode === 'staff' ? 'cash' : 'gcash',
@@ -474,10 +487,11 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
       customerName: mode === 'staff' ? customerName : undefined,
       customerPhone: mode === 'staff' ? customerPhone : undefined,
       amount: total,
+      addonIds: Array.from(selectedAddons),
     });
   };
 
-  const goNext = () => {
+  const goNext = async () => {
     setError('');
     if (isWalkIn && !customerName.trim()) { setError('Please enter the customer name.'); return; }
     if (isDetails) {
@@ -485,7 +499,14 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
       if (!time) { setError('Please select a start time.'); return; }
       if (!duration) { setError('Please select a session duration.'); return; }
     }
-    if (isReview && mode === 'staff') doConfirm();
+    if (isReview && mode === 'staff') {
+      try {
+        await doConfirm();
+      } catch (e: any) {
+        setError(e?.message || 'Could not save booking.');
+        return;
+      }
+    }
     setStep(s => s + 1);
   };
   const goPrev = () => { setError(''); setStep(s => Math.max(0, s - 1)); };
@@ -837,7 +858,15 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                 <GCashPaymentSimulator
                   amount={total}
                   refCode={refCode.current}
-                  onSuccess={() => { doConfirm(); setStep(doneStep); }}
+                  onSuccess={async () => {
+                    setError('');
+                    try {
+                      await doConfirm();
+                      setStep(doneStep);
+                    } catch (e: any) {
+                      setError(e?.message || 'Could not save booking. Please try again.');
+                    }
+                  }}
                   onCancel={goPrev}
                 />
               </motion.div>
@@ -946,6 +975,7 @@ interface FacilityMapViewerProps {
 export function FacilityMapViewer({ mode, compact = false, prefill }: FacilityMapViewerProps) {
   const { maps, getCourtLiveStatus } = useFacilityMap();
   const { bookings, addBooking, user, calcCourtPrice } = useUser();
+  const { createBooking } = useBookingAPI();
 
   const publishedMaps = maps.filter(m => m.isPublished);
   const [selectedMapIdx, setSelectedMapIdx] = useState(0);
@@ -1135,13 +1165,42 @@ export function FacilityMapViewer({ mode, compact = false, prefill }: FacilityMa
     });
   };
 
-  const handleConfirmBooking = (details: { court: string; sport: string; date: string; time: string; duration: number; addOns: string; paymentMethod: string; refCode: string; customerName?: string; customerPhone?: string; amount: number }) => {
+  const handleConfirmBooking = async (details: {
+    court: string; sport: string; date: string; time: string; duration: number;
+    addOns: string; paymentMethod: string; refCode: string;
+    customerName?: string; customerPhone?: string; amount: number;
+    addonIds: string[];
+  }) => {
+    const uid = user?.id;
+    if (!uid) {
+      throw new Error('Sign in to complete a booking.');
+    }
+    const end_time = addDurationToTime(details.time, details.duration);
+    const response = await createBooking({
+      user_id: uid,
+      court_id: details.court,
+      booking_date: details.date,
+      start_time: details.time,
+      end_time,
+      addons: details.addonIds?.length ? details.addonIds : undefined,
+      status: 'confirmed',
+    });
     addBooking({
-      id: `BK${Date.now()}`, sport: details.sport, date: details.date, time: details.time, duration: details.duration,
-      court: details.court, status: 'confirmed', amount: details.amount, paymentStatus: 'paid',
-      createdAt: new Date().toISOString(),
+      id: response.id,
+      sport: details.sport,
+      date: details.date,
+      time: details.time,
+      duration: details.duration,
+      court: details.court,
+      status: 'confirmed',
+      amount: response.total_price ?? details.amount,
+      paymentStatus: 'paid',
+      createdAt: response.created_at || new Date().toISOString(),
       customerName: details.customerName || user?.name || 'Customer',
-      customerPhone: details.customerPhone, addOns: details.addOns, refCode: details.refCode, checkInStatus: 'none',
+      customerPhone: details.customerPhone,
+      addOns: details.addOns,
+      refCode: details.refCode,
+      checkInStatus: 'none',
     });
     setSuccessFlash(`${details.court} booked!`);
     setTimeout(() => setSuccessFlash(null), 4000);

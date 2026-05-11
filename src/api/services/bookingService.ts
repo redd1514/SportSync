@@ -1,5 +1,72 @@
 import { supabase } from './supabaseClient';
 import { BookingRequest, BookingResponse } from '../types';
+import { createHash } from 'crypto';
+
+const USE_MOCK_BOOKINGS = process.env.USE_MOCK_BOOKINGS === 'true';
+
+function toStableUuid(input: string): string {
+  const hex = createHash('sha256').update(input).digest('hex').slice(0, 32);
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20, 32)].join('-');
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function resolveUserRowId(userId: string): Promise<string> {
+  const normalizedAuthId = isUuid(userId) ? userId : toStableUuid(userId);
+
+  if (isUuid(userId)) {
+    const directMatch = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (directMatch.data?.id) return directMatch.data.id;
+  }
+
+  const authMatch = await supabase
+    .from('users')
+    .select('id')
+    .eq('auth_id', normalizedAuthId)
+    .maybeSingle();
+
+  if (authMatch.data?.id) return authMatch.data.id;
+
+  return userId;
+}
+
+async function resolveCourtRowId(courtIdOrName: string): Promise<string> {
+  const directMatch = await supabase
+    .from('courts')
+    .select('id')
+    .eq('id', courtIdOrName)
+    .maybeSingle();
+
+  if (directMatch.data?.id) return directMatch.data.id;
+
+  const nameMatch = await supabase
+    .from('courts')
+    .select('id')
+    .eq('name', courtIdOrName)
+    .maybeSingle();
+
+  if (nameMatch.data?.id) return nameMatch.data.id;
+
+  const normalized = courtIdOrName.trim().toLowerCase();
+  const inferredSport = normalized.replace(/\s+\d+$/, '');
+  const fallback = await supabase
+    .from('courts')
+    .select('id, name')
+    .limit(100);
+
+  const matched = fallback.data?.find((court: any) => {
+    const courtName = String(court.name || '').trim().toLowerCase();
+    return courtName === normalized || courtName.includes(inferredSport);
+  });
+  return matched?.id || courtIdOrName;
+}
 
 // Mock data for development - stored in memory for session
 let mockBookings: BookingResponse[] = [
@@ -26,10 +93,11 @@ export const bookingService = {
     endTime: string
   ): Promise<boolean> {
     try {
+      const resolvedCourtId = await resolveCourtRowId(courtId);
       const { data, error } = await supabase
         .from('bookings')
         .select('id')
-        .eq('court_id', courtId)
+        .eq('court_id', resolvedCourtId)
         .eq('booking_date', date)
         .in('status', ['pending', 'confirmed', 'checked_in'])
         .or(`and(start_time.gte.${startTime},start_time.lt.${endTime}),and(end_time.gt.${startTime},end_time.lte.${endTime})`);
@@ -37,18 +105,25 @@ export const bookingService = {
       if (error) throw error;
       return (data?.length ?? 0) === 0; // True if no conflicts
     } catch (e) {
-      // Return mock data for development
-      console.log('Using mock availability check');
-      return true;
+      console.error('checkAvailability error:', e);
+      if (USE_MOCK_BOOKINGS) {
+        console.log('Using mock availability check');
+        return true;
+      }
+      throw e;
     }
   },
 
   // Create a booking
   async createBooking(booking: BookingRequest): Promise<BookingResponse> {
     try {
+      const resolvedUserId = await resolveUserRowId(booking.user_id);
+      const resolvedCourtId = await resolveCourtRowId(booking.court_id);
+      const bookingId = crypto.randomUUID();
+
       // Check availability
       const isAvailable = await this.checkAvailability(
-        booking.court_id,
+        resolvedCourtId,
         booking.booking_date,
         booking.start_time,
         booking.end_time
@@ -59,13 +134,15 @@ export const bookingService = {
       }
 
       // Get hourly rate
-      const { data: rateData, error: rateError } = await supabase
+      const { data: rateRows, error: rateError } = await supabase
         .from('hourly_rates')
         .select('rate_per_hour')
-        .eq('court_id', booking.court_id)
-        .single();
+        .eq('court_id', resolvedCourtId)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       if (rateError) throw rateError;
+      const rateData = rateRows?.[0];
 
       // Calculate duration in hours
       const [startHour, startMin] = booking.start_time.split(':').map(Number);
@@ -91,81 +168,103 @@ export const bookingService = {
       const totalPrice = basePrice + addonsTotal;
 
       // Create booking
-      const { data, error } = await supabase
+      const rowStatus = booking.status ?? 'pending';
+      const { error: insertError } = await supabase
         .from('bookings')
         .insert([
           {
-            user_id: booking.user_id,
-            court_id: booking.court_id,
+            id: bookingId,
+            user_id: resolvedUserId,
+            court_id: resolvedCourtId,
             booking_date: booking.booking_date,
             start_time: booking.start_time,
             end_time: booking.end_time,
-            status: 'pending',
+            status: rowStatus,
             base_price: basePrice,
             total_price: totalPrice,
           },
-        ])
-        .select()
-        .single();
+        ]);
 
-      if (error) throw error;
-      return data as BookingResponse;
+      if (insertError) throw insertError;
+
+      const { data: createdBooking, error: fetchError } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', bookingId)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!createdBooking) {
+        throw new Error('Booking insert succeeded but no row was returned');
+      }
+
+      return createdBooking as BookingResponse;
     } catch (e) {
-      // Return mock booking for development
-      console.log('[Mock API] Using mock booking creation');
-      const mockBooking: BookingResponse = {
-        id: `b${Date.now()}`,
-        user_id: booking.user_id,
-        court_id: booking.court_id,
-        booking_date: booking.booking_date,
-        start_time: booking.start_time,
-        end_time: booking.end_time,
-        status: 'confirmed',
-        base_price: 450,
-        total_price: 450,
-        created_at: new Date().toISOString(),
-      };
-      // Add to mock bookings array for persistence during session
-      mockBookings.push(mockBooking);
-      console.log(`[Mock API] Added booking for user ${booking.user_id}, total bookings: ${mockBookings.length}`);
-      return mockBooking;
+      console.error('Create booking error:', e);
+      if (USE_MOCK_BOOKINGS) {
+        console.log('[Mock API] Using mock booking creation');
+        const mockBooking: BookingResponse = {
+          id: `b${Date.now()}`,
+          user_id: booking.user_id,
+          court_id: booking.court_id,
+          booking_date: booking.booking_date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          status: 'confirmed',
+          base_price: 450,
+          total_price: 450,
+          created_at: new Date().toISOString(),
+        };
+        // Add to mock bookings array for persistence during session
+        mockBookings.push(mockBooking);
+        console.log(`[Mock API] Added booking for user ${booking.user_id}, total bookings: ${mockBookings.length}`);
+        return mockBooking;
+      }
+      throw e;
     }
   },
 
   // Get user bookings
   async getUserBookings(userId: string): Promise<BookingResponse[]> {
     try {
+      const resolvedUserId = await resolveUserRowId(userId);
+
       const { data, error } = await supabase
         .from('bookings')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', resolvedUserId)
         .order('booking_date', { ascending: false });
 
       if (error) {
         throw error;
       }
-      // If Supabase returned data, use it; otherwise fall back to mock
       if (data && data.length > 0) {
         return data as BookingResponse[];
       }
-      // Fall through to mock data if empty
-      throw new Error('Using mock bookings');
-    } catch (e) {
-      // Return mock bookings for development (all created in session)
-      console.log(`[Mock API] Getting bookings for user: ${userId}`);
-      console.log(`[Mock API] Total mock bookings in memory: ${mockBookings.length}`);
-      const userBookings = mockBookings.filter(b => b.user_id === userId);
-      console.log(`[Mock API] Found ${userBookings.length} bookings for user ${userId}`);
-      if (userBookings.length === 0) {
-        console.log(`[Mock API] Available mock bookings by user:`);
-        const groupedByUser = mockBookings.reduce((acc: any, b) => {
-          if (!acc[b.user_id]) acc[b.user_id] = 0;
-          acc[b.user_id]++;
-          return acc;
-        }, {});
-        console.log(groupedByUser);
+      if (USE_MOCK_BOOKINGS) {
+        throw new Error('Using mock bookings');
       }
-      return userBookings;
+      return [];
+    } catch (e) {
+      console.error('GetUserBookings error:', e);
+      if (USE_MOCK_BOOKINGS) {
+        // Return mock bookings for development (all created in session)
+        console.log(`[Mock API] Getting bookings for user: ${userId}`);
+        console.log(`[Mock API] Total mock bookings in memory: ${mockBookings.length}`);
+        const userBookings = mockBookings.filter(b => b.user_id === userId);
+        console.log(`[Mock API] Found ${userBookings.length} bookings for user ${userId}`);
+        if (userBookings.length === 0) {
+          console.log(`[Mock API] Available mock bookings by user:`);
+          const groupedByUser = mockBookings.reduce((acc: any, b) => {
+            if (!acc[b.user_id]) acc[b.user_id] = 0;
+            acc[b.user_id]++;
+            return acc;
+          }, {});
+          console.log(groupedByUser);
+        }
+        return userBookings;
+      }
+      throw e;
     }
   },
 
@@ -183,6 +282,26 @@ export const bookingService = {
       console.log('Using mock booking cancellation');
       const booking = mockBookings.find(b => b.id === bookingId);
       if (booking) booking.status = 'cancelled';
+    }
+  },
+  // Get all bookings (admin)
+  async getAllBookings(): Promise<BookingResponse[]> {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, users!inner(full_name, email)')
+        .order('booking_date', { ascending: false })
+        .limit(500);
+
+      if (error) throw error;
+      return (data || []).map((b: any) => ({
+        ...b,
+        customer_name: b.users?.full_name || b.users?.email || null,
+      }));
+    } catch (e) {
+      console.error('GetAllBookings error:', e);
+      if (USE_MOCK_BOOKINGS) return mockBookings;
+      throw e;
     }
   },
 };

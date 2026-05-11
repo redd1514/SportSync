@@ -5,6 +5,8 @@ export interface BookingRequest {
   start_time: string;
   end_time: string;
   addons?: string[];
+  /** When omitted, server defaults to pending. */
+  status?: 'pending' | 'confirmed' | 'cancelled' | 'checked_in';
 }
 
 export interface BookingResponse {

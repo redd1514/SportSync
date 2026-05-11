@@ -1,6 +1,5 @@
 import { useState } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/apiBase';
 
 export const useStaffAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -10,7 +9,7 @@ export const useStaffAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}${url}`, {
+      const response = await fetch(`${getApiBaseUrl()}${url}`, {
         headers: { 'Content-Type': 'application/json' },
         ...options,
       });

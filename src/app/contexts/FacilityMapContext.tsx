@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 
 import { getLocalDateString } from '../utils/date';
+import { fetchAppData, putAppData } from '../utils/appDataClient';
 
 /* ─── Types ─────────────────────────────────────────────────────── */
 export interface CourtBlock {
@@ -110,28 +111,60 @@ const DEFAULT_DEMO_MAP: FacilityMap = {
 /* ─── Context ───────────────────────────────────────────────────── */
 const FacilityMapContext = createContext<FacilityMapContextType | undefined>(undefined);
 
+const FACILITY_MAPS_KV_KEY = 'facility_maps_v2';
+
 export function FacilityMapProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [maps, setMaps] = useState<FacilityMap[]>(() => {
-    try {
-      const saved = localStorage.getItem('jrc_facility_maps_v2');
-      if (saved) {
-        const parsed: FacilityMap[] = JSON.parse(saved);
-        // Always ensure the demo map exists (inject if missing)
-        const hasDemo = parsed.some(m => m.id === DEMO_MAP_ID);
-        if (!hasDemo) return [DEFAULT_DEMO_MAP, ...parsed];
-        return parsed;
-      }
-    } catch {}
-    return [DEFAULT_DEMO_MAP];
-  });
+  const [maps, setMaps] = useState<FacilityMap[]>([DEFAULT_DEMO_MAP]);
+  const [mapsBootstrapped, setMapsBootstrapped] = useState(false);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('jrc_facility_maps_v2', JSON.stringify(maps));
-    } catch {}
-  }, [maps]);
+    let cancelled = false;
+    (async () => {
+      setIsLoading(true);
+      try {
+        const remote = await fetchAppData<FacilityMap[]>(FACILITY_MAPS_KV_KEY);
+        if (cancelled) return;
+        if (Array.isArray(remote) && remote.length > 0) {
+          const hasDemo = remote.some((m) => m.id === DEMO_MAP_ID);
+          setMaps(hasDemo ? remote : [DEFAULT_DEMO_MAP, ...remote]);
+        } else {
+          try {
+            const saved = typeof window !== 'undefined' ? localStorage.getItem('jrc_facility_maps_v2') : null;
+            if (saved) {
+              const parsed: FacilityMap[] = JSON.parse(saved);
+              const hasDemo = parsed.some((m) => m.id === DEMO_MAP_ID);
+              const next = hasDemo ? parsed : [DEFAULT_DEMO_MAP, ...parsed];
+              setMaps(next);
+              await putAppData(FACILITY_MAPS_KV_KEY, next);
+              localStorage.removeItem('jrc_facility_maps_v2');
+            }
+          } catch {
+            /* keep default demo map */
+          }
+        }
+      } catch {
+        /* keep default */
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          setMapsBootstrapped(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapsBootstrapped) return;
+    const t = window.setTimeout(() => {
+      void putAppData(FACILITY_MAPS_KV_KEY, maps);
+    }, 650);
+    return () => window.clearTimeout(t);
+  }, [maps, mapsBootstrapped]);
 
   const createMap = useCallback((
     meta: { name: string; branch: string; location: string; canvasW: number; canvasH: number }

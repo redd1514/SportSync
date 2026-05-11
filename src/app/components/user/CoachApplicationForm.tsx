@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { GraduationCap, CheckCircle, X, Send, Award, Clock, DollarSign, Users, ChevronRight } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
+import { getApiBaseUrl } from "../../utils/apiBase";
 
 export interface CoachApplication {
   id: string;
@@ -55,25 +56,31 @@ export function CoachApplicationForm() {
 
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!sport || !bio || availability.length === 0) return;
-    const app: CoachApplication = {
-      id: `app-${Date.now()}`,
-      userId: user?.id || "guest",
-      userName: user?.name || "User",
-      userEmail: user?.email || "",
-      sport, experience, bio, availability,
-      requestedRate: parseInt(requestedRate) || 800,
-      certifications,
-      status: "pending",
-      submittedAt: new Date().toISOString(),
-    };
-    // Store in localStorage so admin can see it
-    const existing = JSON.parse(localStorage.getItem("jrc_coach_applications") || "[]");
-    existing.push(app);
-    localStorage.setItem("jrc_coach_applications", JSON.stringify(existing));
-    setSubmitted(true);
-    setStep(3);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/coach-applications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id || "guest",
+          userName: user?.name || "User",
+          userEmail: user?.email || "",
+          sport,
+          experience,
+          bio,
+          availability,
+          requestedRate: parseInt(requestedRate, 10) || 800,
+          certifications,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Could not submit application");
+      setSubmitted(true);
+      setStep(3);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not submit application");
+    }
   };
 
   const INPUT = `w-full rounded-xl px-4 py-3 text-sm border transition-colors focus:outline-none`;

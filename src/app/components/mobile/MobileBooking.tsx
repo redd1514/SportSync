@@ -503,7 +503,8 @@ export function MobileBooking() {
         booking_date: dateStr,
         start_time: startSlot,
         end_time: endLabel,
-        addons: addonsArray
+        addons: addonsArray,
+        status: "confirmed",
       });
 
       // Simulate GCash Gateway Processing
