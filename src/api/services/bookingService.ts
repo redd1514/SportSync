@@ -284,24 +284,31 @@ export const bookingService = {
       if (booking) booking.status = 'cancelled';
     }
   },
-  // Get all bookings (admin)
-  async getAllBookings(): Promise<BookingResponse[]> {
-    try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*, users!inner(full_name, email)')
-        .order('booking_date', { ascending: false })
-        .limit(500);
 
-      if (error) throw error;
-      return (data || []).map((b: any) => ({
-        ...b,
-        customer_name: b.users?.full_name || b.users?.email || null,
-      }));
+  // Use their function signature (with filters) but your database logic
+async getAllBookings(filters?: { date?: string; start?: string; end?: string }) {
+    try {
+        let query = supabase
+            .from('bookings')
+            .select('*, users!inner(full_name, email)')
+            .order('booking_date', { ascending: false })
+            .limit(500);
+
+        // Apply their filters to your Supabase query
+        if (filters?.date) {
+            query = query.eq('booking_date', filters.date);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+        return (data || []).map((b: any) => ({
+            ...b,
+            customer_name: b.users?.full_name || b.users?.email || null,
+        }));
     } catch (e) {
-      console.error('GetAllBookings error:', e);
-      if (USE_MOCK_BOOKINGS) return mockBookings;
-      throw e;
+        console.error('[bookingService] getAllBookings', e);
+        return [];
     }
-  },
+}
 };

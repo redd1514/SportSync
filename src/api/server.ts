@@ -8,6 +8,7 @@ import { coachService } from './services/coachService.ts';
 import paymentsRouter from './routes/payments.ts';
 import usersRouter from './routes/users.ts';
 import adminRouter from './routes/admin.ts';
+import staffRouter from './routes/staff.ts';
 import facilitiesRouter from './routes/facilities.ts';
 import appDataRouter from './routes/appData.ts';
 import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
@@ -36,6 +37,8 @@ app.get('/', (c) => c.json({
     appData: '/api/app-data',
     payments: '/api/payments',
     users: '/api/users',
+    admin: '/api/admin',
+    staff: '/api/staff'
     admin: '/api/admin',
     facilities: '/api/facilities',
   }
@@ -110,6 +113,7 @@ app.route('/api/app-data', appDataRouter);
 app.route('/api/payments', paymentsRouter);
 app.route('/api/users', usersRouter);
 app.route('/api/admin', adminRouter);
+app.route('/api/staff', staffRouter);
 app.route('/api/facilities', facilitiesRouter);
 
 // 404 handler

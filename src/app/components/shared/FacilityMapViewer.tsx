@@ -5,11 +5,15 @@ import {
   CalendarDays, Clock, ChevronLeft, ChevronRight,
   Check, User, Zap, AlertCircle, Smartphone, QrCode,
   Receipt, Mail, ArrowRight, ChevronDown, CreditCard,
+  Download,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { getLocalDateString } from '../../utils/date';
+import { genRefCode } from '../../../shared/ticketRef';
+import { downloadTicketQrPng } from '../../../shared/qrDownload';
 import { useFacilityMap, getSportMapColor, LiveStatus } from '../../contexts/FacilityMapContext';
 import { useUser, Booking } from '../../contexts/UserContext';
+import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { useAddons } from '../../contexts/AddonsContext';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { SPORTS_INFO, AddOn } from '../sportsData';
@@ -192,7 +196,7 @@ function TimeSlotGrid({
           >
             <span className="font-black leading-tight" style={{
               fontSize: 13,
-              color: sel ? '#000' : end ? accentColor : ranged ? accentColor : booked ? '#2a2a2a' : 'white',
+              color: sel ? 'white' : end ? accentColor : ranged ? accentColor : booked ? '#2a2a2a' : 'white',
               textDecoration: booked ? 'line-through' : 'none',
             }}>
               {`${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`}
@@ -447,6 +451,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [error, setError]           = useState('');
   const refCode = useRef(genRefCode());
+  const [qrDownloadBusy, setQrDownloadBusy] = useState(false);
 
   /* Derived */
   const bookedRanges = useMemo(() => courtBookings
@@ -472,6 +477,19 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
 
   const handleTimeChange = (t: string) => { setTime(t); setDuration(0); setEndHour(null); };
   const handleDurationSelect = (dur: number, endH: number) => { setDuration(dur); setEndHour(endH); };
+  const handlePHPhone = (raw: string) => {
+    const digits = raw.replace(/\D/g, '');
+    // Force "09" prefix, then limit to 11 digits total.
+    let normalized = digits;
+    if (normalized.startsWith('639')) normalized = '0' + normalized.slice(2); // 639xx... -> 09xx...
+    if (!normalized.startsWith('09')) {
+      // If user typed starting digit(s), coerce into 09XXXXXXXXX
+      const tail = normalized.startsWith('9') ? normalized.slice(1) : normalized;
+      normalized = '09' + tail;
+    }
+    normalized = normalized.slice(0, 11);
+    setCustomerPhone(normalized);
+  };
 
   const doConfirm = async () => {
     const addOnLabels = Array.from(selectedAddons).map(id => {
@@ -598,12 +616,34 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               <div className="bg-white rounded-3xl p-5 flex flex-col items-center gap-3 w-full">
                 <p className="text-gray-600 font-black" style={{ fontSize: 10, letterSpacing: 1.5 }}>SHOW AT FRONT DESK TO CHECK IN</p>
                 <div style={{ background: 'white', padding: 4, borderRadius: 12 }}>
-                  <QRCodeSVG value={JSON.stringify({ ref: refCode.current, court: courtName, date, time })} size={160} level="H" includeMargin={false} />
+                  <QRCodeSVG value={refCode.current} size={160} level="H" includeMargin={false} />
                 </div>
                 <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-4 py-2">
                   <QrCode size={13} className="text-gray-500" />
                   <span className="text-gray-800 font-black" style={{ fontSize: 14, letterSpacing: 1.5 }}>{refCode.current}</span>
                 </div>
+                <button
+                  type="button"
+                  disabled={qrDownloadBusy}
+                  onClick={async () => {
+                    setQrDownloadBusy(true);
+                    try {
+                      await downloadTicketQrPng({
+                        value: refCode.current,
+                        fileBaseName: refCode.current.replace(/\s+/g, '_'),
+                      });
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setQrDownloadBusy(false);
+                    }
+                  }}
+                  className="w-full py-2.5 rounded-xl font-black text-gray-800 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={{ fontSize: 13 }}
+                >
+                  <Download size={15} />
+                  {qrDownloadBusy ? 'Preparing…' : 'Download QR image'}
+                </button>
               </div>
               <div className="w-full bg-[#111] rounded-2xl border border-white/8 overflow-hidden">
                 <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2" style={{ background: `${accentColor}08` }}>
@@ -648,7 +688,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               </div>
               <div>
                 <label className="text-gray-400 block mb-1.5" style={{ fontSize: 12, fontWeight: 700 }}>PHONE NUMBER</label>
-                <input value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="+63 9XX XXX XXXX" type="tel"
+                <input value={customerPhone} onChange={e => handlePHPhone(e.target.value)} placeholder="09XX XXX XXXX" type="tel" maxLength={11}
                   className="w-full rounded-xl px-4 py-3 text-white focus:outline-none"
                   style={{ fontSize: 14, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }} />
               </div>
@@ -970,16 +1010,31 @@ interface FacilityMapViewerProps {
   mode: 'customer' | 'staff';
   compact?: boolean;
   prefill?: { sport: string; date: string; time: string };
+  selectedMapId?: string | null;
+  onMapChange?: (mapId: string | null) => void;
 }
 
-export function FacilityMapViewer({ mode, compact = false, prefill }: FacilityMapViewerProps) {
+export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange }: FacilityMapViewerProps) {
   const { maps, getCourtLiveStatus } = useFacilityMap();
   const { bookings, addBooking, user, calcCourtPrice } = useUser();
   const { createBooking } = useBookingAPI();
+  const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi } = useUser();
+  const { createDeskBooking } = useBookingAPI();
 
   const publishedMaps = maps.filter(m => m.isPublished);
   const [selectedMapIdx, setSelectedMapIdx] = useState(0);
   const activeMap = publishedMaps[selectedMapIdx] ?? null;
+  const isControlledMap = selectedMapId !== undefined;
+
+  useEffect(() => {
+    if (!isControlledMap) return;
+    if (!selectedMapId) {
+      if (selectedMapIdx !== 0) setSelectedMapIdx(0);
+      return;
+    }
+    const idx = publishedMaps.findIndex(m => m.id === selectedMapId);
+    if (idx >= 0 && idx !== selectedMapIdx) setSelectedMapIdx(idx);
+  }, [isControlledMap, selectedMapId, publishedMaps, selectedMapIdx]);
 
   useEffect(() => {
     if (selectedMapIdx >= publishedMaps.length && publishedMaps.length > 0) setSelectedMapIdx(0);
@@ -1202,6 +1257,48 @@ export function FacilityMapViewer({ mode, compact = false, prefill }: FacilityMa
       refCode: details.refCode,
       checkInStatus: 'none',
     });
+  const handleConfirmBooking = async (details: { court: string; sport: string; date: string; time: string; duration: number; addOns: string; paymentMethod: string; refCode: string; customerName?: string; customerPhone?: string; amount: number }) => {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
+    const payload = {
+      court: details.court,
+      sport: details.sport,
+      booking_date: details.date,
+      start_time: details.time,
+      duration_hours: details.duration,
+      total_price: details.amount,
+      customer_name: details.customerName || user?.name || 'Customer',
+      customer_phone: details.customerPhone,
+      payment_method: details.paymentMethod === 'gcash' ? 'gcash' : 'cash',
+      source: mode === 'staff' ? 'map_staff' : 'map_customer',
+      ref_code: details.refCode,
+      add_ons: details.addOns,
+      staff_id: staffId,
+    };
+    try {
+      const out = await createDeskBooking(payload);
+      addBooking(out.booking as Booking);
+      await refreshBookingsFromApi();
+    } catch (err) {
+      console.error('[FacilityMapViewer] desk booking failed, using local copy', err);
+      addBooking({
+        id: `BK${Date.now()}`,
+        sport: details.sport,
+        date: details.date,
+        time: details.time,
+        duration: details.duration,
+        court: details.court,
+        status: 'confirmed',
+        amount: details.amount,
+        paymentStatus: 'paid',
+        createdAt: new Date().toISOString(),
+        customerName: details.customerName || user?.name || 'Customer',
+        customerPhone: details.customerPhone,
+        addOns: details.addOns,
+        refCode: details.refCode,
+        checkInStatus: 'none',
+      });
+    }
     setSuccessFlash(`${details.court} booked!`);
     setTimeout(() => setSuccessFlash(null), 4000);
   };
@@ -1235,7 +1332,10 @@ export function FacilityMapViewer({ mode, compact = false, prefill }: FacilityMa
         <div className="flex items-center gap-1 px-3 py-2 bg-[#111] border-b border-white/8 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           <Building2 size={11} className="text-gray-600 flex-shrink-0 mr-1" />
           {publishedMaps.map((m, i) => (
-            <button key={m.id} onClick={() => setSelectedMapIdx(i)}
+            <button key={m.id} onClick={() => {
+              setSelectedMapIdx(i);
+              onMapChange?.(m.id);
+            }}
               className="flex items-center gap-1.5 px-3 py-1 rounded-lg font-black flex-shrink-0 transition-all"
               style={{
                 fontSize: 11,

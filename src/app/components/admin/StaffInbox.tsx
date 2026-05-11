@@ -7,6 +7,14 @@ import { useAnnouncements } from '../../contexts/AnnouncementsContext';
 const SURF = '#1E1E1F';
 const BORDER = 'rgba(255,255,255,0.06)';
 const TS = '#9294A0';
+const DUMMY_CANCELLATIONS = [
+  { id: 'demo-cx-1', customerName: 'Patricia Gomez', date: '2026-05-12', time: '19:00', court: 'Basketball 1', reason: 'Team captain is sick', isReal: false },
+  { id: 'demo-cx-2', customerName: 'Eli Ramos', date: '2026-05-12', time: '20:00', court: 'Badminton 2', reason: 'Transportation issue from office', isReal: false },
+];
+const DUMMY_COACHING = [
+  { id: 'demo-coach-1', userName: 'Bea Villanueva', coachName: 'Coach Marco', sport: 'Volleyball', requestedDate: '2026-05-13', requestedTime: '17:00', isReal: false },
+  { id: 'demo-coach-2', userName: 'Luis Javier', coachName: 'Coach Renz', sport: 'Badminton', requestedDate: '2026-05-14', requestedTime: '09:00', isReal: false },
+];
 
 type InboxSubTab = 'cancellations' | 'coaching' | 'announcements';
 
@@ -23,6 +31,8 @@ export function StaffInbox() {
   const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '', type: 'promotion' as const });
   const [announceSent, setAnnounceSent] = useState('');
   const [confirmAction, setConfirmAction] = useState<{ type: 'cancellation' | 'coaching'; id: string; approved: boolean } | null>(null);
+  const [dummyCancellations, setDummyCancellations] = useState(DUMMY_CANCELLATIONS);
+  const [dummyCoaching, setDummyCoaching] = useState(DUMMY_COACHING);
 
   const fetchInboxData = async () => {
     try {
@@ -47,16 +57,26 @@ export function StaffInbox() {
   const handleApprove = async () => {
     if (!confirmAction) return;
     if (confirmAction.type === 'cancellation') {
-      if (confirmAction.approved) {
-        await approveCancellationRequest(confirmAction.id);
+      const isDummy = dummyCancellations.some(d => d.id === confirmAction.id);
+      if (isDummy) {
+        setDummyCancellations(prev => prev.filter(d => d.id !== confirmAction.id));
       } else {
-        await rejectCancellationRequest(confirmAction.id, "Staff declined your request.");
+        if (confirmAction.approved) {
+          await approveCancellationRequest(confirmAction.id);
+        } else {
+          await rejectCancellationRequest(confirmAction.id, "Staff declined your request.");
+        }
       }
     } else if (confirmAction.type === 'coaching') {
-      if (confirmAction.approved) {
-        await verifyCoachingPayment(confirmAction.id);
+      const isDummy = dummyCoaching.some(d => d.id === confirmAction.id);
+      if (isDummy) {
+        setDummyCoaching(prev => prev.filter(d => d.id !== confirmAction.id));
       } else {
-        await rejectCoachingPayment(confirmAction.id, "Payment verification failed.");
+        if (confirmAction.approved) {
+          await verifyCoachingPayment(confirmAction.id);
+        } else {
+          await rejectCoachingPayment(confirmAction.id, "Payment verification failed.");
+        }
       }
     }
     setConfirmAction(null);
@@ -72,14 +92,16 @@ export function StaffInbox() {
     setTimeout(() => setAnnounceSent(''), 3000);
   };
 
-  const pendingCancellations = requests.cancellations.length;
-  const pendingCoaching = requests.coaching.length;
+  const visibleCancellations = requests.cancellations.length > 0 ? requests.cancellations : dummyCancellations;
+  const visibleCoaching = requests.coaching.length > 0 ? requests.coaching : dummyCoaching;
+  const pendingCancellations = visibleCancellations.length;
+  const pendingCoaching = visibleCoaching.length;
 
   return (
-    <div className="h-full flex flex-col md:flex-row overflow-hidden pb-[80px] md:pb-0" style={{ background: '#131314' }}>
+    <div className="h-full flex flex-col md:flex-row overflow-hidden pb-[80px] md:pb-0" style={{ background: 'linear-gradient(180deg,#12151E,#101218)' }}>
       
       {/* SIDEBAR FOR DESKTOP */}
-      <div className="w-full md:w-64 flex-shrink-0 border-b md:border-b-0 md:border-r overflow-y-auto" style={{ borderColor: BORDER, background: SURF }}>
+      <div className="w-full md:w-64 flex-shrink-0 border-b md:border-b-0 md:border-r overflow-y-auto" style={{ borderColor: 'rgba(255,255,255,0.1)', background: '#161A22' }}>
         <div className="p-5">
           <h2 className="text-white font-black" style={{ fontSize: 24 }}>Front Desk Inbox</h2>
           <p style={{ color: TS, fontSize: 13, marginTop: 4 }}>Review pending requests from users and coaches</p>
@@ -125,8 +147,8 @@ export function StaffInbox() {
                     <p style={{ color: TS, fontSize: 13 }}>No pending cancellation requests</p>
                   </div>
                 ) : (
-                  requests.cancellations.map((r: any) => (
-                    <div key={r.id} className="p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4" style={{ background: SURF, borderColor: BORDER }}>
+                  visibleCancellations.map((r: any) => (
+                    <motion.div key={r.id} whileHover={{ y: -2 }} className="p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4" style={{ background: '#1A1E29', borderColor: 'rgba(255,255,255,0.1)' }}>
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white font-black"
                           style={{ background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', fontSize: 13 }}>
@@ -136,6 +158,7 @@ export function StaffInbox() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-white font-black" style={{ fontSize: 15 }}>{r.customerName || 'User Request'}</span>
                             <span className="px-2 py-0.5 rounded text-yellow-400 font-bold" style={{ fontSize: 10, background: 'rgba(250,204,21,0.1)' }}>PENDING</span>
+                            {!r.isReal && <span className="px-2 py-0.5 rounded text-blue-300 font-bold" style={{ fontSize: 10, background: 'rgba(96,165,250,0.15)' }}>DEMO</span>}
                           </div>
                           <p style={{ color: TS, fontSize: 13 }}>{r.date} · {r.time} · {r.court}</p>
                           <p className="mt-2 text-white italic" style={{ fontSize: 13 }}>Reason: "{r.reason}"</p>
@@ -163,7 +186,7 @@ export function StaffInbox() {
                           </>
                         )}
                       </div>
-                    </div>
+                    </motion.div>
                   ))
                 )}
               </motion.div>
@@ -178,8 +201,8 @@ export function StaffInbox() {
                     <p style={{ color: TS, fontSize: 13 }}>No pending coaching verifications</p>
                   </div>
                 ) : (
-                  requests.coaching.map((r: any) => (
-                    <div key={r.id} className="p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4" style={{ background: SURF, borderColor: BORDER }}>
+                  visibleCoaching.map((r: any) => (
+                    <motion.div key={r.id} whileHover={{ y: -2 }} className="p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4" style={{ background: '#1A1E29', borderColor: 'rgba(255,255,255,0.1)' }}>
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-white font-black"
                           style={{ background: 'linear-gradient(135deg,#60a5fa,#3b82f6)', fontSize: 13 }}>
@@ -189,6 +212,7 @@ export function StaffInbox() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-white font-black" style={{ fontSize: 15 }}>{r.userName}</span>
                             <span className="px-2 py-0.5 rounded text-blue-400 font-bold" style={{ fontSize: 10, background: 'rgba(96,165,250,0.1)' }}>VERIFY PAYMENT</span>
+                            {!r.isReal && <span className="px-2 py-0.5 rounded text-blue-300 font-bold" style={{ fontSize: 10, background: 'rgba(96,165,250,0.15)' }}>DEMO</span>}
                           </div>
                           <p style={{ color: TS, fontSize: 13 }}>Coach: {r.coachName} · {r.sport}</p>
                           <p style={{ color: TS, fontSize: 12 }}>{r.requestedDate} · {r.requestedTime}</p>
@@ -216,7 +240,7 @@ export function StaffInbox() {
                           </>
                         )}
                       </div>
-                    </div>
+                    </motion.div>
                   ))
                 )}
               </motion.div>

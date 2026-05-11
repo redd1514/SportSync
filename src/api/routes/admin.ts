@@ -5,31 +5,27 @@ import { supabase } from '../services/supabaseClient.ts';
 
 const adminRouter = new Hono();
 
+// GET /api/admin/bookings - Get all bookings with filters (client-shaped rows)
 adminRouter.get('/bookings', async (c) => {
   try {
     const date = c.req.query('date');
     const start = c.req.query('start');
     const end = c.req.query('end');
 
-    const allBookings = await bookingService.getAllBookings();
-    let filteredBookings = allBookings || [];
+    const filters = date ? { date } : start && end ? { start, end } : {};
+    const allBookings = await bookingService.getAllBookings(filters);
 
-    if (date) {
-      filteredBookings = filteredBookings.filter((b) => b.booking_date === date);
-    } else if (start && end) {
-      filteredBookings = filteredBookings.filter((b) => b.booking_date >= start && b.booking_date <= end);
-    }
-
-    const bookings = filteredBookings.map((b) => ({
-      id: b.id,
-      refCode: b.id,
-      customerName: (b as { customer_name?: string }).customer_name || 'Customer',
-      court: b.court_id || 'Court',
-      date: b.booking_date,
-      time: `${b.start_time} - ${b.end_time}`,
-      amount: b.total_price || 0,
-      status: b.status || 'pending',
-    }));
+// Keep the mapping logic from your current branch to satisfy your UI needs
+    const bookings = (allBookings || []).map((b) => ({
+    id: b.id,
+    refCode: b.id,
+    customerName: (b as { customer_name?: string }).customer_name || 'Customer',
+    court: b.court_id || 'Court',
+    date: b.booking_date,
+    time: `${b.start_time} - ${b.end_time}`,
+    amount: b.total_price || 0,
+    status: b.status || 'pending',
+}));
 
     return c.json(bookings || []);
   } catch (error: any) {
@@ -202,20 +198,14 @@ adminRouter.get('/users', async (c) => {
   }
 });
 
+// GET /api/admin/payments - Payment transactions from Supabase
 adminRouter.get('/payments', async (c) => {
   try {
-    const rows = await paymentService.listRecent(300);
-    const mapped = (rows as any[]).map((p) => ({
-      id: p.id,
-      bookingId: p.booking_id,
-      amount: Number(p.amount) || 0,
-      method: p.payment_method,
-      status: p.status,
-      date: (p.completed_at || p.created_at || '').slice(0, 10),
-    }));
-    return c.json(mapped);
+    const { listPaymentsJoined } = await import('../services/deskBookingService.ts');
+    const rows = await listPaymentsJoined();
+    return c.json(rows);
   } catch (error: any) {
-    console.error('[Admin API] payments:', error.message);
+    console.error('[Admin API] Payments fetch error:', error.message);
     return c.json([], 200);
   }
 });

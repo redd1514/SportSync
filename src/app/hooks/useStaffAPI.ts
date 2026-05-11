@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { getApiBaseUrl } from '../utils/apiBase';
 
 export const useStaffAPI = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRequest = async (url: string, options?: RequestInit) => {
+  const handleRequest = useCallback(async (url: string, options?: RequestInit) => {
     setLoading(true);
     setError(null);
     try {
@@ -21,11 +21,12 @@ export const useStaffAPI = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const getStaffOperations = (date: string) => {
-    return handleRequest(`/api/staff/operations?date=${encodeURIComponent(date)}`);
-  };
+  const getStaffOperations = useCallback(
+    (date: string) => handleRequest(`/api/staff/operations?date=${encodeURIComponent(date)}`),
+    [handleRequest]
+  );
 
   const getPendingRequests = () => {
     return handleRequest(`/api/staff/requests/pending`);
