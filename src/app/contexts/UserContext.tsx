@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase } from "../utils/supabase/client";
 
 const _TODAY = new Date().toISOString().split('T')[0];
@@ -132,6 +132,7 @@ interface UserContextType {
   error: string | null;
   authFlow: "none" | "password_recovery";
   clearAuthFlow: () => void;
+  refreshBookingsFromApi: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -163,6 +164,34 @@ export function UserProvider({ children }: { children: ReactNode }) {
   });
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+
+  const refreshBookingsFromApi = useCallback(async () => {
+    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    const start = new Date();
+    start.setDate(start.getDate() - 14);
+    const end = new Date();
+    end.setMonth(end.getMonth() + 3);
+    const startStr = start.toISOString().split("T")[0];
+    const endStr = end.toISOString().split("T")[0];
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/bookings/calendar?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}`
+      );
+      if (!res.ok) return;
+      const list = (await res.json()) as Booking[];
+      if (!Array.isArray(list) || list.length === 0) return;
+      setBookings((prev) => {
+        const byId = new Map(prev.map((b) => [b.id, b]));
+        for (const b of list) {
+          const cur = byId.get(b.id);
+          byId.set(b.id, cur ? { ...cur, ...b } : b);
+        }
+        return Array.from(byId.values());
+      });
+    } catch (e) {
+      console.error("[UserContext] refreshBookingsFromApi", e);
+    }
+  }, []);
 
   // 1. Listen for real Supabase sessions when the app loads
   useEffect(() => {
@@ -210,6 +239,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    void refreshBookingsFromApi();
+  }, [user?.id, user?.role, refreshBookingsFromApi]);
 
   const addStaff = (staff: StaffAccount) => {
     setStaffAccounts(prev => [...prev, staff]);
@@ -439,7 +473,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
       isLoading,
       error,
       authFlow,
-      clearAuthFlow
+      clearAuthFlow,
+      refreshBookingsFromApi
     }}>
       {children}
     </UserContext.Provider>

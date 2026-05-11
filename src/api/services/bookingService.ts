@@ -185,4 +185,15 @@ export const bookingService = {
       if (booking) booking.status = 'cancelled';
     }
   },
+
+  /** Admin / calendar: client-shaped bookings (matches UserContext Booking fields) */
+  async getAllBookings(filters?: { date?: string; start?: string; end?: string }) {
+    try {
+      const { getAllBookingsFiltered } = await import('./deskBookingService.ts');
+      return await getAllBookingsFiltered(filters);
+    } catch (e) {
+      console.error('[bookingService] getAllBookings', e);
+      return [];
+    }
+  },
 };

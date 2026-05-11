@@ -7,6 +7,7 @@ import coachesRouter from './routes/coaches.ts';
 import paymentsRouter from './routes/payments.ts';
 import usersRouter from './routes/users.ts';
 import adminRouter from './routes/admin.ts';
+import staffRouter from './routes/staff.ts';
 
 
 
@@ -29,7 +30,8 @@ app.get('/', (c) => c.json({
     coaches: '/api/coaches',
     payments: '/api/payments',
     users: '/api/users',
-    admin: '/api/admin'
+    admin: '/api/admin',
+    staff: '/api/staff'
   }
 }));
 
@@ -39,6 +41,7 @@ app.route('/api/coaches', coachesRouter);
 app.route('/api/payments', paymentsRouter);
 app.route('/api/users', usersRouter);
 app.route('/api/admin', adminRouter);
+app.route('/api/staff', staffRouter);
 
 // 404 handler
 app.notFound((c) => c.json({ error: 'Not Found', path: c.req.path }, 404));

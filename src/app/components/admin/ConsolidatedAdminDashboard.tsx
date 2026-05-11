@@ -198,7 +198,7 @@ function ExecutiveOverview() {
     <div className="space-y-6">
       <div>
         <h2 className="text-white font-black" style={{ fontSize: 24 }}>Executive Overview</h2>
-        <p className="text-gray-500" style={{ fontSize: 13 }}>Real-time visibility across all operations</p>
+        <p className="text-gray-400" style={{ fontSize: 13 }}>Real-time visibility across all operations</p>
       </div>
 
       {/* Sub-tab pills with icons */}
@@ -225,10 +225,10 @@ function ExecutiveOverview() {
             {[
               { label: "Today's Revenue", value: `₱${totalRevToday.toLocaleString()}`, icon: DollarSign, color: '#FF8C00', sub: `${todayBookings.length} bookings today` },
               { label: 'Total Bookings', value: bookings.length, icon: Calendar, color: '#22c55e', sub: 'All time' },
-              { label: 'Courts Open', value: `${openCourts}/12`, icon: MapPin, color: '#0047AB', sub: `${12 - openCourts} currently occupied` },
+              { label: 'Courts Open', value: `${openCourts}/12`, icon: MapPin, color: '#fb923c', sub: `${12 - openCourts} currently occupied` },
               { label: 'Pending Requests', value: pendingCancellations, icon: AlertTriangle, color: '#a855f7', sub: 'Awaiting review' },
             ].map(kpi => (
-              <div key={kpi.label} className="rounded-2xl p-5 border border-white/5 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${kpi.color}10 0%, ${kpi.color}05 100%)`, borderColor: `${kpi.color}15` }}>
+              <motion.div key={kpi.label} whileHover={{ y: -3 }} className="rounded-2xl p-5 border border-white/10 relative overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.32)]" style={{ background: `linear-gradient(135deg, ${kpi.color}12 0%, ${kpi.color}06 100%)`, borderColor: `${kpi.color}20` }}>
                 <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-5" style={{ background: kpi.color, filter: 'blur(20px)', transform: 'translate(30%, -30%)' }} />
                 <div className="flex items-start justify-between mb-3 relative">
                   <div>
@@ -240,7 +240,7 @@ function ExecutiveOverview() {
                   </div>
                 </div>
                 <p style={{ fontSize: 11, color: kpi.color, fontWeight: 700 }}>{kpi.sub}</p>
-              </div>
+              </motion.div>
             ))}
           </div>
 
@@ -469,14 +469,20 @@ function ExecutiveOverview() {
 type FacilitySubTab = 'map' | 'courts' | 'addons';
 
 function FacilityMapBuilderTab() {
+  const { bookings } = useUser();
   const [sub, setSub] = useState<FacilitySubTab>('map');
   const { maps, updateBlockStatus, deleteCourtBlock } = useFacilityMap();
   const { addCustomSport, customSports } = useAddons();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [maintenancePrompt, setMaintenancePrompt] = useState<{
+    court: any;
+    target: 'available' | 'maintenance';
+    blockedCount: number;
+  } | null>(null);
   const [showAddSportModal, setShowAddSportModal] = useState(false);
   const [newSportName, setNewSportName] = useState('');
   const [newSportColor, setNewSportColor] = useState('#FF8C00');
-  const COLOR_PRESETS = ['#FF8C00','#0047AB','#22c55e','#a855f7','#ec4899','#06b6d4','#f59e0b','#10b981'];
+  const COLOR_PRESETS = ['#FF8C00','#fb923c','#f59e0b','#22c55e','#a855f7','#ec4899','#06b6d4','#10b981'];
 
   // Get all published maps for the selector
   const publishedMaps = maps.filter(m => m.isPublished);
@@ -498,6 +504,34 @@ function FacilityMapBuilderTab() {
     acc[b.sport].push(b);
     return acc;
   }, {});
+  const hasBlockingBookings = (courtName: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    return bookings.filter(b =>
+      b.court === courtName &&
+      b.date >= today &&
+      b.status !== 'cancelled' &&
+      b.status !== 'completed' &&
+      b.status !== 'rejected'
+    ).length;
+  };
+  const openMaintenancePrompt = (court: any) => {
+    const target = court.status === 'maintenance' ? 'available' : 'maintenance';
+    setMaintenancePrompt({
+      court,
+      target,
+      blockedCount: target === 'maintenance' ? hasBlockingBookings(court.name) : 0,
+    });
+  };
+  const confirmMaintenance = () => {
+    if (!maintenancePrompt) return;
+    const { court, target, blockedCount } = maintenancePrompt;
+    if (target === 'maintenance' && blockedCount > 0) {
+      setMaintenancePrompt(null);
+      return;
+    }
+    updateBlockStatus(court.id, target);
+    setMaintenancePrompt(null);
+  };
 
   const SUB_TABS = [
     { id: 'map' as const, icon: MapPin, label: 'Facility Map' },
@@ -513,10 +547,10 @@ function FacilityMapBuilderTab() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0E0E0E] border-b border-white/[0.05] flex-shrink-0">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-[#141018] border-b border-white/[0.08] flex-shrink-0">
         {SUB_TABS.map(t => (
           <button key={t.id} onClick={() => setSub(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all font-black ${t.id === sub ? 'bg-[#FF8C00] text-white' : 'bg-[#1A1A1A] text-gray-400 hover:text-white border border-white/5'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all font-black ${t.id === sub ? 'bg-[#FF8C00] text-white' : 'bg-transparent text-gray-500 hover:text-gray-300 border border-white/10'}`}
             style={{ fontSize: 12 }}>
             <t.icon size={11} /> {t.label}
           </button>
@@ -609,7 +643,7 @@ function FacilityMapBuilderTab() {
                             </div>
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => updateBlockStatus(court.id, court.status === 'maintenance' ? 'available' : 'maintenance')}
+                                onClick={() => openMaintenancePrompt(court)}
                                 className={`px-3 py-1.5 rounded-xl text-xs font-black transition-colors ${court.status === 'maintenance' ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30' : 'bg-gray-500/10 text-gray-400 hover:bg-gray-500/20'}`}>
                                 {court.status === 'maintenance' ? 'Clear Maintenance' : 'Set Maintenance'}
                               </button>
@@ -634,6 +668,27 @@ function FacilityMapBuilderTab() {
 
       {/* Confirm delete court */}
       <AnimatePresence>
+        {maintenancePrompt && (
+          <ConfirmModal opts={{
+            title: maintenancePrompt.target === 'maintenance' ? 'Set Court to Maintenance?' : 'Clear Maintenance?',
+            body: maintenancePrompt.target === 'maintenance'
+              ? maintenancePrompt.blockedCount > 0
+                ? `${maintenancePrompt.court.name} has ${maintenancePrompt.blockedCount} active/upcoming booking(s).\n\nTo prevent conflicts, you must reschedule or cancel those bookings first.`
+                : `${maintenancePrompt.court.name} will be hidden from booking immediately for users and staff.`
+              : `${maintenancePrompt.court.name} will be available for booking again immediately.`,
+            confirmLabel: maintenancePrompt.target === 'maintenance'
+              ? maintenancePrompt.blockedCount > 0 ? 'Understood' : 'Yes, Set Maintenance'
+              : 'Yes, Clear',
+            confirmColor: maintenancePrompt.target === 'maintenance'
+              ? maintenancePrompt.blockedCount > 0 ? '#a855f7' : '#f97316'
+              : '#22c55e',
+            icon: maintenancePrompt.target === 'maintenance'
+              ? <Wrench size={26} className={maintenancePrompt.blockedCount > 0 ? 'text-purple-400' : 'text-amber-400'} />
+              : <CheckCircle size={26} className="text-green-400" />,
+            onConfirm: confirmMaintenance,
+            onCancel: () => setMaintenancePrompt(null),
+          }} />
+        )}
         {confirmDeleteId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
@@ -757,7 +812,7 @@ function MasterCalendarTab() {
           <p className="text-gray-500" style={{ fontSize: 13 }}>Manage all bookings and schedules</p>
         </div>
         <div className="flex gap-3 flex-wrap">
-          <button onClick={() => setShowManualBooking(true)} className="flex items-center gap-2 bg-[#0047AB] text-white px-4 py-2 rounded-xl hover:bg-[#003a8c] transition-colors font-black" style={{ fontSize: 13 }}>
+          <button onClick={() => setShowManualBooking(true)} className="flex items-center gap-2 text-white px-4 py-2 rounded-xl transition-colors font-black" style={{ fontSize: 13, background: 'linear-gradient(135deg,#FF8C00,#e67e00)' }}>
             <Plus size={16} /> Manual Booking
           </button>
           <button onClick={() => setShowBulkBooking(true)} className="flex items-center gap-2 bg-[#FF8C00] text-white px-4 py-2 rounded-xl hover:bg-[#e67e00] transition-colors font-black" style={{ fontSize: 13 }}>
@@ -1296,7 +1351,7 @@ function SystemSettingsTab() {
           </div>
           <div className="bg-[#1A1A1A] rounded-2xl p-6 border border-white/5">
             <div className="flex items-center gap-2 mb-4">
-              <Calendar size={14} className="text-[#0047AB]" />
+              <Calendar size={14} className="text-[#FF8C00]" />
               <h4 className="text-white font-black" style={{ fontSize: 15 }}>Booking Limits</h4>
             </div>
             <div className="space-y-3">
@@ -1450,12 +1505,21 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col md:flex-row h-screen overflow-hidden">
+    <div className="min-h-screen text-white flex flex-col md:flex-row h-screen overflow-hidden"
+      style={{
+        // Copy Staff’s exact glow recipe; just change hue to orange.
+        background: 'radial-gradient(1200px 520px at 18% -10%, rgba(255,140,0,0.26), transparent), #090A0F',
+      }}>
 
       {/* ── MOBILE layout: status + content + bottom nav ── */}
       <div className="md:hidden flex flex-col h-screen w-full overflow-hidden">
         {/* Status bar */}
-        <div className="flex items-center justify-between px-5 h-10 flex-shrink-0" style={{ background: "#0D0D0D", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+        <div className="flex items-center justify-between px-5 h-10 flex-shrink-0"
+          style={{
+            background: "rgba(12,10,16,0.72)",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            backdropFilter: "blur(10px)",
+          }}>
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#FF8C00,#e67e00)" }}>
               <Shield size={11} className="text-white" />
@@ -1467,11 +1531,17 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
           </button>
         </div>
         {/* Content */}
-        <main className={`flex-1 overflow-x-hidden bg-[#0D0D0D] ${activeTab === 'facility' ? 'overflow-hidden' : 'overflow-y-auto p-4'}`}>
+        <main className={`flex-1 overflow-x-hidden ${activeTab === 'facility' ? 'overflow-hidden' : 'overflow-y-auto p-4'}`} style={{ background: 'transparent' }}>
           {renderContent()}
         </main>
         {/* Mobile bottom nav */}
-        <div className="flex-shrink-0 flex items-stretch" style={{ background: "#141414", borderTop: "1px solid rgba(255,255,255,0.07)", paddingBottom: "env(safe-area-inset-bottom,0px)" }}>
+        <div className="flex-shrink-0 flex items-stretch"
+          style={{
+            background: "rgba(12,10,16,0.82)",
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            paddingBottom: "env(safe-area-inset-bottom,0px)",
+            backdropFilter: "blur(10px)",
+          }}>
           {ADMIN_TABS.map(tab => {
             const on = activeTab === tab.id;
             return (
@@ -1495,8 +1565,14 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
         <motion.aside
           animate={{ width: sidebarCollapsed ? 72 : 236 }}
           transition={{ type: 'spring', stiffness: 380, damping: 34 }}
-          className="bg-[#0E0E0E] border-r border-white/[0.05] flex-col flex-shrink-0 overflow-hidden flex"
-          style={{ minWidth: sidebarCollapsed ? 72 : 236, maxWidth: sidebarCollapsed ? 72 : 236, width: sidebarCollapsed ? 72 : 236 }}
+          className="border-r border-white/[0.07] flex-col flex-shrink-0 overflow-hidden flex"
+          style={{
+            minWidth: sidebarCollapsed ? 72 : 236,
+            maxWidth: sidebarCollapsed ? 72 : 236,
+            width: sidebarCollapsed ? 72 : 236,
+            // Simple, readable solid dark-orange base (no fancy overlays)
+            background: '#1A1008',
+          }}
         >
         {/* Logo */}
         <div className="flex items-center px-4 py-5 flex-shrink-0" style={{ justifyContent: sidebarCollapsed ? 'center' : 'space-between' }}>
@@ -1511,7 +1587,7 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
                     <span style={{ color: 'white' }}>JRC </span>
                     <span style={{ color: '#FF8C00' }}>Admin</span>
                   </p>
-                  <p style={{ fontSize: 9, fontWeight: 800, color: '#3a3a3a', letterSpacing: 1.5 }}>ADMIN PORTAL</p>
+                  <p style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.35)', letterSpacing: 1.5 }}>ADMIN PORTAL</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1533,7 +1609,7 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
         <div className="h-px bg-white/[0.04] flex-shrink-0 mx-3" />
 
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3 space-y-0.5" style={{ padding: sidebarCollapsed ? '12px 8px' : '12px 10px' }}>
-          {!sidebarCollapsed && <p className="text-gray-700 mb-2 pl-2 font-black" style={{ fontSize: 9, letterSpacing: 1.5 }}>ADMIN SECTIONS</p>}
+          {!sidebarCollapsed && <p className="mb-2 pl-2 font-black" style={{ fontSize: 9, letterSpacing: 1.5, color: 'rgba(255,255,255,0.42)' }}>ADMIN SECTIONS</p>}
           {ADMIN_TABS.map(tab => {
             const isActive = activeTab === tab.id;
             const item = (
@@ -1544,7 +1620,7 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
                 style={{
                   padding: sidebarCollapsed ? '10px 0' : '9px 10px',
                   justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                  background: isActive ? 'rgba(255,140,0,0.1)' : 'transparent',
+                  background: isActive ? 'rgba(255,140,0,0.10)' : 'transparent',
                 }}
               >
                 {isActive && !sidebarCollapsed && (
@@ -1554,12 +1630,12 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
                   background: isActive ? 'linear-gradient(135deg,#FF8C00,#e67e00)' : 'rgba(255,255,255,0.05)',
                   boxShadow: isActive ? '0 4px 12px rgba(255,140,0,0.3)' : 'none',
                 }}>
-                  <tab.icon size={15} color={isActive ? 'white' : '#555'} strokeWidth={isActive ? 2.5 : 2} />
+                  <tab.icon size={15} color={isActive ? 'white' : 'rgba(255,255,255,0.55)'} strokeWidth={isActive ? 2.5 : 2} />
                 </div>
                 {!sidebarCollapsed && (
                   <div className="text-left min-w-0 flex-1">
                     <p style={{ fontSize: 12, fontWeight: 800, color: isActive ? '#F8FAFC' : '#777' }}>{tab.label}</p>
-                    <p style={{ fontSize: 10, color: '#444' }} className="truncate">{tab.sub}</p>
+                    <p style={{ fontSize: 10, color: isActive ? 'rgba(255,255,255,0.55)' : '#444' }} className="truncate">{tab.sub}</p>
                   </div>
                 )}
               </button>
@@ -1593,7 +1669,7 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl p-3 border border-white/5" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <div className="rounded-2xl p-3 border border-white/10" style={{ background: 'rgba(255,255,255,0.04)' }}>
               <div className="flex items-center gap-2.5 mb-3">
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#FF8C00,#e67e00)' }}>
                   <span className="text-white font-black" style={{ fontSize: 13 }}>{user?.name?.charAt(0) || 'A'}</span>
@@ -1618,7 +1694,8 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
         {(() => {
           const activeTabData = ADMIN_TABS.find(t => t.id === activeTab);
           return (
-            <div className="hidden md:flex h-14 bg-[#0E0E0E] border-b border-white/[0.05] items-center px-6 flex-shrink-0 gap-3">
+            <div className="hidden md:flex h-14 border-b border-white/[0.08] items-center px-6 flex-shrink-0 gap-3"
+              style={{ background: 'rgba(12,10,16,0.72)', backdropFilter: 'blur(10px)' }}>
               {/* Breadcrumb */}
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'rgba(255,140,0,0.15)' }}>
@@ -1647,9 +1724,9 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
         })()}
 
         {/* Content */}
-        <main className={`flex-1 overflow-x-hidden bg-[#0D0D0D] custom-scrollbar ${
+        <main className={`flex-1 overflow-x-hidden custom-scrollbar ${
           activeTab === 'facility' ? 'overflow-hidden' : 'overflow-y-auto p-4 md:p-8'
-        }`}>
+        }`} style={{ background: 'transparent' }}>
           {renderContent()}
         </main>
       </div>

@@ -3,45 +3,19 @@ import { bookingService } from '../services/bookingService.ts';
 
 const adminRouter = new Hono();
 
-// GET /api/admin/bookings - Get all bookings with filters
+// GET /api/admin/bookings - Get all bookings with filters (client-shaped rows)
 adminRouter.get('/bookings', async (c) => {
   try {
     const date = c.req.query('date');
     const start = c.req.query('start');
     const end = c.req.query('end');
 
-    // Get all bookings from the service
-    const allBookings = await bookingService.getAllBookings();
-    
-    let filteredBookings = allBookings || [];
-
-    // Filter by specific date
-    if (date) {
-      filteredBookings = filteredBookings.filter(b => b.booking_date === date);
-    }
-    // Filter by date range
-    else if (start && end) {
-      filteredBookings = filteredBookings.filter(b => 
-        b.booking_date >= start && b.booking_date <= end
-      );
-    }
-
-    // Transform to match admin dashboard format
-    const bookings = filteredBookings.map(b => ({
-      id: b.id,
-      refCode: b.id,
-      customerName: b.customer_name || 'Customer',
-      court: b.court_id || 'Court',
-      date: b.booking_date,
-      time: `${b.start_time} - ${b.end_time}`,
-      amount: b.total_price || 0,
-      status: b.status || 'pending',
-    }));
-
+    const filters = date ? { date } : start && end ? { start, end } : {};
+    const bookings = await bookingService.getAllBookings(filters);
     return c.json(bookings || []);
   } catch (error: any) {
     console.error('[Admin API] Booking fetch error:', error.message);
-    return c.json([], 200); // Return empty array on error
+    return c.json([], 200);
   }
 });
 
@@ -114,20 +88,14 @@ adminRouter.get('/users', async (c) => {
   }
 });
 
-// GET /api/admin/payments - Get payment transactions
+// GET /api/admin/payments - Payment transactions from Supabase
 adminRouter.get('/payments', async (c) => {
   try {
-    return c.json([
-      {
-        id: 'p1',
-        bookingId: 'b1',
-        amount: 450,
-        method: 'GCash',
-        status: 'completed',
-        date: '2026-05-10',
-      },
-    ]);
+    const { listPaymentsJoined } = await import('../services/deskBookingService.ts');
+    const rows = await listPaymentsJoined();
+    return c.json(rows);
   } catch (error: any) {
+    console.error('[Admin API] Payments fetch error:', error.message);
     return c.json([], 200);
   }
 });

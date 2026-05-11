@@ -4,12 +4,13 @@ import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
   HelpCircle, MapPin, Star, CheckCircle, Clock, XCircle, Settings,
-  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle,
+  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
+import { downloadTicketQrPng } from "../../../shared/qrDownload";
 
 interface MobileProfileScreenProps {
   onLogout: () => void;
@@ -232,11 +233,14 @@ function RescheduleDialog({ booking, onClose, onConfirm }: {
 
 /* ── QR Ticket Viewer ── */
 function QRTicketDialog({ booking, onClose }: {
-  booking: { refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number };
+  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number };
   onClose: () => void;
 }) {
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
   const endH = parseInt(booking.time) + (booking.duration || 1);
+  const qrValue = (booking.refCode || booking.id || '').toString();
+  const fileBase = (booking.refCode || booking.id || 'ticket').toString().replace(/\s+/g, '_');
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -251,8 +255,27 @@ function QRTicketDialog({ booking, onClose }: {
             <p className="text-white font-black" style={{ fontSize: 16 }}>Your QR Ticket</p>
             <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/8 flex items-center justify-center"><X size={14} className="text-gray-400" /></button>
           </div>
-          <div className="bg-white rounded-2xl p-4 flex flex-col items-center gap-2">
-            <QRCodeSVG value={JSON.stringify({ ref: booking.refCode, court: booking.court, date: booking.date })} size={160} level="H" />
+          <div className="bg-white rounded-2xl p-4 flex flex-col items-center gap-2 w-full">
+            <QRCodeSVG value={qrValue} size={160} level="H" />
+            <button
+              type="button"
+              disabled={downloadBusy || !qrValue}
+              onClick={async () => {
+                setDownloadBusy(true);
+                try {
+                  await downloadTicketQrPng({ value: qrValue, fileBaseName: fileBase });
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setDownloadBusy(false);
+                }
+              }}
+              className="w-full py-2.5 rounded-xl font-black text-gray-800 bg-gray-100 border border-gray-200 flex items-center justify-center gap-2 disabled:opacity-45"
+              style={{ fontSize: 12 }}
+            >
+              <Download size={14} />
+              {downloadBusy ? 'Preparing…' : 'Download QR image'}
+            </button>
           </div>
           <p className="font-black text-white tracking-widest" style={{ fontSize: 16 }}>{booking.refCode || 'NO CODE'}</p>
           <p className="text-gray-400 text-center" style={{ fontSize: 12 }}>Show this at the front desk to check in</p>
