@@ -19,6 +19,7 @@ interface AnnouncementsContextType {
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  clearAnnouncements: () => Promise<void>;
 }
 
 const AnnouncementsContext = createContext<AnnouncementsContextType | null>(null);
@@ -115,10 +116,19 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
   };
 
+  const clearAnnouncements = async () => {
+    try {
+      // Mock clearing via backend if needed, or just clear locally.
+      const res = await fetch(`${getApiBaseUrl()}/api/announcements`, { method: 'DELETE' });
+      // ignore errors for now, just clear locally
+    } catch (e) {}
+    setAnnouncements([]);
+  };
+
   const undismissedCount = useMemo(() => announcements.filter(a => !a.dismissed).length, [announcements]);
 
   return (
-    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, undismissedCount, isLoading, error, refresh }}>
+    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, clearAnnouncements, undismissedCount, isLoading, error, refresh }}>
       {children}
     </AnnouncementsContext.Provider>
   );
