@@ -68,45 +68,44 @@ export const getSportMapColor = (sport: string) => SPORT_COLORS[sport] || '#6b72
 
 export const DEFAULT_LAYOUT: CourtBlock[] = [];
 
-/* ─── Built-in demo map ──────────────────────────────────────────── */
-const DEMO_MAP_ID = 'jrc-demo-map-v1';
+/** Normalize maps loaded from KV / JSON (handles snake_case and missing isPublished). */
+function normalizeFacilityMap(raw: unknown): FacilityMap | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const id = o.id != null ? String(o.id) : '';
+  if (!id) return null;
+  const blocks = Array.isArray(o.blocks) ? (o.blocks as CourtBlock[]) : [];
+  const publishedAtRaw = o.publishedAt ?? o.published_at;
+  const publishedAt = publishedAtRaw != null && publishedAtRaw !== '' ? String(publishedAtRaw) : undefined;
+  let rawPub: unknown = o.isPublished ?? o.is_published;
+  if (typeof rawPub === 'string') {
+    rawPub = rawPub === 'true' || rawPub === '1';
+  }
+  const isPublished =
+    typeof rawPub === 'boolean' ? rawPub : Boolean(publishedAt);
+  return {
+    id,
+    name: String(o.name ?? 'Facility'),
+    branch: String(o.branch ?? ''),
+    location: String(o.location ?? ''),
+    canvasW: Number(o.canvasW ?? o.canvas_w) || 960,
+    canvasH: Number(o.canvasH ?? o.canvas_h) || 450,
+    blocks,
+    isPublished,
+    publishedAt,
+    createdAt: String(o.createdAt ?? o.created_at ?? new Date().toISOString()),
+  };
+}
 
-const DEMO_BLOCKS: CourtBlock[] = [
-  // ── Row 1: Large courts ──
-  { id: 'BASK-1', sport: 'Basketball',    name: 'Basketball 1',  x: 20,  y: 20,  width: 250, height: 215, status: 'available'   },
-  { id: 'VOLL-1', sport: 'Volleyball',    name: 'Volleyball 1',  x: 285, y: 20,  width: 250, height: 215, status: 'available'   },
-  // ── Row 1: Badminton stacked ──
-  { id: 'BADM-1', sport: 'Badminton',     name: 'Badminton 1',   x: 550, y: 20,  width: 178, height: 88,  status: 'available'   },
-  { id: 'BADM-2', sport: 'Badminton',     name: 'Badminton 2',   x: 550, y: 118, width: 178, height: 88,  status: 'available'   },
-  { id: 'BADM-3', sport: 'Badminton',     name: 'Badminton 3',   x: 550, y: 216, width: 178, height: 88,  status: 'maintenance' },
-  // ── Row 1: Pickleball stacked ──
-  { id: 'PICK-1', sport: 'Pickleball',    name: 'Pickleball 1',  x: 745, y: 20,  width: 195, height: 90, status: 'available'   },
-  { id: 'PICK-2', sport: 'Pickleball',    name: 'Pickleball 2',  x: 745, y: 118, width: 195, height: 90, status: 'available'   },
-  { id: 'PICK-3', sport: 'Pickleball',    name: 'Pickleball 3',  x: 745, y: 216, width: 195, height: 90, status: 'available'   },
-  // ── Row 2: Billiards ──
-  { id: 'BILL-1', sport: 'Billiards',     name: 'Billiards 1',   x: 20,  y: 325, width: 150, height: 105, status: 'available'   },
-  { id: 'BILL-2', sport: 'Billiards',     name: 'Billiards 2',   x: 180, y: 325, width: 150, height: 105, status: 'available'   },
-  { id: 'BILL-3', sport: 'Billiards',     name: 'Billiards 3',   x: 340, y: 325, width: 150, height: 105, status: 'available'   },
-  { id: 'BILL-4', sport: 'Billiards',     name: 'Billiards 4',   x: 500, y: 325, width: 150, height: 105, status: 'available'   },
-  // ── Row 3: Table Tennis ──
-  { id: 'TTNS-1', sport: 'Table Tennis',  name: 'Table Tennis 1',x: 660, y: 325, width: 65, height: 105, status: 'available'   },
-  { id: 'TTNS-2', sport: 'Table Tennis',  name: 'Table Tennis 2',x: 730, y: 325, width: 65, height: 105, status: 'available'   },
-  { id: 'TTNS-3', sport: 'Table Tennis',  name: 'Table Tennis 3',x: 800, y: 325, width: 65, height: 105, status: 'available'   },
-  { id: 'TTNS-4', sport: 'Table Tennis',  name: 'Table Tennis 4',x: 870, y: 325, width: 65, height: 105, status: 'available'   },
-];
-
-const DEFAULT_DEMO_MAP: FacilityMap = {
-  id: DEMO_MAP_ID,
-  name: 'JRC Ballpark',
-  branch: 'Main Branch',
-  location: 'Valenzuela City',
-  canvasW: 960,
-  canvasH: 450,
-  blocks: DEMO_BLOCKS,
-  isPublished: true,
-  publishedAt: '2026-01-01T00:00:00Z',
-  createdAt: '2026-01-01T00:00:00Z',
-};
+function normalizeFacilityMapsPayload(raw: unknown): FacilityMap[] {
+  if (raw == null) return [];
+  let list: unknown[] = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (typeof raw === 'object' && raw !== null && Array.isArray((raw as { maps?: unknown }).maps)) {
+    list = (raw as { maps: unknown[] }).maps;
+  }
+  return list.map(normalizeFacilityMap).filter((m): m is FacilityMap => m !== null);
+}
 
 /* ─── Context ───────────────────────────────────────────────────── */
 const FacilityMapContext = createContext<FacilityMapContextType | undefined>(undefined);
@@ -114,49 +113,42 @@ const FacilityMapContext = createContext<FacilityMapContextType | undefined>(und
 const FACILITY_MAPS_KV_KEY = 'facility_maps_v2';
 
 export function FacilityMapProvider({ children }: { children: ReactNode }) {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [maps, setMaps] = useState<FacilityMap[]>([DEFAULT_DEMO_MAP]);
+  const [maps, setMaps] = useState<FacilityMap[]>([]);
   const [mapsBootstrapped, setMapsBootstrapped] = useState(false);
-
-  // Ensure demo map is always present and published
-  const ensureDemoMapExists = useCallback((currentMaps: FacilityMap[]) => {
-    const hasDemo = currentMaps.some(m => m.id === DEMO_MAP_ID);
-    if (!hasDemo) {
-      return [DEFAULT_DEMO_MAP, ...currentMaps];
-    }
-    // Ensure demo map is published
-    return currentMaps.map(m =>
-      m.id === DEMO_MAP_ID ? { ...m, isPublished: true } : m
-    );
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setIsLoading(true);
       try {
-        const remote = await fetchAppData<FacilityMap[]>(FACILITY_MAPS_KV_KEY);
+        const remote = await fetchAppData<unknown>(FACILITY_MAPS_KV_KEY);
         if (cancelled) return;
-        if (Array.isArray(remote) && remote.length > 0) {
-          const ensured = ensureDemoMapExists(remote);
-          setMaps(ensured);
+        const fromRemote = normalizeFacilityMapsPayload(remote);
+        if (fromRemote.length > 0) {
+          setMaps(fromRemote);
         } else {
           try {
             const saved = typeof window !== 'undefined' ? localStorage.getItem('jrc_facility_maps_v2') : null;
             if (saved) {
-              const parsed: FacilityMap[] = JSON.parse(saved);
-              const ensured = ensureDemoMapExists(parsed);
-              setMaps(ensured);
-              await putAppData(FACILITY_MAPS_KV_KEY, ensured);
+              const parsed = JSON.parse(saved) as unknown;
+              const fromLocal = normalizeFacilityMapsPayload(parsed);
+              setMaps(fromLocal);
+              if (fromLocal.length > 0) {
+                await putAppData(FACILITY_MAPS_KV_KEY, fromLocal);
+              }
               localStorage.removeItem('jrc_facility_maps_v2');
+            } else {
+              setMaps([]);
             }
           } catch {
-            /* keep default demo map */
+            setMaps([]);
           }
         }
-      } catch {
-        /* keep default */
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load maps');
+        setMaps([]);
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -167,16 +159,15 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ensureDemoMapExists]);
+  }, []);
 
   useEffect(() => {
-    if (!mapsBootstrapped) return;
+    if (!mapsBootstrapped || maps.length === 0) return;
     const t = window.setTimeout(() => {
-      const ensured = ensureDemoMapExists(maps);
-      void putAppData(FACILITY_MAPS_KV_KEY, ensured);
+      void putAppData(FACILITY_MAPS_KV_KEY, maps);
     }, 650);
     return () => window.clearTimeout(t);
-  }, [maps, mapsBootstrapped, ensureDemoMapExists]);
+  }, [maps, mapsBootstrapped]);
 
   const createMap = useCallback((
     meta: { name: string; branch: string; location: string; canvasW: number; canvasH: number }
@@ -206,8 +197,6 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteMap = useCallback((id: string) => {
-    // Never delete the built-in demo map
-    if (id === DEMO_MAP_ID) return;
     setMaps(prev => prev.filter(m => m.id !== id));
   }, []);
 

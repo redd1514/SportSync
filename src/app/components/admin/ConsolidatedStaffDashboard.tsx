@@ -1069,8 +1069,9 @@ function LiveOperations() {
     blockedCount: number;
   } | null>(null);
 
-  const { getStaffOperations, loading: apiLoading } = (useStaffAPI as any)();
+  const { getStaffOperations, loading: apiLoading } = useStaffAPI();
   const [operationsData, setOperationsData] = useState<any>(null);
+  const [opsHydrated, setOpsHydrated] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1080,10 +1081,12 @@ function LiveOperations() {
         setOperationsData(res);
       } catch (err) {
         console.error("Failed to fetch staff operations:", err);
+      } finally {
+        setOpsHydrated(true);
       }
     };
-    fetchData();
-    const interval = setInterval(fetchData, 45000); // refresh every 45s
+    void fetchData();
+    const interval = setInterval(() => void fetchData(), 45000);
     return () => clearInterval(interval);
   }, [getStaffOperations]);
 
@@ -1093,10 +1096,10 @@ function LiveOperations() {
     : publishedMaps[0];
   const publishedLayout = activeMap?.blocks ?? [];
 
-  const todayBookingsCount = operationsData?.bookingsCount ?? 37;
-  const totalRevToday = operationsData?.revenue ?? 24850;
-  const openCourts = operationsData?.activeCourts ?? Math.max(0, publishedLayout.length - 2);
-  const pendingCancellations = operationsData?.pendingRequests ?? 4;
+  const todayBookingsCount = opsHydrated ? (operationsData?.bookingsCount ?? 0) : null;
+  const totalRevToday = opsHydrated ? (operationsData?.revenue ?? 0) : null;
+  const openCourts = opsHydrated ? (operationsData?.activeCourts ?? 0) : null;
+  const pendingCancellations = opsHydrated ? (operationsData?.pendingRequests ?? 0) : null;
 
   const sportGroups = publishedLayout
     .reduce<Record<string, typeof publishedLayout>>((acc, court) => {
@@ -1106,10 +1109,10 @@ function LiveOperations() {
   const allSports = Object.keys(sportGroups);
 
   const KPIs = [
-    { label: "Today's Revenue", value: `₱${totalRevToday.toLocaleString()}`, icon: DollarSign, color: '#FF8C00', bg: '#2A1F0A' },
-    { label: "Today's Bookings", value: todayBookingsCount, icon: Calendar, color: '#22c55e', bg: '#0A2010' },
-    { label: 'Courts Active', value: `${openCourts}/${publishedLayout.length}`, icon: MapPin, color: '#0047AB', bg: '#0A1525' },
-    { label: 'Pending Requests', value: pendingCancellations, icon: AlertTriangle, color: '#a855f7', bg: '#1A0A25' },
+    { label: "Today's Revenue", value: totalRevToday === null ? '—' : `₱${Number(totalRevToday).toLocaleString()}`, icon: DollarSign, color: '#FF8C00', bg: '#2A1F0A' },
+    { label: "Today's Bookings", value: todayBookingsCount === null ? '—' : todayBookingsCount, icon: Calendar, color: '#22c55e', bg: '#0A2010' },
+    { label: 'Courts Active', value: openCourts === null ? '—' : `${openCourts}/${publishedLayout.length}`, icon: MapPin, color: '#0047AB', bg: '#0A1525' },
+    { label: 'Pending Requests', value: pendingCancellations === null ? '—' : pendingCancellations, icon: AlertTriangle, color: '#a855f7', bg: '#1A0A25' },
   ];
   const hasBlockingBookings = (courtName: string) => {
     const today = new Date().toISOString().split('T')[0];

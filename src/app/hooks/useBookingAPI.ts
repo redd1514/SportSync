@@ -83,7 +83,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings/desk`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/desk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -102,7 +102,7 @@ export const useBookingAPI = () => {
   const lookupBookingByRef = async (q: string) => {
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings/lookup?q=${encodeURIComponent(q)}`);
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/lookup?q=${encodeURIComponent(q)}`);
       if (!response.ok) return null;
       return await response.json();
     } catch (err: any) {
@@ -115,7 +115,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/bookings/${bookingId}/check-in`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/check-in`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(staffId ? { staff_id: staffId } : {}),

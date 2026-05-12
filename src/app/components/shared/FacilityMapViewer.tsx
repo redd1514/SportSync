@@ -23,17 +23,6 @@ const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 4;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-function addDurationToTime(startTime: string, durationHours: number): string {
-  const parts = startTime.split(':');
-  const h = parseInt(parts[0] || '0', 10);
-  const m = parseInt(parts[1] || '0', 10);
-  const totalMinutes = h * 60 + m + durationHours * 60;
-  const wrapped = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
-  const eh = Math.floor(wrapped / 60);
-  const em = wrapped % 60;
-  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
-}
-
 const STATUS_COLORS: Record<LiveStatus, { fill: string; stroke: string; label: string }> = {
   available:   { fill: '#22c55e', stroke: '#16a34a', label: 'Available'   },
   occupied:    { fill: '#dc2626', stroke: '#b91c1c', label: 'Occupied'    },
@@ -1010,14 +999,14 @@ interface FacilityMapViewerProps {
 }
 
 export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange }: FacilityMapViewerProps) {
-  const { maps, getCourtLiveStatus } = useFacilityMap();
-  const { createBooking } = useBookingAPI();
-  const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi } = useUser();
+  const { maps, getCourtLiveStatus, isLoading: mapsLoading } = useFacilityMap();
   const { createDeskBooking } = useBookingAPI();
+  const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi } = useUser();
 
   const publishedMaps = maps.filter(m => m.isPublished);
   const [selectedMapIdx, setSelectedMapIdx] = useState(0);
   const activeMap = publishedMaps[selectedMapIdx] ?? null;
+
   const isControlledMap = selectedMapId !== undefined;
 
   useEffect(() => {
@@ -1218,40 +1207,8 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
     court: string; sport: string; date: string; time: string; duration: number;
     addOns: string; paymentMethod: string; refCode: string;
     customerName?: string; customerPhone?: string; amount: number;
-    addonIds: string[];
+    addonIds?: string[];
   }) => {
-    const uid = user?.id;
-    if (!uid) {
-      throw new Error('Sign in to complete a booking.');
-    }
-    const end_time = addDurationToTime(details.time, details.duration);
-    const response = await createBooking({
-      user_id: uid,
-      court_id: details.court,
-      booking_date: details.date,
-      start_time: details.time,
-      end_time,
-      addons: details.addonIds?.length ? details.addonIds : undefined,
-      status: 'confirmed',
-    });
-    addBooking({
-      id: response.id,
-      sport: details.sport,
-      date: details.date,
-      time: details.time,
-      duration: details.duration,
-      court: details.court,
-      status: 'confirmed',
-      amount: response.total_price ?? details.amount,
-      paymentStatus: 'paid',
-      createdAt: response.created_at || new Date().toISOString(),
-      customerName: details.customerName || user?.name || 'Customer',
-      customerPhone: details.customerPhone,
-      addOns: details.addOns,
-      refCode: details.refCode,
-      checkInStatus: 'none',
-    });
-  const handleConfirmBooking = async (details: { court: string; sport: string; date: string; time: string; duration: number; addOns: string; paymentMethod: string; refCode: string; customerName?: string; customerPhone?: string; amount: number }) => {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
     const payload = {
@@ -1303,6 +1260,15 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
     const label = i === 0 ? 'Today' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     return { dateStr, label };
   });
+
+  if (mapsLoading && maps.length === 0) {
+    return (
+      <div className="flex flex-col h-full bg-[#0D0D0D] items-center justify-center gap-4 p-8">
+        <div className="animate-spin rounded-full h-12 w-12 border border-orange-500 border-t-transparent" />
+        <p className="text-gray-400 font-black" style={{ fontSize: 12 }}>Loading facility maps...</p>
+      </div>
+    );
+  }
 
   if (publishedMaps.length === 0) {
     return (
@@ -1482,6 +1448,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
           <svg width="100%" height="100%" style={{ display: 'block', userSelect: 'none' }}>
+            {publishedLayout.length === 0 && console.log('[SVG] publishedLayout is EMPTY! activeMap:', activeMap?.name, 'blocks:', activeMap?.blocks)}
             <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
               <rect width={canvasW} height={canvasH} fill="#111111" />
               <defs>
@@ -1612,5 +1579,4 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
       </AnimatePresence>
     </div>
   );
-  }
 }
