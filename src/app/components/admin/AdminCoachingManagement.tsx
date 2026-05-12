@@ -10,7 +10,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { getSportColor } from "../SportIcons";
 import type { CoachApplication } from "../user/CoachApplicationForm";
-import { getApiBaseUrl } from "../../utils/apiBase";
+import { apiFetch } from "../../utils/authenticatedFetch";
 
 type Tab = "coaches" | "requests" | "applications";
 
@@ -132,7 +132,7 @@ export function AdminCoachingManagement() {
 
   const loadApplications = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/coach-applications`);
+      const res = await apiFetch(`/api/coach-applications`);
       const data = await res.json().catch(() => []);
       let list: CoachApplication[] = Array.isArray(data) ? data.map(mapApiToCoachApplication) : [];
       if (list.length === 0 && typeof window !== "undefined") {
@@ -140,7 +140,7 @@ export function AdminCoachingManagement() {
           const legacy = JSON.parse(localStorage.getItem("jrc_coach_applications") || "[]");
           if (Array.isArray(legacy) && legacy.length > 0) {
             for (const app of legacy as CoachApplication[]) {
-              const resM = await fetch(`${getApiBaseUrl()}/api/coach-applications`, {
+              const resM = await apiFetch(`/api/coach-applications`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -158,7 +158,7 @@ export function AdminCoachingManagement() {
               const created = await resM.json().catch(() => ({}));
               const newId = (created as { id?: string }).id;
               if (resM.ok && newId && (app.status === "approved" || app.status === "rejected")) {
-                await fetch(`${getApiBaseUrl()}/api/coach-applications/${encodeURIComponent(newId)}`, {
+                await apiFetch(`/api/coach-applications/${encodeURIComponent(newId)}`, {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ status: app.status }),
@@ -166,7 +166,7 @@ export function AdminCoachingManagement() {
               }
             }
             localStorage.removeItem("jrc_coach_applications");
-            const res2 = await fetch(`${getApiBaseUrl()}/api/coach-applications`);
+            const res2 = await apiFetch(`/api/coach-applications`);
             const data2 = await res2.json().catch(() => []);
             list = Array.isArray(data2) ? data2.map(mapApiToCoachApplication) : [];
           }
@@ -786,8 +786,8 @@ export function AdminCoachingManagement() {
                         isAvailable: true,
                       });
                     }
-                    const patchRes = await fetch(
-                      `${getApiBaseUrl()}/api/coach-applications/${encodeURIComponent(appConfirm.app.id)}`,
+                    const patchRes = await apiFetch(
+                      `/api/coach-applications/${encodeURIComponent(appConfirm.app.id)}`,
                       {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },

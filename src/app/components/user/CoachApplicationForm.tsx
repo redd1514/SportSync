@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { GraduationCap, CheckCircle, X, Send, Award, Clock, DollarSign, Users, ChevronRight } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
-import { getApiBaseUrl } from "../../utils/apiBase";
+import { apiFetch } from "../../utils/authenticatedFetch";
 
 export interface CoachApplication {
   id: string;
@@ -59,7 +59,7 @@ export function CoachApplicationForm() {
   const handleSubmit = async () => {
     if (!sport || !bio || availability.length === 0) return;
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/coach-applications`, {
+      const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

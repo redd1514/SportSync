@@ -1,26 +1,60 @@
 import { Hono } from 'hono';
-import { createHash } from 'crypto';
 import { supabase } from '../services/supabaseClient.ts';
+import { coachingSessionService, listCoachProfileIdsForViewer } from '../services/coachingSessionService.ts';
+import { findUserRow, isUuid, toStableUuid } from '../services/userRowQuery.ts';
 
 const usersRouter = new Hono();
 
-function toStableUuid(input: string): string {
-  const hex = createHash('sha256').update(input).digest('hex').slice(0, 32);
-  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20, 32)].join('-');
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-async function findUserRow(id: string) {
-  const byId = await supabase.from('users').select('*').eq('id', id).maybeSingle();
-  if (byId.data) return byId.data;
-
-  const byAuthId = await supabase.from('users').select('*').eq('auth_id', id).maybeSingle();
-  if (byAuthId.data) return byAuthId.data;
-
+function extractUsersRouterId(path: string): string | null {
+  const m = path.match(/\/users\/([^/]+)/);
+  if (m?.[1]) return m[1];
+  const stripped = path.startsWith('/') ? path.slice(1) : path;
+  const first = stripped.split('/')[0];
+  if (first && first !== 'sync') return first;
   return null;
+}
+
+/** When `API_AUTH_REQUIRED=true`: POST /sync stays public; other routes need Bearer + self scope (or staff/admin). */
+usersRouter.use(async (c, next) => {
+  const path = c.req.path;
+  const syncPost =
+    c.req.method === 'POST' &&
+    (path === '/api/users/sync' || path.endsWith('/users/sync') || path === '/sync');
+  if (syncPost) return next();
+
+  if (process.env.API_AUTH_REQUIRED !== 'true') return next();
+
+  const auth = c.get('auth');
+  if (!auth) return c.json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
+
+  const seg1 = extractUsersRouterId(path);
+  if (!seg1 || seg1 === 'sync') return next();
+
+  if (auth.appRole === 'admin' || auth.appRole === 'staff') return next();
+
+  const target = await findUserRow(seg1);
+  const targetId = target?.id as string | undefined;
+  if (!targetId) return next();
+
+  if (String(targetId) !== String(auth.userId)) {
+    return c.json({ error: 'Forbidden', code: 'USER_SCOPE' }, 403);
+  }
+  return next();
+});
+
+function mapSessionStatusForUi(dbStatus: string): string {
+  if (dbStatus === 'approved' || dbStatus === 'scheduled') return 'confirmed';
+  if (dbStatus === 'completed') return 'confirmed';
+  return dbStatus;
+}
+
+function normalizeUserRoleForDb(role: unknown): 'user' | 'staff' | 'admin' {
+  const r = String(role || 'user')
+    .trim()
+    .toLowerCase();
+  if (r === 'admin' || r === 'staff' || r === 'user') return r;
+  // DB CHECK only allows user/staff/admin (see migrations). "coach" is app-level; store as user.
+  return 'user';
 }
 
 // POST /api/users/sync - Upsert a DB user row for an auth session or demo account
@@ -33,17 +67,25 @@ usersRouter.post('/sync', async (c) => {
       return c.json({ error: 'auth_id and email are required' }, 400);
     }
 
+    const authKey = isUuid(authId) ? authId : toStableUuid(authId);
     const payload = {
-      auth_id: isUuid(authId) ? authId : toStableUuid(authId),
+      auth_id: authKey,
       email,
-      role: body.role || 'user',
+      role: normalizeUserRoleForDb(body.role),
       full_name: body.full_name || body.name || 'User',
       phone: body.phone || null,
     };
 
-    const existing = await supabase.from('users').select('*').eq('auth_id', payload.auth_id).maybeSingle();
-    const { data, error } = existing.data
-      ? await supabase.from('users').update(payload).eq('auth_id', payload.auth_id).select('*').single()
+    const { data: byAuth } = await supabase.from('users').select('*').eq('auth_id', authKey).maybeSingle();
+    let existingRow = byAuth;
+
+    if (!existingRow) {
+      const { data: byEmail } = await supabase.from('users').select('*').ilike('email', email).maybeSingle();
+      existingRow = byEmail ?? null;
+    }
+
+    const { data, error } = existingRow
+      ? await supabase.from('users').update(payload).eq('id', existingRow.id).select('*').single()
       : await supabase.from('users').insert([payload]).select('*').single();
 
     if (error) throw error;
@@ -53,30 +95,7 @@ usersRouter.post('/sync', async (c) => {
   }
 });
 
-// GET /api/users/:id - Get user profile
-usersRouter.get('/:id', async (c) => {
-  try {
-    const id = c.req.param('id');
-    const user = await findUserRow(id);
-    if (!user) return c.json({ error: 'Not Found' }, 404);
-    return c.json(user);
-  } catch (error: any) {
-    return c.json({ error: error.message }, 400);
-  }
-});
-
-// PUT /api/users/:id - Update user profile
-usersRouter.put('/:id', async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const { data, error } = await supabase.from('users').update(body).eq('id', id).select('*').single();
-    if (error) throw error;
-    return c.json(data);
-  } catch (error: any) {
-    return c.json({ error: error.message }, 400);
-  }
-});
+// Register multi-segment routes before `/:id` so paths like `/x/coaching-sessions` are not captured as `id = "x"` only.
 
 // GET /api/users/:id/loyalty - Get loyalty points
 usersRouter.get('/:id/loyalty', async (c) => {
@@ -108,6 +127,95 @@ usersRouter.get('/:id/bookings', async (c) => {
       .order('booking_date', { ascending: false });
     if (error) throw error;
     return c.json(data || []);
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+// GET /api/users/:id/coaching-sessions — sessions where this user is the student OR the coach
+usersRouter.get('/:id/coaching-sessions', async (c) => {
+  try {
+    const paramId = c.req.param('id');
+    const userRow = await findUserRow(paramId);
+    const usersTableId = userRow?.id as string | undefined;
+    if (!usersTableId) {
+      return c.json([]);
+    }
+
+    const sessions = await coachingSessionService.listSessionsForParticipant(usersTableId);
+
+    const coachIdsForViewer = await listCoachProfileIdsForViewer(usersTableId);
+    const viewerCoachIdSet = new Set(coachIdsForViewer.map((id) => String(id)));
+
+    const { data: coaches } = await supabase.from('coaches').select('*');
+    const { data: sports } = await supabase.from('sports').select('*');
+    const { data: users } = await supabase.from('users').select('*');
+
+    const sportMap = new Map((sports || []).map((s: any) => [s.id, s]));
+    const userMap = new Map((users || []).map((u: any) => [u.id, u]));
+
+    const mapped = sessions.map((session: any) => {
+      const coach = (coaches || []).find((co: any) => String(co.id) === String(session.coach_id));
+      const sport = sportMap.get(session.sport_id);
+      const coachUser = coach ? userMap.get(coach.user_id) : null;
+      const student = userMap.get(session.user_id);
+      const notes = typeof session.notes === 'string' ? session.notes : '';
+      const linkedMatch = notes.match(/linked_booking:([^\s]+)/);
+      const proofFromNotes = notes
+        .split('\n')
+        .map((line: string) => line.trim())
+        .find((line: string) => /^https?:\/\//i.test(line));
+      const paymentProofUrl = session.payment_proof_url || proofFromNotes;
+
+      const viewerIsStudent = String(session.user_id) === String(usersTableId);
+      const viewerIsCoachForThisSession = viewerCoachIdSet.has(String(session.coach_id));
+
+      return {
+        id: session.id,
+        userId: session.user_id,
+        userName: student?.full_name || student?.email || 'Unknown User',
+        coachId: session.coach_id,
+        coachName: coachUser?.full_name || coachUser?.email || 'Unknown Coach',
+        sport: sport?.name || 'Unknown Sport',
+        requestedDate: session.session_date,
+        requestedTime: session.start_time,
+        message: notes,
+        durationHours: session.duration_hours,
+        status: mapSessionStatusForUi(String(session.status || 'pending')),
+        paymentProofUrl,
+        linkedBookingId: linkedMatch?.[1],
+        viewerIsStudent,
+        viewerIsCoachForThisSession,
+      };
+    });
+
+    return c.json(mapped);
+  } catch (error: any) {
+    console.error('Error fetching coaching sessions:', error);
+    return c.json([]);
+  }
+});
+
+// GET /api/users/:id - Get user profile
+usersRouter.get('/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'Not Found' }, 404);
+    return c.json(user);
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+// PUT /api/users/:id - Update user profile
+usersRouter.put('/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const { data, error } = await supabase.from('users').update(body).eq('id', id).select('*').single();
+    if (error) throw error;
+    return c.json(data);
   } catch (error: any) {
     return c.json({ error: error.message }, 400);
   }

@@ -1,9 +1,10 @@
+import './types/honoEnv.ts';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { serve } from '@hono/node-server';
 import bookingsRouter from './routes/bookings.ts';
 import coachesRouter from './routes/coaches.ts';
+import coachingSessionsRouter from './routes/coachingSessions.ts';
 import { coachService } from './services/coachService.ts';
 import paymentsRouter from './routes/payments.ts';
 import usersRouter from './routes/users.ts';
@@ -14,14 +15,22 @@ import appDataRouter from './routes/appData.ts';
 import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
 import { coachApplicationService } from './services/coachApplicationService.ts';
 import announcementsRouter from './routes/announcements.ts';
-
-
+import authRouter from './routes/auth.ts';
+import { attachOrRequireAuth, requireAppRoles } from './middleware/authGate.ts';
 
 const app = new Hono();
 
 // Middleware
-app.use('*', cors());
+app.use(
+  '*',
+  cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 app.use('*', logger());
+app.use('*', attachOrRequireAuth);
 
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -34,6 +43,7 @@ app.get('/', (c) => {
     version: '1.0.0',
     endpoints: {
       health: '/health',
+      auth: '/api/auth/token',
       bookings: '/api/bookings',
       coaches: '/api/coaches',
       coachApplications: '/api/coach-applications',
@@ -46,6 +56,8 @@ app.get('/', (c) => {
     },
   });
 });
+
+app.route('/api/auth', authRouter);
 
 // Routes
 app.route('/api/bookings', bookingsRouter);
@@ -62,6 +74,13 @@ app.get('/api/coaches', async (c) => {
 
 app.post('/api/coaches', async (c) => {
   try {
+    if (process.env.API_AUTH_REQUIRED === 'true') {
+      const auth = c.get('auth');
+      if (!auth) return c.json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
+      if (auth.appRole !== 'admin') {
+        return c.json({ error: 'Forbidden', code: 'ADMIN_ONLY' }, 403);
+      }
+    }
     const body = await c.req.json();
     const created = await coachService.createCoach({
       name: String(body.name || '').trim(),
@@ -82,8 +101,17 @@ app.post('/api/coaches', async (c) => {
 
 app.route('/api/coaches', coachesRouter);
 
+app.route('/api/coaching-sessions', coachingSessionsRouter);
+
 app.get('/api/coach-applications', async (c) => {
   try {
+    if (process.env.API_AUTH_REQUIRED === 'true') {
+      const auth = c.get('auth');
+      if (!auth) return c.json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
+      if (auth.appRole !== 'admin') {
+        return c.json({ error: 'Forbidden', code: 'ADMIN_ONLY' }, 403);
+      }
+    }
     const rows = await coachApplicationService.list();
     return c.json(rows);
   } catch (error: any) {
@@ -93,6 +121,10 @@ app.get('/api/coach-applications', async (c) => {
 
 app.post('/api/coach-applications', async (c) => {
   try {
+    if (process.env.API_AUTH_REQUIRED === 'true') {
+      const auth = c.get('auth');
+      if (!auth) return c.json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
+    }
     const body = await c.req.json();
     const created = await coachApplicationService.create({
       userId: body.userId,
@@ -115,8 +147,17 @@ app.route('/api/coach-applications', coachApplicationsPatchRouter);
 app.route('/api/app-data', appDataRouter);
 app.route('/api/payments', paymentsRouter);
 app.route('/api/users', usersRouter);
-app.route('/api/admin', adminRouter);
-app.route('/api/staff', staffRouter);
+
+const adminMount = new Hono();
+adminMount.use('*', requireAppRoles('admin'));
+adminMount.route('/', adminRouter);
+app.route('/api/admin', adminMount);
+
+const staffMount = new Hono();
+staffMount.use('*', requireAppRoles('staff', 'admin'));
+staffMount.route('/', staffRouter);
+app.route('/api/staff', staffMount);
+
 app.route('/api/announcements', announcementsRouter);
 app.route('/api/facilities', facilitiesRouter);
 

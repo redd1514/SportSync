@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import { getApiBaseUrl } from '../utils/apiBase';
+import { apiFetch } from '../utils/authenticatedFetch';
 import { useUser } from './UserContext';
 
 export interface Announcement {
@@ -36,7 +36,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/announcements/published`);
+      const res = await apiFetch(`/api/announcements/published`);
       const data = await res.json().catch(() => []);
       if (!res.ok) throw new Error((data as { error?: string })?.error || 'Failed to load announcements');
       const list = Array.isArray(data) ? data : [];
@@ -87,7 +87,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         created_by: user?.id,
         publish: true,
       };
-      const res = await fetch(`${getApiBaseUrl()}/api/announcements`, {
+      const res = await apiFetch(`/api/announcements`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -119,7 +119,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const clearAnnouncements = async () => {
     try {
       // Mock clearing via backend if needed, or just clear locally.
-      const res = await fetch(`${getApiBaseUrl()}/api/announcements`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/announcements`, { method: 'DELETE' });
       // ignore errors for now, just clear locally
     } catch (e) {}
     setAnnouncements([]);

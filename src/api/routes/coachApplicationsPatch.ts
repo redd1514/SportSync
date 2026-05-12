@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
 import { coachApplicationService } from '../services/coachApplicationService.ts';
+import { requireAppRoles } from '../middleware/authGate.ts';
 
 const coachApplicationsPatchRouter = new Hono();
+
+coachApplicationsPatchRouter.use('*', requireAppRoles('admin'));
 
 coachApplicationsPatchRouter.patch('/:id', async (c) => {
   try {

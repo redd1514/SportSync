@@ -1,0 +1,12 @@
+* [33m7c87ebe[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mbackend_database_connection[m[33m, [m[1;31morigin/staff_functionality_v2[m[33m, [m[1;32mstaff_functionality_v2[m[33m)[m staff_function_v3
+* [33md7c59d1[m Staff Activity Logs and Inbox change
+* [33m6b61d24[m Fixed Blank Facility Map
+* [33m037f07d[m[33m ([m[1;31morigin/feature/PWA_Backend_Database_implementation[m[33m, [m[1;32mfeature/PWA_Backend_Database_implementation[m[33m)[m Facility map Blank Prob
+*   [33m829e842[m Merge branch 'main' into feature/PWA_Backend_Database_implementation
+[32m|[m[33m\[m  
+[32m|[m * [33m466a3af[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m unfinished staff functionality
+* [33m|[m [33md59549b[m redd
+[33m|[m[33m/[m  
+* [33m4196b60[m unfinished_testing_of_API_admin
+[33m|[m * [33me9c5673[m[33m ([m[1;32mcopilot/worktree-2026-05-10T18-04-22[m[33m)[m Enhance logging for Supabase credentials and booking service operations
+[33m|[m * [33m2a7f639[m Refactor booking retrieval in admin routes and dashboard to improve data handling

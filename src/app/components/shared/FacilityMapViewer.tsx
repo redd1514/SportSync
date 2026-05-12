@@ -1458,7 +1458,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
           <svg width="100%" height="100%" style={{ display: 'block', userSelect: 'none' }}>
-            {publishedLayout.length === 0 && console.log('[SVG] publishedLayout is EMPTY! activeMap:', activeMap?.name, 'blocks:', activeMap?.blocks)}
+            {publishedLayout.length === 0 && (console.log('[SVG] publishedLayout is EMPTY! activeMap:', activeMap?.name, 'blocks:', activeMap?.blocks), null)}
             <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
               <rect width={canvasW} height={canvasH} fill="#111111" />
               <defs>

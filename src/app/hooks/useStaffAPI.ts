@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { getApiBaseUrl } from '../utils/apiBase';
+import { apiFetch } from '../utils/authenticatedFetch';
 
 export const useStaffAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -9,8 +9,9 @@ export const useStaffAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}${url}`, {
-        headers: { 'Content-Type': 'application/json' },
+      const path = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
+      const response = await apiFetch(path, {
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
         ...options,
       });
       if (!response.ok) throw new Error(`Request failed: ${response.statusText}`);

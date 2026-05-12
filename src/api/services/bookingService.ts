@@ -13,7 +13,7 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-async function resolveUserRowId(userId: string): Promise<string> {
+export async function resolveUserRowId(userId: string): Promise<string> {
   const normalizedAuthId = isUuid(userId) ? userId : toStableUuid(userId);
 
   if (isUuid(userId)) {
@@ -228,6 +228,7 @@ export const bookingService = {
   async getUserBookings(userId: string): Promise<BookingResponse[]> {
     try {
       const resolvedUserId = await resolveUserRowId(userId);
+      console.log('[BookingService] getUserBookings - input userId:', userId, 'resolved:', resolvedUserId);
 
       const { data, error } = await supabase
         .from('bookings')
@@ -238,6 +239,7 @@ export const bookingService = {
       if (error) {
         throw error;
       }
+      console.log('[BookingService] Found bookings:', data?.length);
       if (data && data.length > 0) {
         return data as BookingResponse[];
       }

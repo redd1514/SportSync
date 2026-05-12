@@ -31,6 +31,7 @@ import { FacilityMapViewer } from '../shared/FacilityMapViewer';
 import { CustomDateTimePicker } from '../shared/CustomDateTimePicker';
 import { StaffInbox } from './StaffInbox';
 import { normalizeTicketScanInput, genRefCode, isUuidString } from '../../../shared/ticketRef';
+import { apiFetch } from '../../utils/authenticatedFetch';
 
 type StaffTab = 'operations' | 'calendar' | 'inbox' | 'activity';
 
@@ -1178,7 +1179,6 @@ function triggerTextDownload(filename: string, content: string, mime: string) {
 
 // ── Staff activity (desk + check-ins from Supabase) ─────────────────────────
 function StaffActivityLog() {
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const [ops, setOps] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [usingDemo, setUsingDemo] = useState(false);
@@ -1202,7 +1202,7 @@ function StaffActivityLog() {
     try {
       const ac = new AbortController();
       const timer = window.setTimeout(() => ac.abort(), 8000);
-      const res = await fetch(`${API_BASE}/api/staff/operations?date=${encodeURIComponent(date)}`, {
+      const res = await apiFetch(`/api/staff/operations?date=${encodeURIComponent(date)}`, {
         signal: ac.signal,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -1224,7 +1224,7 @@ function StaffActivityLog() {
     } finally {
       setIsLoading(false);
     }
-  }, [API_BASE]);
+  }, []);
 
   useEffect(() => {
     void load();

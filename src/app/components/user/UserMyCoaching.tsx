@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Clock, Calendar, CheckCircle, XCircle, ArrowRight, Upload,
   Users, GraduationCap, Star, DollarSign, MessageSquare, Check,
   ChevronRight, Shield, QrCode, X
 } from "lucide-react";
-import { useCoaching, CoachingRequest } from "../../contexts/CoachingContext";
+import type { CoachingRequest } from "../../contexts/CoachingContext";
 import { useUser } from "../../contexts/UserContext";
 import { useCoachingAPI } from "../../hooks/useCoachingAPI";
+import { apiFetch } from "../../utils/authenticatedFetch";
 import { getSportColor, SportIcon } from "../SportIcons";
 import { format } from "date-fns";
 import { CoachingPaymentModal } from "../CoachingPaymentModal";
@@ -220,23 +221,16 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
   const fetchCoachingData = async () => {
     if (!user) return;
     try {
-      // Assuming getCoaches also fetches all the sessions and we can figure it out.
-      // But typically, getUserCoachingSessions fetches the client sessions,
-      // and if the user is a coach, perhaps there's a different way to fetch their teaching sessions.
-      // We'll mimic the legacy logic by fetching all coaches, then finding if the user is one, 
-      // then grabbing their sessions.
       const fetchedCoaches = await getCoaches();
       setCoaches(fetchedCoaches || []);
       
       const mySessions = await getUserCoachingSessions(user.id);
-      
-      // If user is a coach, fetch all sessions where they are the coach, or backend might include them in `getUserCoachingSessions`.
-      // For this app's logic, let's assume `getUserCoachingSessions` provides both `clientSessions` and `coachSessions` via array.
       if (mySessions) {
         setRequests(mySessions);
       }
     } catch (error) {
       console.error('API Error:', error);
+      setRequests([]);
     } finally {
       setIsInitialLoad(false);
     }
@@ -248,29 +242,72 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
     return () => clearInterval(interval);
   }, [user]);
 
-  const findCoachByEmail = (email: string) => coaches.find(c => c.email === email);
+  const findCoachByEmail = (email: string) => coaches.find((c) => c.email?.toLowerCase() === email.toLowerCase());
 
   /* Detect if the logged-in user is also an accepted coach */
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
 
-  /* Sessions where user is the student */
-  const clientSessions = requests.filter(r => r.userId === user?.id || r.userId === "u1");
+  const clientSessions = requests.filter(
+    (r) =>
+      r.viewerIsStudent === true ||
+      (r.viewerIsStudent === undefined && !!(user?.id && (r.userId === user.id || r.userId === "u1"))),
+  );
 
-  /* Sessions where logged-in user is the coach */
-  const coachSessions = myCoachProfile
-    ? requests.filter(r => r.coachId === myCoachProfile.id)
-    : [];
+  const coachSessions = requests.filter((r) => {
+    if (r.viewerIsCoachForThisSession === true) return true;
+    return !!myCoachProfile && String(r.coachId) === String(myCoachProfile.id);
+  });
 
-  const isCoach = !!myCoachProfile;
-  const [activeTab, setActiveTab] = useState<"client" | "coach">(isCoach ? "coach" : "client");
+  const isCoach = !!(myCoachProfile || requests.some((r) => r.viewerIsCoachForThisSession === true));
+
+  const coachRowIdFromSession = requests.find(
+    (r) =>
+      r.viewerIsCoachForThisSession === true ||
+      (!!myCoachProfile && String(r.coachId) === String(myCoachProfile.id)),
+  )?.coachId;
+  const coachProfileForBadge =
+    myCoachProfile ||
+    (coachRowIdFromSession ? coaches.find((c) => String(c.id) === String(coachRowIdFromSession)) : undefined);
+
+  const [activeTab, setActiveTab] = useState<"client" | "coach">("client");
+  const coachDefaultTabApplied = useRef(false);
+
+  useEffect(() => {
+    coachDefaultTabApplied.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (isInitialLoad) return;
+    if (!isCoach) return;
+    if (coachDefaultTabApplied.current) return;
+    if (coachSessions.length > 0 && clientSessions.length === 0) {
+      setActiveTab("coach");
+      coachDefaultTabApplied.current = true;
+    }
+  }, [isInitialLoad, isCoach, coachSessions.length, clientSessions.length]);
 
   const handlePaymentComplete = async (proofUrl: string) => {
     if (selectedPaymentReq) {
-      // Example of an API call or localized optimistic update:
-      setRequests(prev => prev.map(r => r.id === selectedPaymentReq.id ? { ...r, status: "confirmed", paymentProofUrl: proofUrl } : r));
-      setSelectedPaymentReq(null);
-      setShowPaymentModal(false);
-      fetchCoachingData();
+      try {
+        const res = await apiFetch(
+          `/api/coaching-sessions/${encodeURIComponent(selectedPaymentReq.id)}/status`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "pending_verification", payment_proof_url: proofUrl }),
+          },
+        );
+        const errBody = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error((errBody as { error?: string }).error || "Could not submit payment proof");
+        }
+        setSelectedPaymentReq(null);
+        setShowPaymentModal(false);
+        fetchCoachingData();
+      } catch (error) {
+        console.error('Error completing payment:', error);
+        alert(error instanceof Error ? error.message : 'Failed to complete payment');
+      }
     }
   };
 
@@ -331,8 +368,8 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
                 <Shield size={18} color={BLUE} />
               </div>
               <div>
-                <p className="font-black" style={{ color: BLUE, fontSize: 13 }}>Accepted Coach — {myCoachProfile.sport}</p>
-                <p style={{ color: TS, fontSize: 12 }}>Your profile is visible in Coaching Services · ₱{myCoachProfile.hourlyRate?.toLocaleString()}/hr</p>
+                <p className="font-black" style={{ color: BLUE, fontSize: 13 }}>Accepted Coach — {coachProfileForBadge?.sport}</p>
+                <p style={{ color: TS, fontSize: 12 }}>Your profile is visible in Coaching Services · ₱{coachProfileForBadge?.hourlyRate?.toLocaleString()}/hr</p>
               </div>
               <div className="ml-auto px-2.5 py-1 rounded-full font-black" style={{ fontSize: 10, background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>
                 ACTIVE

@@ -1,7 +1,7 @@
-import { getApiBaseUrl } from './apiBase';
+import { apiFetch } from './authenticatedFetch';
 
 export async function fetchAppData<T>(key: string): Promise<T | null> {
-  const res = await fetch(`${getApiBaseUrl()}/api/app-data/${encodeURIComponent(key)}`);
+  const res = await apiFetch(`/api/app-data/${encodeURIComponent(key)}`);
   if (!res.ok) return null;
   const j = await res.json();
   if (j && typeof j === 'object' && 'error' in j) return null;
@@ -9,7 +9,7 @@ export async function fetchAppData<T>(key: string): Promise<T | null> {
 }
 
 export async function putAppData(key: string, value: unknown): Promise<boolean> {
-  const res = await fetch(`${getApiBaseUrl()}/api/app-data/${encodeURIComponent(key)}`, {
+  const res = await apiFetch(`/api/app-data/${encodeURIComponent(key)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value }),

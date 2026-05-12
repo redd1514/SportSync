@@ -5,6 +5,9 @@ import app from './server.ts';
 const port = parseInt(process.env.API_PORT || '3000', 10);
 
 console.log(`🚀 API Server starting on http://localhost:${port}`);
+console.log(
+  `   API_AUTH_REQUIRED=${process.env.API_AUTH_REQUIRED === 'true' ? 'true (Bearer required on protected routes)' : 'false (open API; attach Bearer when present)'}`,
+);
 
 const server = serve({
   fetch: app.fetch,

@@ -152,6 +152,72 @@ const generateTimeSlots = (timeRange: string) => {
   }
 };
 
+/* ─── Coaching Duration Picker ───────────────────────────────────── */
+const fmt12 = (h: number) => `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
+
+function CoachingDurationPicker({
+  startTime,
+  hourlyRate,
+  accentColor,
+  selectedDuration,
+  onSelect,
+}: {
+  startTime: string;
+  hourlyRate: number;
+  accentColor: string;
+  selectedDuration: number;
+  onSelect: (dur: number, endH: number) => void;
+}) {
+  const { h: startH } = parseTime(startTime);
+  const slots = Array.from({ length: 8 }, (_, i) => i + 1); // 1-8 hours
+
+  return (
+    <div className="space-y-2">
+      {slots.map(dur => {
+        const endH = startH + dur;
+        const isSelected = selectedDuration === dur;
+        const price = hourlyRate * dur;
+        return (
+          <motion.button
+            key={dur}
+            onClick={() => onSelect(dur, endH)}
+            whileTap={{ scale: 0.98 }}
+            layout
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border transition-all"
+            style={{
+              background: isSelected ? `${accentColor}15` : 'rgba(255,255,255,0.03)',
+              borderColor: isSelected ? `${accentColor}60` : 'rgba(255,255,255,0.07)',
+              boxShadow: isSelected ? `0 0 0 1px ${accentColor}30` : 'none',
+            }}
+          >
+            <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all"
+              style={{ borderColor: isSelected ? accentColor : '#444', background: isSelected ? accentColor : 'transparent' }}>
+              {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-white font-black" style={{ fontSize: 14 }}>{dur} hour{dur > 1 ? 's' : ''}</p>
+              <p className="text-gray-500" style={{ fontSize: 11 }}>{fmt12(startH)} — {fmt12(endH)}</p>
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={price}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.15 }}
+                className="font-black"
+                style={{ fontSize: 16, color: isSelected ? accentColor : '#555' }}
+              >
+                ₱{price.toLocaleString()}
+              </motion.span>
+            </AnimatePresence>
+          </motion.button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Star Rating ─────────────────────────────────────────────────── */
 const DUMMY_RATINGS: Record<string, { rating: number; reviews: number; specialties: string[] }> = {
   c1: { rating: 4.9, reviews: 127, specialties: ["Shooting", "Defense", "Footwork"] },
@@ -166,6 +232,9 @@ const DUMMY_RATINGS: Record<string, { rating: number; reviews: number; specialti
 export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) => void }) {
   const { coaches, addRequest, setActiveRequestId, findCoachByEmail, updateRequestStatus, isLoading: coachesLoading } = useCoaching();
   const { user } = useUser();
+  
+  /* A user is a coach if they have a coach profile in the database */
+  /* Coach profiles only exist after an admin approves a coach application */
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : null;
   const isAcceptedCoach = !!myCoachProfile;
 
@@ -181,6 +250,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
   /* Request form state */
   const [selectedDateObj, setSelectedDateObj] = useState<Date | null>(null);
   const [time, setTime] = useState("");
+  const [durationHours, setDurationHours] = useState(1);
   const [message, setMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdRequest, setCreatedRequest] = useState<CoachingRequest | null>(null);
@@ -209,34 +279,41 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
     });
   }, [coaches, selectedSport, showAvailableOnly, searchQuery, myCoachProfile]);
 
-  const handleRequestSubmit = () => {
+  const handleRequestSubmit = async () => {
     if (!selectedCoach || !selectedDateObj || !time) return;
-    const dateStr = format(selectedDateObj, "yyyy-MM-dd");
-    const requestId = addRequest({
-      userId: user?.id || "u1",
-      userName: user?.name || "Current User",
-      coachId: selectedCoach.id,
-      coachName: selectedCoach.name,
-      sport: selectedCoach.sport,
-      requestedDate: dateStr,
-      requestedTime: time,
-      message,
-    });
-    setActiveRequestId(requestId);
-    const newReq: CoachingRequest = {
-      id: requestId,
-      userId: user?.id || "u1",
-      userName: user?.name || "Current User",
-      coachId: selectedCoach.id,
-      coachName: selectedCoach.name,
-      sport: selectedCoach.sport,
-      requestedDate: dateStr,
-      requestedTime: time,
-      message,
-      status: "pending",
-      requestedAt: new Date().toISOString()
-    };
-    setCreatedRequest(newReq);
+    try {
+      const dateStr = format(selectedDateObj, "yyyy-MM-dd");
+      const requestId = await addRequest({
+        userId: user?.id || "u1",
+        userName: user?.name || "Current User",
+        coachId: selectedCoach.id,
+        coachName: selectedCoach.name,
+        sport: selectedCoach.sport,
+        requestedDate: dateStr,
+        requestedTime: time,
+        message,
+        durationHours,
+      });
+      setActiveRequestId(requestId);
+      const newReq: CoachingRequest = {
+        id: requestId,
+        userId: user?.id || "u1",
+        userName: user?.name || "Current User",
+        coachId: selectedCoach.id,
+        coachName: selectedCoach.name,
+        sport: selectedCoach.sport,
+        requestedDate: dateStr,
+        requestedTime: time,
+        message,
+        durationHours,
+        status: "pending",
+        requestedAt: new Date().toISOString()
+      };
+      setCreatedRequest(newReq);
+    } catch (error) {
+      console.error('Error submitting request:', error);
+      alert(error instanceof Error ? error.message : 'Failed to submit coaching request');
+    }
   };
 
   const coachMeta = (id: string) => DUMMY_RATINGS[id] || { rating: 4.5, reviews: 20, specialties: [] };
@@ -639,7 +716,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
 
       {/* ── Request Form Modal ── */}
       <AnimatePresence>
-        {isRequesting && selectedCoach && (
+        {isRequesting && selectedCoach && !createdRequest && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -746,6 +823,25 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                       </motion.div>
                     )}
 
+                    {/* Duration */}
+                    {time && (
+                      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                        <div className="flex items-center gap-1.5 mb-3">
+                          <ChevronRight size={12} style={{ color: getSportColor(selectedCoach.sport) }} />
+                          <label className="text-gray-400 font-black" style={{ fontSize: 11, letterSpacing: 0.5 }}>
+                            SESSION DURATION
+                          </label>
+                        </div>
+                        <CoachingDurationPicker
+                          startTime={time}
+                          hourlyRate={selectedCoach.hourlyRate || 0}
+                          accentColor={getSportColor(selectedCoach.sport)}
+                          selectedDuration={durationHours}
+                          onSelect={(dur, endH) => setDurationHours(dur)}
+                        />
+                      </motion.div>
+                    )}
+
                     {/* Message */}
                     <div>
                       <label className="block text-gray-400 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>
@@ -806,8 +902,12 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
           }}
           requestDetails={createdRequest}
           coachingFee={selectedCoach.hourlyRate}
-          onPaymentComplete={(proofUrl) => {
-            updateRequestStatus(createdRequest.id, 'confirmed', undefined, proofUrl);
+          onPaymentComplete={async (proofUrl) => {
+            try {
+              await updateRequestStatus(createdRequest.id, 'confirmed', undefined, proofUrl);
+            } catch (error) {
+              console.error('Error updating request status:', error);
+            }
             setCreatedRequest(null);
             setShowSuccess(true);
             setTimeout(() => {

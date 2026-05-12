@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getApiBaseUrl } from '../utils/apiBase';
+import { apiFetch } from '../utils/authenticatedFetch';
 
 export const useCoachingAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -9,8 +9,9 @@ export const useCoachingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}${url}`, {
-        headers: { 'Content-Type': 'application/json' },
+      const path = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
+      const response = await apiFetch(path, {
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
         ...options,
       });
       if (!response.ok) throw new Error(`Request failed: ${response.statusText}`);
@@ -44,28 +45,30 @@ export const useCoachingAPI = () => {
   };
 
   const approveCoachingSession = (sessionId: string) => {
-    return handleRequest(`/api/coaches/sessions/${sessionId}/approve`, {
+    return handleRequest(`/api/coaching-sessions/${encodeURIComponent(sessionId)}/status`, {
       method: 'PUT',
+      body: JSON.stringify({ status: 'confirmed' }),
     });
   };
 
   const rejectCoachingSession = (sessionId: string, reason: string) => {
-    return handleRequest(`/api/coaches/sessions/${sessionId}/reject`, {
+    return handleRequest(`/api/coaching-sessions/${encodeURIComponent(sessionId)}/status`, {
       method: 'PUT',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ status: 'rejected' }),
     });
   };
 
   const cancelCoachingSession = (sessionId: string) => {
-    return handleRequest(`/api/coaches/sessions/${sessionId}/cancel`, {
+    return handleRequest(`/api/coaching-sessions/${encodeURIComponent(sessionId)}/status`, {
       method: 'PUT',
+      body: JSON.stringify({ status: 'cancelled' }),
     });
   };
 
   const rescheduleCoachingSession = (sessionId: string, newDate: string, newTime: string) => {
-    return handleRequest(`/api/coaches/sessions/${sessionId}/reschedule`, {
+    return handleRequest(`/api/coaching-sessions/${encodeURIComponent(sessionId)}`, {
       method: 'PUT',
-      body: JSON.stringify({ requestedDate: newDate, requestedTime: newTime }),
+      body: JSON.stringify({ session_date: newDate, start_time: newTime }),
     });
   };
 

@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
+import { requireAppRoles } from '../middleware/authGate.ts';
 
 const announcementsRouter = new Hono();
+
+announcementsRouter.use(async (c, next) => {
+  if (c.req.method === 'GET' && c.req.path.endsWith('published')) return next();
+  return requireAppRoles('staff', 'admin')(c, next);
+});
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

@@ -1,14 +1,24 @@
 import { Hono } from 'hono';
 import { coachService } from '../services/coachService.ts';
+import { coachingSessionService } from '../services/coachingSessionService.ts';
 
 const coachesRouter = new Hono();
 
 // Register static paths before /:id patterns.
-// POST /api/coaches/sessions — request coaching (stub until sessions API is wired)
+// POST /api/coaches/sessions — request coaching (redirects to new API)
 coachesRouter.post('/sessions', async (c) => {
   try {
     const body = await c.req.json();
-    return c.json({ id: `cs${Date.now()}`, ...body, status: 'pending', created_at: new Date().toISOString() }, 201);
+    // Create session using new service
+    const session = await coachingSessionService.createSession({
+      coach_id: body.coach_id || body.coachId,
+      user_id: body.user_id || body.userId,
+      session_date: body.session_date || body.requestedDate,
+      start_time: body.start_time || body.requestedTime,
+      end_time: body.end_time || body.endTime,
+      status: 'pending',
+    });
+    return c.json(session, 201);
   } catch (error: any) {
     return c.json({ error: error.message }, 400);
   }

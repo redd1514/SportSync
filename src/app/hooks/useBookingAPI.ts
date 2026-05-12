@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getApiBaseUrl } from '../utils/apiBase';
+import { apiFetch } from '../utils/authenticatedFetch';
 
 export const useBookingAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -9,7 +9,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings`, {
+      const response = await apiFetch(`/api/bookings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -28,8 +28,8 @@ export const useBookingAPI = () => {
 
   const checkAvailability = async (courtId: string, date: string, startTime: string, endTime: string) => {
     try {
-      const response = await fetch(
-        `${getApiBaseUrl()}/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}`
+      const response = await apiFetch(
+        `/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}`
       );
       const data = await response.json();
       return data.available;
@@ -43,7 +43,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${userId}`);
+      const response = await apiFetch(`/api/bookings/${userId}`);
       if (!response.ok) throw new Error('Failed to fetch bookings');
       const bookings = await response.json();
       return bookings || [];
@@ -59,7 +59,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}`, {
+      const response = await apiFetch(`/api/bookings/${bookingId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
@@ -83,7 +83,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/desk`, {
+      const response = await apiFetch(`/api/bookings/desk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -102,7 +102,7 @@ export const useBookingAPI = () => {
   const lookupBookingByRef = async (q: string) => {
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/lookup?q=${encodeURIComponent(q)}`);
+      const response = await apiFetch(`/api/bookings/lookup?q=${encodeURIComponent(q)}`);
       if (!response.ok) return null;
       return await response.json();
     } catch (err: any) {
@@ -115,7 +115,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/check-in`, {
+      const response = await apiFetch(`/api/bookings/${bookingId}/check-in`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(staffId ? { staff_id: staffId } : {}),
@@ -135,7 +135,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/check-out`, {
+      const response = await apiFetch(`/api/bookings/${bookingId}/check-out`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(staffId ? { staff_id: staffId } : {}),
@@ -155,7 +155,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/request-cancellation`, {
+      const response = await apiFetch(`/api/bookings/${bookingId}/request-cancellation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, reason }),
@@ -175,7 +175,7 @@ export const useBookingAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/request-reschedule`, {
+      const response = await apiFetch(`/api/bookings/${bookingId}/request-reschedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, reason, requested_new_date: newDate, requested_new_start_time: newStartTime }),

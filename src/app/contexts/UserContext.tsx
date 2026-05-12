@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect,useCallback, useRef, ReactNode } from "react";
 import { supabase } from "../utils/supabase/client";
 import { getApiBaseUrl } from "../utils/apiBase";
+import { apiFetch, clearDemoApiToken, exchangeDemoApiToken } from "../utils/authenticatedFetch";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
 
 const SYSTEM_SETTINGS_KV_KEY = "system_settings_v1";
@@ -277,7 +278,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const loadBookingsForUser = async (userId: string) => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${encodeURIComponent(userId)}`);
+      const response = await apiFetch(`/api/bookings/${encodeURIComponent(userId)}`);
       if (!response.ok) return [];
       const data = await response.json();
       return Array.isArray(data) ? data.map(normalizeBooking) : [];
@@ -287,7 +288,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshBookingsFromApi = useCallback(async () => {
-    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
     const start = new Date();
     start.setDate(start.getDate() - 14);
     const end = new Date();
@@ -295,90 +295,140 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const startStr = start.toISOString().split("T")[0];
     const endStr = end.toISOString().split("T")[0];
     try {
-      const res = await fetch(
-        `${API_BASE}/api/bookings/calendar?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}`
+      const res = await apiFetch(
+        `/api/bookings/calendar?start=${encodeURIComponent(startStr)}&end=${encodeURIComponent(endStr)}`
       );
       if (!res.ok) return;
       const list = (await res.json()) as Booking[];
-      if (!Array.isArray(list) || list.length === 0) return;
-      setBookings((prev) => {
-        const byId = new Map(prev.map((b) => [b.id, b]));
-        for (const b of list) {
-          const cur = byId.get(b.id);
-          byId.set(b.id, cur ? { ...cur, ...b } : b);
-        }
-        return Array.from(byId.values());
-      });
+      if (!Array.isArray(list) || list.length === 0) {
+        console.log('[UserContext] No bookings found from calendar');
+        setBookings([]);
+        return;
+      }
+      
+      // Deduplicate by ID to avoid showing the same booking twice
+      const byId = new Map(list.map((b) => [b.id, b]));
+      const uniqueBookings = Array.from(byId.values());
+      console.log('[UserContext] Loaded bookings from calendar:', list.length, 'after dedup:', uniqueBookings.length);
+      setBookings(uniqueBookings);
     } catch (e) {
       console.error("[UserContext] refreshBookingsFromApi", e);
+      setBookings([]);
     }
   }, []);
 
   // 1. Listen for real Supabase sessions when the app loads
-  useEffect(() => {
-    (async () => {
-      const epoch = authEpochRef.current;
-      const { data: { session } } = await supabase.auth.getSession();
+useEffect(() => {
+  (async () => {
+    const epoch = authEpochRef.current;
+
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+
+    if (authEpochRef.current !== epoch) return;
+
+    if (session?.user) {
+      clearDemoApiToken();
+
+      const nextUser = {
+        id: session.user.id,
+        email: session.user.email || "",
+        name: session.user.user_metadata?.full_name || "Real User",
+        phone: "+63 000 000 0000",
+        favoriteSports: [],
+        loyaltyPoints: 0,
+        totalBookings: 0,
+        memberSince: new Date(session.user.created_at)
+          .toISOString()
+          .split("T")[0],
+        role: "user"
+      };
+
+      const syncedUser = await syncUserProfile({
+        id: nextUser.id,
+        email: nextUser.email,
+        name: nextUser.name,
+        phone: nextUser.phone,
+        role: nextUser.role
+      });
+
       if (authEpochRef.current !== epoch) return;
-      if (session?.user) {
-        const nextUser = {
-          id: session.user.id,
-          email: session.user.email || "",
-          name: session.user.user_metadata?.full_name || "Real User",
-          phone: "+63 000 000 0000",
-          favoriteSports: [],
-          loyaltyPoints: 0,
-          totalBookings: 0,
-          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
-          role: "user"
-        };
-        const syncedUser = await syncUserProfile({ id: nextUser.id, email: nextUser.email, name: nextUser.name, phone: nextUser.phone, role: nextUser.role });
+
+      const resolvedUser = syncedUser
+        ? { ...nextUser, id: syncedUser.id }
+        : nextUser;
+
+      setUser(resolvedUser);
+
+      // Bookings will be loaded by the useEffect that watches user changes
+    }
+
+    setIsLoading(false);
+  })();
+
+  const {
+    data: { subscription }
+  } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") {
+      setAuthFlow("password_recovery");
+    }
+
+    if (event === "SIGNED_OUT") {
+      setAuthFlow("none");
+    }
+
+    const epoch = authEpochRef.current;
+
+    if (session?.user) {
+      clearDemoApiToken();
+
+      const nextUser = {
+        id: session.user.id,
+        email: session.user.email || "",
+        name: session.user.user_metadata?.full_name || "Real User",
+        phone: "+63 000 000 0000",
+        favoriteSports: [],
+        loyaltyPoints: 0,
+        totalBookings: 0,
+        memberSince: new Date(session.user.created_at)
+          .toISOString()
+          .split("T")[0],
+        role: "user"
+      };
+
+      syncUserProfile({
+        id: nextUser.id,
+        email: nextUser.email,
+        name: nextUser.name,
+        phone: nextUser.phone,
+        role: nextUser.role
+      }).then((syncedUser) => {
         if (authEpochRef.current !== epoch) return;
-        const resolvedUser = syncedUser ? { ...nextUser, id: syncedUser.id } : nextUser;
+
+        const resolvedUser = syncedUser
+          ? { ...nextUser, id: syncedUser.id }
+          : nextUser;
+
         setUser(resolvedUser);
-        loadBookingsForUser(resolvedUser.id).then(setBookings);
-      }
-      setIsLoading(false);
-    })();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setAuthFlow("password_recovery");
-      }
-      if (event === "SIGNED_OUT") {
-        setAuthFlow("none");
-      }
+        // Bookings will be loaded by the useEffect that watches user changes
+      });
+    } else {
+      clearDemoApiToken();
+      setUser(null);
+      setBookings([]);
+    }
+  });
 
-      const epoch = authEpochRef.current;
-      if (session?.user) {
-        const nextUser = {
-          id: session.user.id,
-          email: session.user.email || "",
-          name: session.user.user_metadata?.full_name || "Real User",
-          phone: "+63 000 000 0000",
-          favoriteSports: [],
-          loyaltyPoints: 0,
-          totalBookings: 0,
-          memberSince: new Date(session.user.created_at).toISOString().split('T')[0],
-          role: "user"
-        } as UserProfile;
-        syncUserProfile({ id: nextUser.id, email: nextUser.email, name: nextUser.name, phone: nextUser.phone, role: nextUser.role }).then((syncedUser) => {
-          if (authEpochRef.current !== epoch) return;
-          const resolvedUser = syncedUser ? { ...nextUser, id: syncedUser.id } : nextUser;
-          setUser(resolvedUser);
-          loadBookingsForUser(resolvedUser.id).then(setBookings);
-        });
-      } else {
-        setUser(null);
-        setBookings([]);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  return () => subscription.unsubscribe();
+}, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) {
+      setBookings([]);
+      return;
+    }
     void refreshBookingsFromApi();
   }, [user?.id, user?.role, refreshBookingsFromApi]);
 
@@ -413,6 +463,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const syncedUser = await syncUserProfile({ id, email, name, phone: "+63 912 345 6789", role });
       if (authEpochRef.current !== epoch) return { error: null };
       const resolvedId = syncedUser?.id || id;
+      void exchangeDemoApiToken({ authId: id, email }).catch(() => {});
       setUser({
         id: resolvedId,
         name,
@@ -425,12 +476,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
         accountStatus: "active",
         role
       });
-      const demoBookings = await loadBookingsForUser(resolvedId);
-      setBookings(demoBookings);
+      // Bookings will be loaded by the useEffect that watches user changes
       return { error: null }; // Success!
     }
 
     // --- REAL SUPABASE CHECK ---
+    clearDemoApiToken();
     // If it's not one of the 3 demo accounts above, try real Supabase Login
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error?.message || null };
@@ -497,6 +548,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     authEpochRef.current += 1;
     await supabase.auth.signOut(); // Clears real session
+    clearDemoApiToken();
     setUser(null); // Clears demo session
     setBookings([]);
     clearPersistedDemoKeys();

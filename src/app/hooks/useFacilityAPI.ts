@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getApiBaseUrl } from '../utils/apiBase';
+import { apiFetch } from '../utils/authenticatedFetch';
 
 export const useFacilityAPI = () => {
   const [loading, setLoading] = useState(false);
@@ -9,8 +9,9 @@ export const useFacilityAPI = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${getApiBaseUrl()}${url}`, {
-        headers: { 'Content-Type': 'application/json' },
+      const path = url.startsWith('/api') ? url : `/api${url.startsWith('/') ? url : `/${url}`}`;
+      const response = await apiFetch(path, {
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
         ...options,
       });
       if (!response.ok) throw new Error(`Request failed: ${response.statusText}`);
@@ -62,7 +63,7 @@ export const useFacilityAPI = () => {
 
   const getFacilityInfo = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/facilities`);
+      const response = await apiFetch(`/api/facilities`);
       if (!response.ok) throw new Error('Failed to fetch facility info');
       return await response.json();
     } catch (err) {
@@ -78,7 +79,7 @@ export const useFacilityAPI = () => {
 
   const getCourtStatuses = async () => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/facilities/courts/status`);
+      const response = await apiFetch(`/api/facilities/courts/status`);
       if (!response.ok) throw new Error('Failed to fetch court statuses');
       return await response.json();
     } catch (err) {
