@@ -30,6 +30,10 @@ export interface Booking {
   refCode?: string;
   checkInStatus?: 'none' | 'checked_in';
   checkInTime?: string;
+  checkOutStatus?: 'none' | 'checked_out';
+  checkOutTime?: string;
+  /** Facility map id when booking was made from a specific published map */
+  facilityMapId?: string;
 }
 
 export interface CancellationRequest {
@@ -101,7 +105,7 @@ export interface UserProfile {
   totalBookings: number;
   memberSince: string;
   accountStatus?: "active" | "suspended" | "inactive";
-  role?: "user" | "admin" | "staff";
+  role?: "user" | "admin" | "staff" | "coach";
   permissions?: string[];
 }
 
@@ -266,6 +270,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
     refCode: booking.refCode || booking.ref_code,
     checkInStatus: booking.checkInStatus || booking.check_in_status,
     checkInTime: booking.checkInTime || booking.check_in_time,
+    checkOutStatus: booking.checkOutStatus || booking.check_out_status,
+    checkOutTime: booking.checkOutTime || booking.check_out_time,
+    facilityMapId: booking.facilityMapId || booking.facility_map_id,
   });
 
   const loadBookingsForUser = async (userId: string) => {
@@ -391,15 +398,17 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const isAdminDemo = email === "admin@jrc.com" && password === "admin123";
     const isUserDemo  = email === "user@jrc.com"  && password === "user123";
     const isStaffDemo = email === "staff@jrc.com" && password === "password123";
+    const isCoachDemo = email === "coach@jrc.com" && password === "coach123";
 
-    if (isAdminDemo || isUserDemo || isStaffDemo) {
+    if (isAdminDemo || isUserDemo || isStaffDemo || isCoachDemo) {
       const epoch = authEpochRef.current;
-      let role: "admin" | "user" | "staff" = "user";
+      let role: "admin" | "user" | "staff" | "coach" = "user";
       let name = "User Demo";
       let id = `user_${email.replace(/[^a-zA-Z0-9]/g, '')}`;
 
       if (isAdminDemo) { role = "admin"; name = "Admin Demo"; id = "admin_u1"; }
       else if (isStaffDemo) { role = "staff"; name = "Staff Demo"; id = "staff_u1"; }
+      else if (isCoachDemo) { role = "coach"; name = "Coach Demo"; id = "coach_u1"; }
 
       const syncedUser = await syncUserProfile({ id, email, name, phone: "+63 912 345 6789", role });
       if (authEpochRef.current !== epoch) return { error: null };

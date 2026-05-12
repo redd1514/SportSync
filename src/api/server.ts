@@ -13,6 +13,7 @@ import facilitiesRouter from './routes/facilities.ts';
 import appDataRouter from './routes/appData.ts';
 import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
 import { coachApplicationService } from './services/coachApplicationService.ts';
+import announcementsRouter from './routes/announcements.ts';
 
 
 
@@ -116,6 +117,7 @@ app.route('/api/payments', paymentsRouter);
 app.route('/api/users', usersRouter);
 app.route('/api/admin', adminRouter);
 app.route('/api/staff', staffRouter);
+app.route('/api/announcements', announcementsRouter);
 app.route('/api/facilities', facilitiesRouter);
 
 // 404 handler

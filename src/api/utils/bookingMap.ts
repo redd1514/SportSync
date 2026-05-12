@@ -6,6 +6,8 @@ export type BookingNotesPayload = {
   addOns?: string;
   source?: string;
   paymentMethod?: string;
+  /** Facility map editor id when booking came from a specific published map */
+  facilityMapId?: string;
 };
 
 export function parseBookingNotes(notes: string | null | undefined): BookingNotesPayload {
@@ -58,6 +60,7 @@ export function mapBookingRowToAdmin(row: {
   checkInStatus: 'none' | 'checked_in';
   checkInTime?: string;
   createdAt: string;
+  facilityMapId?: string;
 } {
   const meta = parseBookingNotes(row.notes ?? undefined);
   const courtName = row.courts?.name ?? 'Court';
@@ -100,6 +103,7 @@ export function mapBookingRowToAdmin(row: {
     checkInStatus: checkedIn ? 'checked_in' : 'none',
     checkInTime: checkedIn ? row.updated_at || row.created_at : undefined,
     createdAt: row.created_at ?? new Date().toISOString(),
+    facilityMapId: typeof meta.facilityMapId === 'string' && meta.facilityMapId ? meta.facilityMapId : undefined,
   };
 }
 
@@ -122,5 +126,6 @@ export function deskAdminRowToClientBooking(a: ReturnType<typeof mapBookingRowTo
     refCode: a.refCode,
     checkInStatus: a.checkInStatus,
     checkInTime: a.checkInTime,
+    facilityMapId: a.facilityMapId,
   };
 }

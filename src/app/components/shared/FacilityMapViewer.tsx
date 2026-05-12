@@ -11,11 +11,11 @@ import { QRCodeSVG } from 'qrcode.react';
 import { getLocalDateString } from '../../utils/date';
 import { genRefCode } from '../../../shared/ticketRef';
 import { downloadTicketQrPng } from '../../../shared/qrDownload';
-import { useFacilityMap, getSportMapColor, LiveStatus } from '../../contexts/FacilityMapContext';
+import { useFacilityMap, getSportMapColor, LiveStatus, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import { useUser, Booking } from '../../contexts/UserContext';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { useAddons } from '../../contexts/AddonsContext';
-import { SPORTS_INFO, AddOn } from '../sportsData';
+import { SPORTS_INFO, AddOn, isAddonPerHourPricing, formatAddonLinePeso } from '../sportsData';
 import { SportIcon } from '../SportIcons';
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
@@ -449,9 +449,9 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
 
   const addonTotal = useMemo(() =>
     Array.from(selectedAddons).reduce((sum, id) => {
-      const a = sportAddons.find(a => a.id === id);
+      const a = sportAddons.find(x => x.id === id);
       if (!a) return sum;
-      return sum + ((a as any).perHour ? a.price * duration : a.price);
+      return sum + (isAddonPerHourPricing(a) ? a.price * duration : a.price);
     }, 0),
   [selectedAddons, sportAddons, duration]);
 
@@ -477,10 +477,10 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
 
   const doConfirm = async () => {
     const addOnLabels = Array.from(selectedAddons).map(id => {
-      const a = sportAddons.find(a => a.id === id);
+      const a = sportAddons.find(x => x.id === id);
       if (!a) return id;
-      return (a as any).perHour ? `${a.label} (x${duration}h)` : a.label;
-    }).join(', ');
+      return formatAddonLinePeso(a, duration).left;
+    }).join(' | ');
     await onConfirm({
       court: courtName, sport, date, time, duration,
       addOns: [addOnLabels, mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
@@ -524,6 +524,38 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
 
   const color = getSportMapColor(sport);
   const dateInfo = formatDate(date);
+
+  const priceBreakdownPanel = (
+    <div className="bg-[#111] rounded-2xl border border-white/5 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-white/5 flex items-center gap-2" style={{ background: `${accentColor}06` }}>
+        <Receipt size={12} style={{ color: accentColor }} />
+        <span className="text-white font-black" style={{ fontSize: 11 }}>PRICE BREAKDOWN</span>
+      </div>
+      <div className="px-4 py-3 space-y-1.5">
+        <div className="flex justify-between gap-2">
+          <span className="text-gray-400 flex-1 min-w-0" style={{ fontSize: 12 }}>
+            Court rate ({'\u20B1'}{basePrice.toLocaleString()}/hr &times; {duration}h)
+          </span>
+          <span className="text-white font-black flex-shrink-0" style={{ fontSize: 12 }}>{'\u20B1'}{(basePrice * duration).toLocaleString()}</span>
+        </div>
+        {addonTotal > 0 && Array.from(selectedAddons).map(id => {
+          const a = sportAddons.find(x => x.id === id);
+          if (!a) return null;
+          const { left, amount } = formatAddonLinePeso(a, duration);
+          return (
+            <div key={id} className="flex justify-between gap-2">
+              <span className="text-gray-400 flex-1 min-w-0" style={{ fontSize: 12 }}>{left}</span>
+              <span className="text-white font-black flex-shrink-0" style={{ fontSize: 12 }}>+{'\u20B1'}{amount.toLocaleString()}</span>
+            </div>
+          );
+        })}
+        <div className="border-t border-white/8 pt-1.5 flex justify-between items-end">
+          <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL</span>
+          <span className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-[900] flex items-end sm:items-center justify-center sm:p-3 bg-black/85 backdrop-blur-sm">
@@ -615,6 +647,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                       await downloadTicketQrPng({
                         value: refCode.current,
                         fileBaseName: refCode.current.replace(/\s+/g, '_'),
+                        displayCode: refCode.current,
                       });
                     } catch (e) {
                       console.error(e);
@@ -643,7 +676,17 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Time</span><span className="text-white font-black" style={{ fontSize: 12 }}>{time && fmt12(parseInt(time))} &ndash; {endHour ? fmt12(endHour) : ''}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Duration</span><span className="text-white font-black" style={{ fontSize: 12 }}>{duration}h</span></div>
                   <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Rate</span><span className="text-white font-black" style={{ fontSize: 12 }}>{'\u20B1'}{basePrice.toLocaleString()}/hr &times; {duration}h</span></div>
-                  {addonTotal > 0 && <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Add-ons</span><span className="text-white font-black" style={{ fontSize: 12 }}>+{'\u20B1'}{addonTotal.toLocaleString()}</span></div>}
+                  {addonTotal > 0 && Array.from(selectedAddons).map(id => {
+                    const a = sportAddons.find(x => x.id === id);
+                    if (!a) return null;
+                    const { left, amount } = formatAddonLinePeso(a, duration);
+                    return (
+                      <div key={id} className="flex justify-between gap-2">
+                        <span className="text-gray-500" style={{ fontSize: 12 }}>{left}</span>
+                        <span className="text-white font-black flex-shrink-0" style={{ fontSize: 12 }}>+{'\u20B1'}{amount.toLocaleString()}</span>
+                      </div>
+                    );
+                  })}
                   <div className="border-t border-white/8 pt-2 flex justify-between">
                     <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL PAID</span>
                     <span className="font-black" style={{ fontSize: 18, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
@@ -732,19 +775,26 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                 )}
                 {time && duration > 0 && (
                   <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center justify-between px-4 py-3 rounded-2xl"
+                    className="flex items-center justify-between px-4 py-3 rounded-2xl gap-3"
                     style={{ background: `${accentColor}12`, border: `1px solid ${accentColor}30` }}>
-                    <div className="flex items-center gap-2">
-                      <Clock size={14} style={{ color: accentColor }} />
-                      <span className="text-white font-black" style={{ fontSize: 13 }}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Clock size={14} style={{ color: accentColor }} className="flex-shrink-0" />
+                      <span className="text-white font-black truncate" style={{ fontSize: 13 }}>
                         {fmt12(parseInt(time))} &rarr; {endHour ? fmt12(endHour) : ''}
                       </span>
                     </div>
                     <AnimatePresence mode="wait">
-                      <motion.span key={total} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-                        className="font-black" style={{ fontSize: 16, color: accentColor }}>
-                        {'\u20B1'}{(basePrice * duration).toLocaleString()}
-                      </motion.span>
+                      <motion.div key={total} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                        className="text-right flex-shrink-0">
+                        {addonTotal > 0 && (
+                          <p className="text-gray-500 font-black mb-0.5" style={{ fontSize: 9 }}>
+                            Court {'\u20B1'}{(basePrice * duration).toLocaleString()} + add-ons {'\u20B1'}{addonTotal.toLocaleString()}
+                          </p>
+                        )}
+                        <span className="font-black block" style={{ fontSize: 16, color: accentColor }}>
+                          {'\u20B1'}{total.toLocaleString()}
+                        </span>
+                      </motion.div>
                     </AnimatePresence>
                   </motion.div>
                 )}
@@ -794,28 +844,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   </div>
                 </div>
 
-                {/* Price breakdown */}
-                <div className="bg-[#111] rounded-2xl border border-white/5 overflow-hidden">
-                  <div className="px-4 py-2.5 border-b border-white/5 flex items-center gap-2" style={{ background: `${accentColor}06` }}>
-                    <Receipt size={12} style={{ color: accentColor }} />
-                    <span className="text-white font-black" style={{ fontSize: 11 }}>PRICE BREAKDOWN</span>
-                  </div>
-                  <div className="px-4 py-3 space-y-1.5">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400" style={{ fontSize: 12 }}>Court ({'\u20B1'}{basePrice}/hr &times; {duration}h)</span>
-                      <span className="text-white font-black" style={{ fontSize: 12 }}>{'\u20B1'}{(basePrice * duration).toLocaleString()}</span>
-                    </div>
-                    {addonTotal > 0 && Array.from(selectedAddons).map(id => {
-                      const a = sportAddons.find(a => a.id === id); if (!a) return null;
-                      const cost = (a as any).perHour ? a.price * duration : a.price;
-                      return <div key={id} className="flex justify-between"><span className="text-gray-400" style={{ fontSize: 12 }}>{a.label}</span><span className="text-white font-black" style={{ fontSize: 12 }}>+{'\u20B1'}{cost.toLocaleString()}</span></div>;
-                    })}
-                    <div className="border-t border-white/8 pt-1.5 flex justify-between items-end">
-                      <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL</span>
-                      <span className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
+                {priceBreakdownPanel}
 
                 {/* Add-ons */}
                 {sportAddons.length > 0 && (
@@ -824,7 +853,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                     <div className="space-y-2">
                       {sportAddons.map(addon => {
                         const isChecked = selectedAddons.has(addon.id);
-                        const addonCost = (addon as any).perHour ? addon.price * duration : addon.price;
+                        const addonCost = isAddonPerHourPricing(addon) ? addon.price * duration : addon.price;
                         return (
                           <button key={addon.id}
                             onClick={() => setSelectedAddons(prev => { const n = new Set(prev); if (n.has(addon.id)) n.delete(addon.id); else n.add(addon.id); return n; })}
@@ -837,7 +866,11 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                               </div>
                               <div>
                                 <p className="text-white font-black" style={{ fontSize: 14 }}>{addon.label}</p>
-                                <p className="text-gray-500" style={{ fontSize: 11 }}>{addon.note}</p>
+                                <p className="text-gray-500" style={{ fontSize: 11 }}>
+                                  {isAddonPerHourPricing(addon)
+                                    ? `${'\u20B1'}${addon.price.toLocaleString()}/hr × ${duration}h = ${'\u20B1'}${addonCost.toLocaleString()}`
+                                    : (addon.note || `Flat ${'\u20B1'}${addon.price.toLocaleString()}`)}
+                                </p>
                               </div>
                             </div>
                             <span className="font-black" style={{ fontSize: 14, color: accentColor }}>+{'\u20B1'}{addonCost.toLocaleString()}</span>
@@ -879,6 +912,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   </div>
                   <p className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</p>
                 </div>
+                {priceBreakdownPanel}
                 <GCashPaymentSimulator
                   amount={total}
                   refCode={refCode.current}
@@ -1164,44 +1198,18 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
 
   const hoveredBookingInfo = useMemo<Booking | null>(() => {
     if (!hoveredBlock || !hoveredId) return null;
-    const SHARED_SPORTS = ["Basketball", "Volleyball", "Badminton", "Pickleball"];
-    const FULL_COURT_SPORTS = ["Basketball", "Volleyball"];
-    const sportA = SHARED_SPORTS.find(s => hoveredBlock.name.includes(s));
-
     const matching = bookings.filter(b => {
       if (b.date !== selectedDate || b.status === 'cancelled' || b.status === 'completed' || b.status === 'rejected') return false;
-      const sportB = SHARED_SPORTS.find(s => b.court.includes(s) || b.sport === s);
-
-      if (sportA && sportB) {
-        if (FULL_COURT_SPORTS.includes(sportB)) return true;
-        if (FULL_COURT_SPORTS.includes(sportA)) return true;
-        if (sportA !== sportB) return true;
-        return b.court === hoveredBlock.name;
-      }
-      return b.court === hoveredBlock.name;
+      return bookingAppliesToPublishedMap(b, hoveredBlock.name, activeMap?.id, publishedMaps);
     });
-
     return matching.find(b => { const bH = parseInt(b.time.split(':')[0]); return selectedHour >= bH && selectedHour < bH+(b.duration||1); }) || null;
-  }, [hoveredBlock, hoveredId, bookings, selectedDate, selectedHour]);
+  }, [hoveredBlock, hoveredId, bookings, selectedDate, selectedHour, activeMap?.id, publishedMaps]);
 
-  const getCourtBookings = (courtName: string): Booking[] => {
-    const SHARED_SPORTS = ["Basketball", "Volleyball", "Badminton", "Pickleball"];
-    const FULL_COURT_SPORTS = ["Basketball", "Volleyball"];
-    const sportA = SHARED_SPORTS.find(s => courtName.includes(s));
-
-    return bookings.filter(b => {
+  const getCourtBookings = (courtName: string): Booking[] =>
+    bookings.filter(b => {
       if (b.status === 'cancelled' || b.status === 'rejected' || b.status === 'completed') return false;
-      const sportB = SHARED_SPORTS.find(s => b.court.includes(s) || b.sport === s);
-
-      if (sportA && sportB) {
-        if (FULL_COURT_SPORTS.includes(sportB)) return true;
-        if (FULL_COURT_SPORTS.includes(sportA)) return true;
-        if (sportA !== sportB) return true;
-        return b.court === courtName;
-      }
-      return b.court === courtName;
+      return bookingAppliesToPublishedMap(b, courtName, activeMap?.id, publishedMaps);
     });
-  };
 
   const handleConfirmBooking = async (details: {
     court: string; sport: string; date: string; time: string; duration: number;
@@ -1225,6 +1233,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
       ref_code: details.refCode,
       add_ons: details.addOns,
       staff_id: staffId,
+      ...(activeMap?.id ? { facility_map_id: activeMap.id } : {}),
     };
     try {
       const out = await createDeskBooking(payload);
@@ -1248,6 +1257,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
         addOns: details.addOns,
         refCode: details.refCode,
         checkInStatus: 'none',
+        facilityMapId: activeMap?.id,
       });
     }
     setSuccessFlash(`${details.court} booked!`);

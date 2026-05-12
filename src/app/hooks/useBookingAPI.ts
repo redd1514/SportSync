@@ -131,6 +131,66 @@ export const useBookingAPI = () => {
     }
   };
 
+  const checkOutBooking = async (bookingId: string, staffId?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/check-out`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(staffId ? { staff_id: staffId } : {}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((data as { error?: string }).error || 'Check-out failed');
+      return data;
+    } catch (err: any) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestBookingCancellation = async (bookingId: string, userId: string, reason: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/request-cancellation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, reason }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((data as { error?: string }).error || 'Request failed');
+      return data;
+    } catch (err: any) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestBookingReschedule = async (bookingId: string, userId: string, reason: string, newDate: string, newStartTime: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/bookings/${bookingId}/request-reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, reason, requested_new_date: newDate, requested_new_start_time: newStartTime }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((data as { error?: string }).error || 'Request failed');
+      return data;
+    } catch (err: any) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return {
     createBooking,
     checkAvailability,
@@ -140,6 +200,9 @@ export const useBookingAPI = () => {
     createDeskBooking,
     lookupBookingByRef,
     checkInBooking,
+    checkOutBooking,
+    requestBookingCancellation,
+    requestBookingReschedule,
     loading,
     error,
   };

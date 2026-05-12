@@ -160,6 +160,22 @@ export interface AddOn {
   perHour?: boolean; // if true, price is multiplied by session duration
 }
 
+/** Treat as hourly add-on when flag is set or note implies per-hour (KV-loaded add-ons may omit `perHour`). */
+export function isAddonPerHourPricing(a: Pick<AddOn, 'perHour' | 'note'>): boolean {
+  if (a.perHour === true) return true;
+  const n = (a.note || '').toLowerCase();
+  return /\bper\s*hour\b|\b\/\s*hr\b|\bhourly\b|\bper\s*hr\b/.test(n);
+}
+
+export function formatAddonLinePeso(a: AddOn, durationHours: number): { left: string; amount: number } {
+  const hourly = isAddonPerHourPricing(a);
+  const amount = hourly ? a.price * durationHours : a.price;
+  const left = hourly
+    ? `${a.label} (₱${a.price.toLocaleString()}/hr × ${durationHours}h = ₱${amount.toLocaleString()})`
+    : `${a.label} (flat ₱${a.price.toLocaleString()})`;
+  return { left, amount };
+}
+
 export const SPORT_ADDONS: Record<string, AddOn[]> = {
   Basketball: [
     { id: "lights",     label: "Lights",      price: 300,  note: "Evening sessions" },

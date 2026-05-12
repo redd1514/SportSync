@@ -35,6 +35,7 @@ const DEMO_ACCOUNTS = [
   { role: "User Account",  email: "user@jrc.com",  password: "user123",     color: ORANGE,  bg: "rgba(249,115,22,0.08)",  Icon: User },
   { role: "Staff Account", email: "staff@jrc.com", password: "password123", color: "#22c55e", bg: "rgba(34,197,94,0.08)", Icon: Shield },
   { role: "Admin Account", email: "admin@jrc.com", password: "admin123",    color: BLUE,    bg: "rgba(37,99,235,0.08)",    Icon: Shield },
+  { role: "Coach Account", email: "coach@jrc.com", password: "coach123",    color: "#a855f7", bg: "rgba(168,85,247,0.08)",  Icon: GraduationCap },
 ];
 
 /* ── Floating sport particles ── */

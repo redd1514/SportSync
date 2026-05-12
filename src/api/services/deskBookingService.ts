@@ -38,6 +38,8 @@ export type DeskBookingInput = {
   ref_code?: string;
   add_ons?: string;
   staff_id?: string | null;
+  /** Published facility map id (from map editor) for multi-facility scoping */
+  facility_map_id?: string | null;
 };
 
 function pad2(n: number) {
@@ -68,27 +70,21 @@ function isValidUuid(s: string | null | undefined): boolean {
 
 async function resolveCourtId(courtName: string, sportName: string): Promise<string | null> {
   const name = courtName.trim();
-  const { data: exact } = await supabase
-    .from('courts')
-    .select('id, sports!inner(name)')
-    .eq('name', name)
-    .maybeSingle();
+  if (!name) return null;
 
-  if (exact?.id) {
-    const sn = (exact as { sports?: { name?: string } }).sports?.name;
-    if (!sn || sn === sportName) return exact.id as string;
-  }
-
-  const { data: rows } = await supabase
+  const { data: rows, error } = await supabase
     .from('courts')
     .select('id, name, sports!inner(name)')
-    .ilike('name', `%${name}%`);
+    .eq('name', name);
 
+  if (error) throw error;
   if (!rows?.length) return null;
-  const bySport = rows.find(
-    (r: { sports?: { name?: string } }) => r.sports?.name === sportName
+  if (rows.length === 1) return rows[0].id as string;
+  const bySport = rows.find((r: { sports?: { name?: string } }) => r.sports?.name === sportName);
+  if (bySport?.id) return bySport.id as string;
+  throw new Error(
+    `Multiple database courts share the name "${name}". Match sport "${sportName}" or add a facility column to courts.`,
   );
-  return (bySport?.id ?? rows[0]?.id) as string | null;
 }
 
 export async function createDeskBooking(input: DeskBookingInput) {
@@ -111,6 +107,7 @@ export async function createDeskBooking(input: DeskBookingInput) {
     addOns: input.add_ons ?? '',
     source: input.source,
     paymentMethod: input.payment_method,
+    ...(input.facility_map_id ? { facilityMapId: input.facility_map_id } : {}),
   });
 
   const { data: booking, error: bErr } = await supabase
@@ -258,6 +255,17 @@ export async function getAllBookingsFiltered(filters?: {
 }
 
 export async function checkInBooking(bookingId: string, staffId?: string | null) {
+  const { data: cur, error: curErr } = await supabase
+    .from('bookings')
+    .select('id,status')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (curErr) throw curErr;
+  if (!cur) throw new Error('Booking not found');
+  if (cur.status === 'completed') throw new Error('Cannot check-in: booking is already checked out (completed).');
+  if (cur.status === 'cancelled') throw new Error('Cannot check-in: booking is cancelled.');
+  if (cur.status === 'checked_in') return fetchBookingById(bookingId);
+
   const { error: uErr } = await supabase
     .from('bookings')
     .update({ status: 'checked_in', updated_at: new Date().toISOString() })
@@ -277,7 +285,39 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
   return fetchBookingById(bookingId);
 }
 
-export async function listStaffOperationsRecent(limit = 80) {
+export async function checkOutBooking(bookingId: string, staffId?: string | null) {
+  const { data: cur, error: curErr } = await supabase
+    .from('bookings')
+    .select('id,status')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (curErr) throw curErr;
+  if (!cur) throw new Error('Booking not found');
+  if (cur.status === 'completed') return fetchBookingById(bookingId);
+  if (cur.status !== 'checked_in') {
+    throw new Error('Cannot check-out before check-in. Please check-in the guest first, then check-out when they finish.');
+  }
+
+  const { error: uErr } = await supabase
+    .from('bookings')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', bookingId);
+
+  if (uErr) throw uErr;
+
+  if (isValidUuid(staffId)) {
+    await supabase.from('staff_operations').insert({
+      staff_id: staffId,
+      booking_id: bookingId,
+      action: 'check_out',
+      notes: null,
+    });
+  }
+
+  return fetchBookingById(bookingId);
+}
+
+export async function listStaffOperationsRecent(limit = 250) {
   const { data, error } = await supabase
     .from('staff_operations')
     .select(
@@ -292,9 +332,12 @@ export async function listStaffOperationsRecent(limit = 80) {
         id,
         booking_date,
         start_time,
+        end_time,
+        status,
+        total_price,
         qr_code_token,
         notes,
-        courts ( name )
+        courts ( name, sports ( name ) )
       )
     `
     )

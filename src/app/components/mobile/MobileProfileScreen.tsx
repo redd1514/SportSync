@@ -263,7 +263,11 @@ function QRTicketDialog({ booking, onClose }: {
               onClick={async () => {
                 setDownloadBusy(true);
                 try {
-                  await downloadTicketQrPng({ value: qrValue, fileBaseName: fileBase });
+                  await downloadTicketQrPng({
+                    value: qrValue,
+                    fileBaseName: fileBase,
+                    displayCode: booking.refCode || qrValue,
+                  });
                 } catch (e) {
                   console.error(e);
                 } finally {

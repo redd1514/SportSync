@@ -23,7 +23,7 @@ import { ALL_COURTS, RATE_CARD, SPORTS_INFO } from '../sportsData';
 import { getSportColor, SportIcon } from '../SportIcons';
 import { CustomDateTimePicker } from '../shared/CustomDateTimePicker';
 import { useAddons } from '../../contexts/AddonsContext';
-import { useFacilityMap } from '../../contexts/FacilityMapContext';
+import { useFacilityMap, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import { useAnnouncements, type Announcement } from '../../contexts/AnnouncementsContext';
 import { useAdminAPI } from '../../hooks/useAdminAPI';
 
@@ -506,8 +506,9 @@ function FacilityMapBuilderTab() {
   }, {});
   const hasBlockingBookings = (courtName: string) => {
     const today = new Date().toISOString().split('T')[0];
+    if (!activeMap?.id) return 0;
     return bookings.filter(b =>
-      b.court === courtName &&
+      bookingAppliesToPublishedMap(b, courtName, activeMap.id, publishedMaps) &&
       b.date >= today &&
       b.status !== 'cancelled' &&
       b.status !== 'completed' &&
@@ -523,13 +524,13 @@ function FacilityMapBuilderTab() {
     });
   };
   const confirmMaintenance = () => {
-    if (!maintenancePrompt) return;
+    if (!maintenancePrompt || !activeMap?.id) return;
     const { court, target, blockedCount } = maintenancePrompt;
     if (target === 'maintenance' && blockedCount > 0) {
       setMaintenancePrompt(null);
       return;
     }
-    updateBlockStatus(court.id, target);
+    updateBlockStatus(activeMap.id, court.id, target);
     setMaintenancePrompt(null);
   };
 
@@ -702,7 +703,12 @@ function FacilityMapBuilderTab() {
               </p>
               <div className="flex gap-2">
                 <button onClick={() => setConfirmDeleteId(null)} className="flex-1 py-2.5 rounded-xl bg-[#252525] text-gray-300 font-black hover:bg-[#303030] transition-colors" style={{ fontSize: 13 }}>Cancel</button>
-                <button onClick={() => { deleteCourtBlock(confirmDeleteId); setConfirmDeleteId(null); }}
+                <button onClick={() => {
+                  if (activeMap?.id && confirmDeleteId) {
+                    deleteCourtBlock(activeMap.id, confirmDeleteId);
+                  }
+                  setConfirmDeleteId(null);
+                }}
                   className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-black hover:bg-red-600 transition-colors" style={{ fontSize: 13 }}>
                   Yes, Remove
                 </button>

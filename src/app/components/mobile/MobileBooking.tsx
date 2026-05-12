@@ -430,7 +430,7 @@ export function MobileBooking() {
   const addOnList = addonsBySport[selectedSport.name] || [];
   const addOnTotal = addOnList
     .filter(a => selectedAddOns.has(a.id))
-    .reduce((s, a) => s + a.price, 0);
+    .reduce((s, a) => s + (a.perHour ? a.price * selectedDuration : a.price), 0);
 
   let coachingFee = 0;
   if (unlinkedRequest) {
@@ -717,10 +717,14 @@ export function MobileBooking() {
               {Array.from(selectedAddOns).map(id => {
                 const addon = addOnList.find(a => a.id === id);
                 if (!addon) return null;
+                const lineCost = addon.perHour ? addon.price * selectedDuration : addon.price;
+                const leftLabel = addon.perHour
+                  ? `${addon.label} (₱${addon.price.toLocaleString()}/hr × ${selectedDuration}h)`
+                  : `${addon.label} (flat ₱${addon.price.toLocaleString()})`;
                 return (
-                  <div key={id} className="flex justify-between">
-                    <span className="text-gray-400" style={{ fontSize: 13 }}>{addon.label}</span>
-                    <span style={{ fontSize: 13, color: sportColor, fontWeight: 800 }}>+₱{addon.price.toLocaleString()}</span>
+                  <div key={id} className="flex justify-between gap-2">
+                    <span className="text-gray-400 flex-1 min-w-0" style={{ fontSize: 13 }}>{leftLabel}</span>
+                    <span style={{ fontSize: 13, color: sportColor, fontWeight: 800 }} className="flex-shrink-0">+₱{lineCost.toLocaleString()}</span>
                   </div>
                 );
               })}
@@ -746,6 +750,7 @@ export function MobileBooking() {
               <div className="space-y-2">
                 {addOnList.map((addon: AddOn) => {
                   const checked = selectedAddOns.has(addon.id);
+                  const addonCost = addon.perHour ? addon.price * selectedDuration : addon.price;
                   return (
                     <motion.button
                       key={addon.id}
@@ -772,12 +777,14 @@ export function MobileBooking() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <span className="text-white" style={{ fontSize: 13, fontWeight: 700 }}>{addon.label}</span>
-                        {addon.note && (
-                          <span className="text-gray-500 ml-1.5" style={{ fontSize: 11 }}>({addon.note})</span>
-                        )}
+                        <p className="text-gray-500 mt-0.5" style={{ fontSize: 11 }}>
+                          {addon.perHour
+                            ? `₱${addon.price.toLocaleString()}/hr × ${selectedDuration}h = ₱${addonCost.toLocaleString()}`
+                            : (addon.note || `Flat ₱${addon.price.toLocaleString()}`)}
+                        </p>
                       </div>
                       <span className="font-black flex-shrink-0" style={{ fontSize: 13, color: checked ? sportColor : "#6b7280" }}>
-                        +₱{addon.price.toLocaleString()}
+                        +₱{addonCost.toLocaleString()}
                       </span>
                     </motion.button>
                   );

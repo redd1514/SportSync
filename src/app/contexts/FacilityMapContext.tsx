@@ -44,13 +44,13 @@ interface FacilityMapContextType {
   getCourtLiveStatus: (
     courtName: string,
     hour: number,
-    bookings: { court: string; date: string; time: string; duration: number; status: string }[],
+    bookings: { court: string; date: string; time: string; duration: number; status: string; facilityMapId?: string | null }[],
     mapId?: string,
     selectedDate?: string,
   ) => LiveStatus;
   /** Admin court management helpers */
-  updateBlockStatus: (courtId: string, status: 'available' | 'maintenance') => void;
-  deleteCourtBlock: (courtId: string) => void;
+  updateBlockStatus: (mapId: string, courtId: string, status: 'available' | 'maintenance') => void;
+  deleteCourtBlock: (mapId: string, courtId: string) => void;
   isLoading: boolean;
   error: string | null;
 }
@@ -67,6 +67,46 @@ const SPORT_COLORS: Record<string, string> = {
 export const getSportMapColor = (sport: string) => SPORT_COLORS[sport] || '#6b7280';
 
 export const DEFAULT_LAYOUT: CourtBlock[] = [];
+
+/** Built-in demo layout — JRC Ballpark (same positions as original product demo). */
+export const DEMO_FACILITY_MAP_ID = 'jrc-demo-map-v1';
+
+const DEMO_BLOCKS: CourtBlock[] = [
+  { id: 'BASK-1', sport: 'Basketball', name: 'Basketball 1', x: 20, y: 20, width: 250, height: 215, status: 'available' },
+  { id: 'VOLL-1', sport: 'Volleyball', name: 'Volleyball 1', x: 285, y: 20, width: 250, height: 215, status: 'available' },
+  { id: 'BADM-1', sport: 'Badminton', name: 'Badminton 1', x: 550, y: 20, width: 178, height: 88, status: 'available' },
+  { id: 'BADM-2', sport: 'Badminton', name: 'Badminton 2', x: 550, y: 118, width: 178, height: 88, status: 'available' },
+  { id: 'BADM-3', sport: 'Badminton', name: 'Badminton 3', x: 550, y: 216, width: 178, height: 88, status: 'maintenance' },
+  { id: 'PICK-1', sport: 'Pickleball', name: 'Pickleball 1', x: 745, y: 20, width: 195, height: 90, status: 'available' },
+  { id: 'PICK-2', sport: 'Pickleball', name: 'Pickleball 2', x: 745, y: 118, width: 195, height: 90, status: 'available' },
+  { id: 'PICK-3', sport: 'Pickleball', name: 'Pickleball 3', x: 745, y: 216, width: 195, height: 90, status: 'available' },
+  { id: 'BILL-1', sport: 'Billiards', name: 'Billiards 1', x: 20, y: 325, width: 150, height: 105, status: 'available' },
+  { id: 'BILL-2', sport: 'Billiards', name: 'Billiards 2', x: 180, y: 325, width: 150, height: 105, status: 'available' },
+  { id: 'BILL-3', sport: 'Billiards', name: 'Billiards 3', x: 340, y: 325, width: 150, height: 105, status: 'available' },
+  { id: 'BILL-4', sport: 'Billiards', name: 'Billiards 4', x: 500, y: 325, width: 150, height: 105, status: 'available' },
+  { id: 'TTNS-1', sport: 'Table Tennis', name: 'Table Tennis 1', x: 660, y: 325, width: 65, height: 105, status: 'available' },
+  { id: 'TTNS-2', sport: 'Table Tennis', name: 'Table Tennis 2', x: 730, y: 325, width: 65, height: 105, status: 'available' },
+  { id: 'TTNS-3', sport: 'Table Tennis', name: 'Table Tennis 3', x: 800, y: 325, width: 65, height: 105, status: 'available' },
+  { id: 'TTNS-4', sport: 'Table Tennis', name: 'Table Tennis 4', x: 870, y: 325, width: 65, height: 105, status: 'available' },
+];
+
+export const DEFAULT_DEMO_FACILITY_MAP: FacilityMap = {
+  id: DEMO_FACILITY_MAP_ID,
+  name: 'JRC Ballpark',
+  branch: 'Main Branch',
+  location: 'Valenzuela City',
+  canvasW: 960,
+  canvasH: 450,
+  blocks: DEMO_BLOCKS,
+  isPublished: true,
+  publishedAt: new Date().toISOString(),
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+function ensureDemoFacilityMap(list: FacilityMap[]): FacilityMap[] {
+  if (list.some((m) => m.id === DEMO_FACILITY_MAP_ID)) return list;
+  return [DEFAULT_DEMO_FACILITY_MAP, ...list];
+}
 
 /** Normalize maps loaded from KV / JSON (handles snake_case and missing isPublished). */
 function normalizeFacilityMap(raw: unknown): FacilityMap | null {
@@ -107,6 +147,30 @@ function normalizeFacilityMapsPayload(raw: unknown): FacilityMap[] {
   return list.map(normalizeFacilityMap).filter((m): m is FacilityMap => m !== null);
 }
 
+/**
+ * When multiple published maps reuse the same court *name*, only bookings tagged with
+ * `facilityMapId` apply to that map. Legacy rows without `facilityMapId` apply only if
+ * exactly one published map defines that court name.
+ */
+export function bookingAppliesToPublishedMap(
+  booking: { court: string; facilityMapId?: string | null },
+  courtBlockName: string,
+  mapId: string | undefined,
+  publishedMaps: FacilityMap[],
+): boolean {
+  const bc = String(booking.court ?? '').trim();
+  const bn = String(courtBlockName ?? '').trim();
+  if (!bc || !bn || bc !== bn) return false;
+  if (!mapId) return true;
+  const bid = booking.facilityMapId;
+  if (bid) return bid === mapId;
+  const mapsWithCourt = publishedMaps.filter((m) => m.blocks.some((bk) => bk.name === courtBlockName));
+  if (mapsWithCourt.length === 0) return false;
+  if (mapsWithCourt.length === 1) return mapsWithCourt[0].id === mapId;
+  // Legacy rows without facilityMapId: attribute to the first published map that defines this court name.
+  return mapsWithCourt[0].id === mapId;
+}
+
 /* ─── Context ───────────────────────────────────────────────────── */
 const FacilityMapContext = createContext<FacilityMapContextType | undefined>(undefined);
 
@@ -127,28 +191,28 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const fromRemote = normalizeFacilityMapsPayload(remote);
         if (fromRemote.length > 0) {
-          setMaps(fromRemote);
+          setMaps(ensureDemoFacilityMap(fromRemote));
         } else {
           try {
             const saved = typeof window !== 'undefined' ? localStorage.getItem('jrc_facility_maps_v2') : null;
             if (saved) {
               const parsed = JSON.parse(saved) as unknown;
               const fromLocal = normalizeFacilityMapsPayload(parsed);
-              setMaps(fromLocal);
+              setMaps(ensureDemoFacilityMap(fromLocal));
               if (fromLocal.length > 0) {
-                await putAppData(FACILITY_MAPS_KV_KEY, fromLocal);
+                await putAppData(FACILITY_MAPS_KV_KEY, ensureDemoFacilityMap(fromLocal));
               }
               localStorage.removeItem('jrc_facility_maps_v2');
             } else {
-              setMaps([]);
+              setMaps(ensureDemoFacilityMap([]));
             }
           } catch {
-            setMaps([]);
+            setMaps(ensureDemoFacilityMap([]));
           }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load maps');
-        setMaps([]);
+        setMaps(ensureDemoFacilityMap([]));
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -231,30 +295,31 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** Update a single block's status inside the published/demo map */
-  const updateBlockStatus = useCallback((courtId: string, status: 'available' | 'maintenance') => {
-    setMaps(prev => prev.map(m => ({
-      ...m,
-      blocks: m.blocks.map(b => b.id === courtId ? { ...b, status } : b),
-    })));
+  /** Update one block's status on a single facility map (avoids duplicate ids across maps). */
+  const updateBlockStatus = useCallback((mapId: string, courtId: string, status: 'available' | 'maintenance') => {
+    setMaps(prev => prev.map(m =>
+      m.id !== mapId
+        ? m
+        : { ...m, blocks: m.blocks.map(b => (b.id === courtId ? { ...b, status } : b)) },
+    ));
   }, []);
 
-  /** Remove a court block from all maps */
-  const deleteCourtBlock = useCallback((courtId: string) => {
-    setMaps(prev => prev.map(m => ({
-      ...m,
-      blocks: m.blocks.filter(b => b.id !== courtId),
-    })));
+  /** Remove a court block from one map only */
+  const deleteCourtBlock = useCallback((mapId: string, courtId: string) => {
+    setMaps(prev => prev.map(m =>
+      m.id !== mapId ? m : { ...m, blocks: m.blocks.filter(b => b.id !== courtId) },
+    ));
   }, []);
 
   /* ── Live court status (no hardcoded demo date) ── */
   const getCourtLiveStatus = useCallback((
     courtName: string,
     hour: number,
-    bookings: { court: string; date: string; time: string; duration: number; status: string }[],
+    bookings: { court: string; date: string; time: string; duration: number; status: string; facilityMapId?: string | null }[],
     mapId?: string,
     selectedDate?: string,
   ): LiveStatus => {
+    const publishedMaps = maps.filter((m) => m.isPublished);
     const targetMap = mapId ? maps.find(m => m.id === mapId) : firstPublished;
     const block = targetMap?.blocks.find(b => b.name === courtName);
     if (block?.status === 'maintenance') return 'maintenance';
@@ -262,32 +327,11 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
     const today  = getLocalDateString(new Date());
     const checkDate = selectedDate || today;
 
-    const SHARED_SPORTS = ["Basketball", "Volleyball", "Badminton", "Pickleball"];
-    const FULL_COURT_SPORTS = ["Basketball", "Volleyball"];
-    const sportA = SHARED_SPORTS.find(s => courtName.includes(s));
-
     const isOccupied = bookings.some(b => {
       if (b.status === 'cancelled' || b.status === 'completed' || b.status === 'rejected') return false;
       if (b.date !== checkDate) return false;
+      if (!bookingAppliesToPublishedMap(b, courtName, mapId, publishedMaps)) return false;
 
-      const sportB = SHARED_SPORTS.find(s => b.court.includes(s) || b.sport === s);
-
-      if (sportA && sportB) {
-        if (FULL_COURT_SPORTS.includes(sportB)) {
-          // existing booking is full court -> blocks everything
-        } else if (FULL_COURT_SPORTS.includes(sportA)) {
-          // checking a full court, but sub court is booked -> full court is blocked
-        } else if (sportA !== sportB) {
-          // different sub-courts (Badminton vs Pickleball) -> block each other
-        } else {
-          // same sub-court sport -> only blocked if exact same court
-          if (b.court !== courtName) return false;
-        }
-      } else {
-        // non-shared sports -> only blocked if exact same court
-        if (b.court !== courtName) return false;
-      }
-      
       const [bHour] = b.time.split(':').map(Number);
       return hour >= bHour && hour < bHour + (b.duration || 1);
     });

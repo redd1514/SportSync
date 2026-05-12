@@ -1,16 +1,31 @@
 import { Hono } from 'hono';
 import { bookingService } from '../services/bookingService.ts';
 import { BookingRequest } from '../types';
+import { supabase } from '../services/supabaseClient.ts';
 import {
   createDeskBooking,
   listCalendarBookings,
   lookupBookingByRefOrId,
   checkInBooking,
+  checkOutBooking,
   type DeskBookingInput,
 } from '../services/deskBookingService.ts';
 import { deskAdminRowToClientBooking } from '../utils/bookingMap.ts';
 
 const bookingsRouter = new Hono();
+
+function addHoursToTime(time: string, hours: number): string {
+  const [hRaw, mRaw = '0', sRaw = '0'] = String(time || '').split(':');
+  const h = parseInt(hRaw || '0', 10);
+  const m = parseInt(mRaw || '0', 10);
+  const s = parseInt(sRaw || '0', 10);
+  const total = h * 3600 + m * 60 + s + Math.round(hours * 3600);
+  const wrapped = ((total % 86400) + 86400) % 86400;
+  const outH = Math.floor(wrapped / 3600);
+  const outM = Math.floor((wrapped % 3600) / 60);
+  const outS = wrapped % 60;
+  return `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}:${String(outS).padStart(2, '0')}`;
+}
 
 // --- Specific paths first (avoid :param shadowing) ---
 
@@ -77,6 +92,7 @@ bookingsRouter.post('/desk', async (c) => {
       ref_code: body.ref_code,
       add_ons: body.add_ons,
       staff_id: staffRaw,
+      facility_map_id: (body as { facility_map_id?: string }).facility_map_id ?? null,
     };
 
     const out = await createDeskBooking(input);
@@ -102,6 +118,116 @@ bookingsRouter.patch('/:id/check-in', async (c) => {
     return c.json(deskAdminRowToClientBooking(row));
   } catch (error: any) {
     return c.json({ error: error.message || 'Check-in failed' }, 400);
+  }
+});
+
+bookingsRouter.patch('/:id/check-out', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const staffId = (body as { staff_id?: string }).staff_id;
+    const row = await checkOutBooking(id, staffId);
+    return c.json(deskAdminRowToClientBooking(row));
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Check-out failed' }, 400);
+  }
+});
+
+// User-facing: request cancellation (creates booking_requests row, pending approval)
+bookingsRouter.post('/:id/request-cancellation', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const userId = String((body as any).user_id || '').trim();
+    const reason = String((body as any).reason || '').trim();
+    if (!userId) return c.json({ error: 'user_id required' }, 400);
+    if (!reason) return c.json({ error: 'reason required' }, 400);
+
+    const { data: b, error: bErr } = await supabase.from('bookings').select('id,status,user_id').eq('id', id).maybeSingle();
+    if (bErr) throw bErr;
+    if (!b) return c.json({ error: 'Booking not found' }, 404);
+    if (String(b.user_id) !== userId) return c.json({ error: 'Forbidden' }, 403);
+    if (b.status === 'cancelled' || b.status === 'completed') return c.json({ error: 'Booking already finished' }, 400);
+
+    const { data: existing } = await supabase
+      .from('booking_requests')
+      .select('id,status')
+      .eq('booking_id', id)
+      .eq('status', 'pending')
+      .maybeSingle();
+    if (existing?.id) return c.json({ error: 'A request is already pending for this booking.' }, 409);
+
+    const row = {
+      booking_id: id,
+      request_type: 'cancellation',
+      reason,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from('booking_requests').insert([row]).select('*').single();
+    if (error) throw error;
+    return c.json(data, 201);
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Request failed' }, 400);
+  }
+});
+
+// User-facing: request reschedule (creates booking_requests row, pending approval)
+bookingsRouter.post('/:id/request-reschedule', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const userId = String((body as any).user_id || '').trim();
+    const reason = String((body as any).reason || '').trim();
+    const newDate = String((body as any).requested_new_date || '').trim();
+    const newStart = String((body as any).requested_new_start_time || '').trim(); // "HH:MM"
+    if (!userId) return c.json({ error: 'user_id required' }, 400);
+    if (!newDate || !newStart) return c.json({ error: 'requested_new_date and requested_new_start_time required' }, 400);
+
+    const { data: b, error: bErr } = await supabase
+      .from('bookings')
+      .select('id,status,user_id,start_time,end_time')
+      .eq('id', id)
+      .maybeSingle();
+    if (bErr) throw bErr;
+    if (!b) return c.json({ error: 'Booking not found' }, 404);
+    if (String(b.user_id) !== userId) return c.json({ error: 'Forbidden' }, 403);
+    if (b.status === 'cancelled' || b.status === 'completed') return c.json({ error: 'Booking already finished' }, 400);
+
+    const { data: existing } = await supabase
+      .from('booking_requests')
+      .select('id,status')
+      .eq('booking_id', id)
+      .eq('status', 'pending')
+      .maybeSingle();
+    if (existing?.id) return c.json({ error: 'A request is already pending for this booking.' }, 409);
+
+    // Derive duration from current start/end if possible
+    let durHours = 1;
+    try {
+      const s = String(b.start_time || '').slice(0, 5);
+      const e = String(b.end_time || '').slice(0, 5);
+      const sMin = parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3, 5), 10);
+      const eMin = parseInt(e.slice(0, 2), 10) * 60 + parseInt(e.slice(3, 5), 10);
+      const diff = eMin - sMin;
+      if (diff > 0) durHours = diff / 60;
+    } catch {}
+
+    const row = {
+      booking_id: id,
+      request_type: 'reschedule',
+      reason: reason || null,
+      requested_new_date: newDate,
+      requested_new_start_time: `${newStart}:00`,
+      requested_new_end_time: addHoursToTime(`${newStart}:00`, durHours),
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from('booking_requests').insert([row]).select('*').single();
+    if (error) throw error;
+    return c.json(data, 201);
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Request failed' }, 400);
   }
 });
 

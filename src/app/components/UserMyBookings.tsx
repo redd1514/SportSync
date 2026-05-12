@@ -30,7 +30,7 @@ const calculateDuration = (startTime: string, endTime: string): number => {
 
 export function UserMyBookings() {
   const { user, updateBooking, addCancellationRequest, bookings: contextBookings } = useUser();
-  const { cancelBooking, getQRCodeUrl, loading, error: apiError } = useBookingAPI();
+  const { getQRCodeUrl, loading, error: apiError, requestBookingCancellation, requestBookingReschedule } = useBookingAPI();
   
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -66,17 +66,8 @@ export function UserMyBookings() {
     if (!selectedBooking || !cancellationReason) return;
 
     try {
-      await cancelBooking(selectedBooking, cancellationReason);
-      
-      const request = {
-        id: `CR${Date.now()}`,
-        bookingId: selectedBooking,
-        reason: cancellationReason,
-        requestedAt: new Date().toISOString(),
-        status: 'pending' as const
-      };
-
-      addCancellationRequest(request);
+      if (!user?.id) throw new Error('Please sign in again.');
+      await requestBookingCancellation(selectedBooking, user.id, cancellationReason);
       updateBooking(selectedBooking, { cancellationRequested: true, cancellationReason });
       
       setShowCancelModal(false);
@@ -89,21 +80,25 @@ export function UserMyBookings() {
     }
   };
 
-  const handleReschedule = () => {
+  const handleReschedule = async () => {
     if (!selectedBooking || !rescheduleDate || !rescheduleTime) return;
 
-    updateBooking(selectedBooking, {
-      date: rescheduleDate,
-      time: rescheduleTime,
-      status: 'rescheduled'
-    });
+    try {
+      if (!user?.id) throw new Error('Please sign in again.');
+      await requestBookingReschedule(selectedBooking, user.id, 'Reschedule request', rescheduleDate, rescheduleTime);
+      updateBooking(selectedBooking, {
+        status: 'rescheduled'
+      });
 
-    setShowRescheduleModal(false);
-    setSelectedBooking(null);
-    setRescheduleDate('');
-    setRescheduleTime('');
-    
-    alert('Booking rescheduled successfully!');
+      setShowRescheduleModal(false);
+      setSelectedBooking(null);
+      setRescheduleDate('');
+      setRescheduleTime('');
+      
+      alert('Reschedule request submitted! Admin will review your request.');
+    } catch (e: any) {
+      alert(`Failed to reschedule: ${e.message}`);
+    }
   };
 
   const StatusBadge = ({ status }: { status: string }) => {

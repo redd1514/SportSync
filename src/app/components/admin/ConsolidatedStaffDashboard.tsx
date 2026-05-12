@@ -12,6 +12,9 @@ import {
   Trash2,
   Eye,
   RotateCcw,
+  Filter,
+  Download,
+  ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../../contexts/UserContext';
@@ -21,7 +24,7 @@ import { AdminBookingCalendar } from './AdminBookingCalendar';
 import { useStaffAPI } from '../../hooks/useStaffAPI';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { ALL_COURTS, SPORTS_INFO } from '../sportsData';
-import { useFacilityMap, getSportMapColor } from '../../contexts/FacilityMapContext';
+import { useFacilityMap, getSportMapColor, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import type { CourtBlock } from '../../contexts/FacilityMapContext';
 import { getSportColor, SportIcon } from '../SportIcons';
 import { FacilityMapViewer } from '../shared/FacilityMapViewer';
@@ -43,10 +46,12 @@ interface ConfirmOptions {
   title: string; body: string; confirmLabel: string;
   confirmColor: string; icon: React.ReactNode;
   onConfirm: () => void; onCancel: () => void;
+  /** e.g. z-[1100] so nested confirmations sit above other overlays */
+  stackZ?: string;
 }
 function ConfirmModal({ opts }: { opts: ConfirmOptions }) {
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className={`fixed inset-0 ${opts.stackZ || 'z-[999]'} flex items-center justify-center bg-black/80 backdrop-blur-sm p-4`}>
       <motion.div initial={{ scale: 0.9, opacity: 0, y: 12 }} animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0 }}
         className="bg-[#1C1E27] rounded-3xl p-6 w-full max-w-sm border border-white/[0.08] shadow-2xl">
@@ -67,6 +72,108 @@ function ConfirmModal({ opts }: { opts: ConfirmOptions }) {
           </button>
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+type PillSelectOption<T extends string> = {
+  id: T;
+  label: string;
+  icon?: React.ReactNode;
+  hint?: string;
+};
+
+function PillSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: PillSelectOption<T>[];
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((o) => o.id === value) || options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-2 rounded-xl px-3 py-1.5 border border-white/10 bg-white/[0.06] hover:bg-white/[0.08] transition-colors font-black text-gray-100"
+        style={{ fontSize: 12 }}
+      >
+        <span className="text-gray-400">{selected?.icon}</span>
+        <span className="whitespace-nowrap">{selected?.label}</span>
+        <ChevronDown size={14} className={`text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            className="absolute left-0 mt-2 z-[1200] min-w-[220px] rounded-2xl border border-white/10 bg-[#141824] shadow-2xl overflow-hidden"
+            role="menu"
+          >
+            <div className="p-2 space-y-1">
+              {options.map((o) => {
+                const active = o.id === value;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onChange(o.id);
+                      setOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl transition-colors flex items-start gap-2"
+                    style={{
+                      background: active ? 'rgba(0,71,171,0.25)' : 'transparent',
+                      border: active ? '1px solid rgba(0,71,171,0.35)' : '1px solid transparent',
+                    }}
+                  >
+                    <span className="mt-0.5 text-blue-300">{o.icon}</span>
+                    <span className="min-w-0">
+                      <span className="block text-white font-black" style={{ fontSize: 12 }}>{o.label}</span>
+                      {o.hint ? (
+                        <span className="block text-gray-500 font-black mt-0.5" style={{ fontSize: 10 }}>{o.hint}</span>
+                      ) : null}
+                    </span>
+                    {active ? <Check size={14} className="ml-auto mt-0.5 text-blue-400" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -157,10 +264,13 @@ async function safeDisposeHtml5Scanner(h: Html5Qrcode | null | undefined): Promi
 // ── Ticket Verification ──────────────────────────────────────────────────────
 function TicketVerification() {
   const { bookings, updateBooking, addBooking, user } = useUser();
-  const { lookupBookingByRef, checkInBooking } = useBookingAPI();
+  const { lookupBookingByRef, checkInBooking, checkOutBooking } = useBookingAPI();
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<typeof bookings[0] | null | 'notfound'>(null);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [scanMode, setScanMode] = useState<'check_in' | 'check_out'>('check_in');
+  const [actionError, setActionError] = useState<string | null>(null);
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -233,6 +343,7 @@ function TicketVerification() {
     setResult(null);
     setNotFoundHint(null);
     setCameraError(null);
+    setActionError(null);
     decodeLock.current = false;
   }, []);
 
@@ -335,6 +446,7 @@ function TicketVerification() {
 
   const handleCheckIn = async () => {
     if (!result || result === 'notfound') return;
+    setActionError(null);
     setCheckingIn(true);
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
@@ -344,10 +456,36 @@ function TicketVerification() {
     } catch {
       /* still mark locally if API unavailable */
     }
-    updateBooking(result.id, { checkInStatus: 'checked_in', checkInTime: t });
-    setResult({ ...result, checkInStatus: 'checked_in', checkInTime: t });
+    updateBooking(result.id, { checkInStatus: 'checked_in', checkInTime: t, status: 'checked_in' as any });
+    setResult({ ...result, checkInStatus: 'checked_in', checkInTime: t, status: 'checked_in' as any });
     setCheckingIn(false);
   };
+
+  const handleCheckOut = async () => {
+    if (!result || result === 'notfound') return;
+    setActionError(null);
+    setCheckingOut(true);
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
+    const t = new Date().toISOString();
+    try {
+      await checkOutBooking(result.id, staffId);
+    } catch (e: any) {
+      setActionError(e?.message || 'Check-out failed. Please try again.');
+      setCheckingOut(false);
+      return;
+    }
+    updateBooking(result.id, { checkOutStatus: 'checked_out', checkOutTime: t, status: 'completed' });
+    setResult({ ...result, checkOutStatus: 'checked_out', checkOutTime: t, status: 'completed' } as any);
+    setCheckingOut(false);
+  };
+
+  const bookingStatus = (result && result !== 'notfound' ? (result as any).status : null) as string | null;
+  const isCompleted = bookingStatus === 'completed';
+  const isCheckedIn = bookingStatus === 'checked_in' || (result && result !== 'notfound' && (result as any).checkInStatus === 'checked_in');
+
+  const canCheckIn = !!result && result !== 'notfound' && !isCompleted && !isCheckedIn;
+  const canCheckOut = !!result && result !== 'notfound' && !isCompleted && isCheckedIn;
 
   const formatTime = (t: string) => {
     const h = parseInt(t.split(':')[0]);
@@ -362,8 +500,37 @@ function TicketVerification() {
         </div>
         <div>
           <p className="text-white font-black" style={{ fontSize: 15 }}>Ticket Verification</p>
-          <p className="text-gray-500" style={{ fontSize: 11 }}>Find ticket → confirm guest → check in. Works on phone and desktop (HTTPS).</p>
+          <p className="text-gray-500" style={{ fontSize: 11 }}>Scan receipt → verify details → check-in or check-out. Works on phone and desktop (HTTPS).</p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => setScanMode('check_in')}
+          className="px-3 py-1.5 rounded-xl font-black border transition-colors"
+          style={{
+            fontSize: 12,
+            background: scanMode === 'check_in' ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.04)',
+            color: scanMode === 'check_in' ? '#bbf7d0' : '#9ca3af',
+            borderColor: scanMode === 'check_in' ? 'rgba(34,197,94,0.35)' : 'rgba(255,255,255,0.10)',
+          }}
+        >
+          Check-in
+        </button>
+        <button
+          type="button"
+          onClick={() => setScanMode('check_out')}
+          className="px-3 py-1.5 rounded-xl font-black border transition-colors"
+          style={{
+            fontSize: 12,
+            background: scanMode === 'check_out' ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.04)',
+            color: scanMode === 'check_out' ? '#bfdbfe' : '#9ca3af',
+            borderColor: scanMode === 'check_out' ? 'rgba(59,130,246,0.35)' : 'rgba(255,255,255,0.10)',
+          }}
+        >
+          Check-out
+        </button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2">
@@ -447,13 +614,21 @@ function TicketVerification() {
             }}
           >
             <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-              {result.checkInStatus === 'checked_in' ? (
+              {scanMode === 'check_out' && (result as any).checkOutStatus === 'checked_out' ? (
+                <CheckCircle size={15} className="text-blue-400" />
+              ) : result.checkInStatus === 'checked_in' ? (
                 <CheckCircle size={15} className="text-green-400" />
               ) : (
                 <QrCode size={15} className="text-[#60a5fa]" />
               )}
               <span className="text-white font-black" style={{ fontSize: 13 }}>
-                {result.checkInStatus === 'checked_in' ? 'Already Checked In' : 'Booking verified'}
+                {scanMode === 'check_out'
+                  ? (result as any).checkOutStatus === 'checked_out'
+                    ? 'Already Checked Out'
+                    : 'Booking verified'
+                  : result.checkInStatus === 'checked_in'
+                    ? 'Already Checked In'
+                    : 'Booking verified'}
               </span>
               <span className="ml-auto text-gray-500 font-black" style={{ fontSize: 11 }}>{result.refCode}</span>
             </div>
@@ -472,7 +647,16 @@ function TicketVerification() {
                 </div>
               ))}
             </div>
-            {result.checkInStatus !== 'checked_in' && (
+
+            {actionError ? (
+              <div className="px-4 pb-3">
+                <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-amber-200 font-black" style={{ fontSize: 12 }}>
+                  {actionError}
+                </div>
+              </div>
+            ) : null}
+
+            {scanMode === 'check_in' && result.checkInStatus !== 'checked_in' && (
               <div className="px-4 pb-4 space-y-2">
                 <p className="text-gray-500 text-center leading-relaxed" style={{ fontSize: 11 }}>
                   Details match the guest in front of you? Use check-in only after you have accepted them at the desk.
@@ -480,9 +664,9 @@ function TicketVerification() {
                 <button
                   type="button"
                   onClick={() => void handleCheckIn()}
-                  disabled={checkingIn}
+                  disabled={checkingIn || !canCheckIn}
                   className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
-                  style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: checkingIn ? 0.7 : 1 }}
+                  style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: (checkingIn || !canCheckIn) ? 0.55 : 1 }}
                 >
                   {checkingIn ? (
                     <>
@@ -494,13 +678,75 @@ function TicketVerification() {
                     </>
                   )}
                 </button>
+                {!canCheckIn && isCompleted ? (
+                  <p className="text-gray-600 text-center font-black" style={{ fontSize: 11 }}>This ticket is already checked out (completed).</p>
+                ) : null}
+                {!canCheckIn && isCheckedIn && !isCompleted ? (
+                  <p className="text-gray-600 text-center font-black" style={{ fontSize: 11 }}>Already checked in — switch to Check-out to finish.</p>
+                ) : null}
               </div>
             )}
-            {result.checkInStatus === 'checked_in' && result.checkInTime && (
+            {scanMode === 'check_out' && (result as any).checkOutStatus !== 'checked_out' && (
+              <div className="px-4 pb-4 space-y-2">
+                <p className="text-gray-500 text-center leading-relaxed" style={{ fontSize: 11 }}>
+                  Guest finished their session? Use check-out to record the end time in the activity log.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleCheckOut()}
+                  disabled={checkingOut || !canCheckOut}
+                  className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg,#3b82f6,#2563eb)', fontSize: 14, opacity: (checkingOut || !canCheckOut) ? 0.55 : 1 }}
+                >
+                  {checkingOut ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} /> Mark as Checked-Out
+                    </>
+                  )}
+                </button>
+                {!canCheckOut && !isCheckedIn && !isCompleted ? (
+                  <div className="text-center space-y-1">
+                    <p className="text-amber-200/80 font-black" style={{ fontSize: 11 }}>Not checked in yet — check-in first to avoid mistakes.</p>
+                    <button
+                      type="button"
+                      onClick={() => setScanMode('check_in')}
+                      className="inline-flex items-center justify-center px-3 py-2 rounded-xl font-black text-emerald-200 border border-emerald-500/25 hover:bg-emerald-500/10 transition-colors"
+                      style={{ fontSize: 12 }}
+                    >
+                      Switch to Check-in
+                    </button>
+                  </div>
+                ) : null}
+                {!canCheckOut && isCompleted ? (
+                  <p className="text-gray-600 text-center font-black" style={{ fontSize: 11 }}>This ticket is already checked out (completed).</p>
+                ) : null}
+              </div>
+            )}
+            {scanMode === 'check_in' && result.checkInStatus === 'checked_in' && result.checkInTime && (
               <div className="px-4 pb-4 space-y-3">
                 <p className="text-green-400 font-black text-center" style={{ fontSize: 12 }}>
                   Checked in at{' '}
                   {new Date(result.checkInTime).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => clearVerification()}
+                  className="w-full py-3 rounded-xl font-black text-gray-200 border border-white/12 hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+                  style={{ fontSize: 13 }}
+                >
+                  <RotateCcw size={15} /> Verify next guest
+                </button>
+              </div>
+            )}
+            {scanMode === 'check_out' && (result as any).checkOutStatus === 'checked_out' && (result as any).checkOutTime && (
+              <div className="px-4 pb-4 space-y-3">
+                <p className="text-blue-400 font-black text-center" style={{ fontSize: 12 }}>
+                  Checked out at{' '}
+                  {new Date((result as any).checkOutTime).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
                 </p>
                 <button
                   type="button"
@@ -591,26 +837,92 @@ function TicketVerification() {
   );
 }
 
-// ── Sample activity rows (API down, timeout, or empty DB) ───────────────────
+// ── Activity log: Manila time + rich fields (staff_operations → bookings) ───
+const ACTIVITY_TZ = 'Asia/Manila';
+
+/**
+ * Supabase often returns `timestamptz` as ISO with `Z`, but some paths return
+ * `YYYY-MM-DDTHH:mm:ss` without offset (UTC instant stored naïvely). Parsing the latter
+ * as local time shifts Manila wall clocks by 8h — treat naive strings as UTC.
+ */
+function parseActivityUtcMillis(iso: string | number | null | undefined): number {
+  if (iso == null) return NaN;
+  if (typeof iso === 'number' && Number.isFinite(iso)) return iso;
+  if (typeof iso !== 'string') return NaN;
+  const s = iso.trim();
+  if (!s) return NaN;
+  if (/[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) {
+    return new Date(s).getTime();
+  }
+  const norm = s.includes('T') ? s : s.replace(' ', 'T');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(norm)) {
+    const asUtc = new Date(`${norm}Z`);
+    if (!Number.isNaN(asUtc.getTime())) return asUtc.getTime();
+  }
+  return new Date(norm).getTime();
+}
+
+function formatPersonDisplayName(raw: string): string {
+  if (!raw || raw === '—') return '—';
+  return raw
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (/^[A-Z]{2,3}$/.test(part)) return part;
+      if (part.includes('-')) {
+        return part
+          .split('-')
+          .map((seg) => (seg ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase() : ''))
+          .join('-');
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 function buildDemoStaffActivity(): any[] {
   const today = new Date().toISOString().split('T')[0];
   const iso = (h: number) => `${String(h).padStart(2, '0')}:00:00`;
-  const mk = (id: string, action: string, name: string, phone: string, court: string, startH: number, ref: string, minsAgo: number) => ({
-    id,
-    action,
-    notes: 'Demo entry — shown when live API has no rows or is unreachable',
-    created_at: new Date(Date.now() - minsAgo * 60_000).toISOString(),
-    staff_id: null,
-    booking_id: `demo-booking-${id}`,
-    bookings: {
-      id: `demo-booking-${id}`,
-      booking_date: today,
-      start_time: iso(startH),
-      qr_code_token: ref,
-      notes: JSON.stringify({ customerName: name, customerPhone: phone, addOns: 'Lights (evening)' }),
-      courts: { name: court },
-    },
-  });
+  const sportForCourt = (court: string) =>
+    court.includes('Badminton') ? 'Badminton' : court.includes('Pickleball') ? 'Pickleball' : court.includes('Volleyball') ? 'Volleyball' : 'Basketball';
+  const mk = (
+    id: string,
+    action: string,
+    name: string,
+    phone: string,
+    court: string,
+    startH: number,
+    ref: string,
+    minsAgo: number,
+  ) => {
+    const endH = startH + 3;
+    return {
+      id,
+      action,
+      notes: 'Demo row — replace when the API returns live staff_operations from Supabase.',
+      created_at: new Date(Date.now() - minsAgo * 60_000).toISOString(),
+      staff_id: null,
+      booking_id: `demo-booking-${id}`,
+      bookings: {
+        id: `demo-booking-${id}`,
+        booking_date: today,
+        start_time: iso(startH),
+        end_time: iso(endH),
+        status: 'confirmed',
+        total_price: 1350,
+        qr_code_token: ref,
+        notes: JSON.stringify({
+          customerName: name,
+          customerPhone: phone,
+          addOns: 'Lights (evening) | Aircon (₱1,500/hr × 3h)',
+          source: action === 'walk_in_booking' ? 'walk_in' : 'map_staff',
+          paymentMethod: 'cash',
+          sport: sportForCourt(court),
+        }),
+        courts: { name: court, sports: { name: sportForCourt(court) } },
+      },
+    };
+  };
   return [
     mk('demo-op-1', 'walk_in_booking', 'Rico Mendoza', '09171234567', 'Basketball 1', 18, 'JRC-DEMO1A', 12),
     mk('demo-op-2', 'check_in', 'Aira Dela Cruz', '09981239876', 'Badminton 2', 19, 'JRC-DEMO1B', 45),
@@ -638,41 +950,230 @@ function formatActivityTime12(t: string | null | undefined): string {
   return `${mod}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+/** Wall-clock in Philippines */
+function formatActivityLoggedAt(iso: string | number | null | undefined): string {
+  const ms = parseActivityUtcMillis(iso);
+  if (Number.isNaN(ms)) return '—';
+  return new Date(ms).toLocaleString('en-PH', {
+    timeZone: ACTIVITY_TZ,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function formatActivityLoggedDate(iso: string | number | null | undefined): string {
+  const ms = parseActivityUtcMillis(iso);
+  if (Number.isNaN(ms)) return '—';
+  return new Date(ms).toLocaleDateString('en-PH', {
+    timeZone: ACTIVITY_TZ,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function formatActivityLoggedTime(iso: string | number | null | undefined): string {
+  const ms = parseActivityUtcMillis(iso);
+  if (Number.isNaN(ms)) return '—';
+  return new Date(ms).toLocaleTimeString('en-PH', {
+    timeZone: ACTIVITY_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function manilaDateKeyFromIso(iso: string | number | null | undefined): string {
+  const ms = parseActivityUtcMillis(iso);
+  if (Number.isNaN(ms)) return '';
+  return new Date(ms).toLocaleDateString('en-CA', { timeZone: ACTIVITY_TZ });
+}
+
+function manilaTodayKey(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: ACTIVITY_TZ });
+}
+
+function formatRelativeShort(iso: string | number | null | undefined): string {
+  const t = parseActivityUtcMillis(iso);
+  if (Number.isNaN(t)) return '';
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if (sec < 45) return 'Just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 36) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+const ACTIVITY_ACTION_META: Record<string, { title: string; blurb: string }> = {
+  walk_in_booking: {
+    title: 'Walk-in booking',
+    blurb: 'Staff recorded a new walk-in reservation at the front desk.',
+  },
+  desk_booking: {
+    title: 'Desk / map booking',
+    blurb: 'Staff or customer completed a booking through the facility map or desk flow.',
+  },
+  check_in: {
+    title: 'Check-in',
+    blurb: 'Guest checked in with a ticket or QR code.',
+  },
+  check_out: {
+    title: 'Check-out',
+    blurb: 'Guest checked out at the desk after finishing their session.',
+  },
+};
+
 function formatActivityAction(action: string | undefined): string {
-  return String(action || '—')
+  const k = String(action || '').toLowerCase();
+  return ACTIVITY_ACTION_META[k]?.title || String(action || '—')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function humanizeBookingStatus(s: string | undefined): string {
+  if (!s) return '—';
+  const m: Record<string, string> = {
+    confirmed: 'Confirmed',
+    checked_in: 'Checked in',
+    pending: 'Pending payment',
+    cancelled: 'Cancelled',
+    completed: 'Completed',
+  };
+  return m[s] || s.replace(/_/g, ' ');
+}
+
+function formatSourceChannel(raw: unknown): string {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('walk')) return 'Walk-in (desk)';
+  if (s.includes('map_staff')) return 'Facility map (staff)';
+  if (s.includes('map_customer')) return 'Facility map (customer app)';
+  if (s.includes('desk')) return 'Desk';
+  return s ? s.replace(/_/g, ' ') : '—';
+}
+
 type ActivitySortKey = 'loggedAt' | 'action' | 'customer' | 'court' | 'ref';
+type ActivityPeriod = 'today' | '7d' | '30d' | 'all';
 
 function flattenActivityRow(row: any) {
   const b = row.bookings;
   const meta = b?.notes ? parseActivityBookingNotes(b.notes) : {};
-  const loggedAtMs = row.created_at ? new Date(row.created_at).getTime() : 0;
-  const customer =
+  const loggedAtMsRaw = parseActivityUtcMillis(row.created_at);
+  const loggedAtMs = Number.isNaN(loggedAtMsRaw) ? 0 : loggedAtMsRaw;
+  const customerRaw =
     (meta.customerName as string) ||
     (meta.customer_name as string) ||
-    '—';
+    '';
+  const customer = customerRaw ? formatPersonDisplayName(customerRaw) : '—';
+  const sportMeta = (meta.sport as string) || b?.courts?.sports?.name || '—';
+  const actionKey = String(row.action || '').toLowerCase();
+  const metaBlurb = ACTIVITY_ACTION_META[actionKey]?.blurb || '';
+  const amount = b?.total_price != null ? Number(b.total_price) : null;
+  const payMethod = (meta.paymentMethod as string) || (meta.payment_method as string) || '—';
+  const addOns = (meta.addOns as string) || (meta.add_ons as string) || '';
+  const facilityMapId = (meta.facilityMapId as string) || (meta.facility_map_id as string) || '';
+  const timeRange =
+    b?.start_time && b?.end_time
+      ? `${formatActivityTime12(b.start_time)} – ${formatActivityTime12(b.end_time)}`
+      : formatActivityTime12(b?.start_time);
+
+  const summaryLine = b
+    ? `${formatActivityAction(row.action)} · ${b.courts?.name || 'Court'} · ${customer !== '—' ? customer : 'Guest'}`
+    : `${formatActivityAction(row.action)} · ${row.notes ? String(row.notes).slice(0, 80) : 'No booking'}`;
+
   return {
     raw: row,
     id: String(row.id),
     loggedAtMs,
-    loggedAtLabel: row.created_at
-      ? new Date(row.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
-      : '—',
-    actionKey: String(row.action || '').toLowerCase(),
+    loggedAtLabel: formatActivityLoggedAt(row.created_at),
+    loggedDateLabel: formatActivityLoggedDate(row.created_at),
+    loggedTimeLabel: formatActivityLoggedTime(row.created_at),
+    loggedManilaDate: manilaDateKeyFromIso(row.created_at),
+    relativeLabel: formatRelativeShort(row.created_at),
+    actionKey,
     actionLabel: formatActivityAction(row.action),
+    actionBlurb: metaBlurb,
     customer,
     phone: (meta.customerPhone as string) || (meta.customer_phone as string) || '—',
     court: b?.courts?.name || '—',
+    sport: sportMeta,
     bookingDate: b?.booking_date || '—',
+    bookingDateLabel:
+      b?.booking_date && b.booking_date !== '—'
+        ? new Date(b.booking_date + 'T12:00:00').toLocaleDateString('en-PH', {
+            timeZone: ACTIVITY_TZ,
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })
+        : '—',
     startLabel: formatActivityTime12(b?.start_time),
+    endLabel: formatActivityTime12(b?.end_time),
+    timeRange,
+    bookingStatus: humanizeBookingStatus(b?.status),
+    amount,
+    paymentMethod: payMethod,
+    addOns,
+    facilityMapId: facilityMapId || '—',
+    sourceChannel: formatSourceChannel(meta.source),
     ref: b?.qr_code_token || (meta.refCode as string) || '—',
     bookingId: b?.id || row.booking_id || '—',
     staffNotes: row.notes ? String(row.notes) : '',
     staffId: row.staff_id ? String(row.staff_id) : '—',
+    summaryLine,
+    customerRaw: customerRaw || '',
   };
+}
+
+type FlatActivityRow = ReturnType<typeof flattenActivityRow>;
+
+function escapeCsvCell(v: string): string {
+  const s = String(v ?? '');
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function activityLogToCsv(rows: FlatActivityRow[]): string {
+  const headers = ['When_PH', 'What', 'Summary', 'Customer', 'Court', 'Ticket', 'Booking_ID', 'Staff_ID'];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        escapeCsvCell(r.loggedAtLabel),
+        escapeCsvCell(r.actionLabel),
+        escapeCsvCell(r.summaryLine),
+        escapeCsvCell(r.customer),
+        escapeCsvCell(r.court),
+        escapeCsvCell(r.ref),
+        escapeCsvCell(r.bookingId),
+        escapeCsvCell(r.staffId),
+      ].join(','),
+    );
+  }
+  return `\uFEFF${lines.join('\r\n')}`;
+}
+
+function triggerTextDownload(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ── Staff activity (desk + check-ins from Supabase) ─────────────────────────
@@ -686,7 +1187,12 @@ function StaffActivityLog() {
   const [sortKey, setSortKey] = useState<ActivitySortKey>('loggedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [detailRow, setDetailRow] = useState<any | null>(null);
-  const [clearConfirm, setClearConfirm] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
+  const [period, setPeriod] = useState<ActivityPeriod>('7d');
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -755,6 +1261,23 @@ function StaffActivityLog() {
     return copy;
   }, [rows, sortKey, sortDir]);
 
+  const filteredRows = useMemo(() => {
+    return sortedRows.filter((r) => {
+      if (period === 'today' && r.loggedManilaDate !== manilaTodayKey()) return false;
+      if (period === '7d' && Date.now() - r.loggedAtMs > 7 * 86400_000) return false;
+      if (period === '30d' && Date.now() - r.loggedAtMs > 30 * 86400_000) return false;
+      if (actionFilter !== 'all' && r.actionKey !== actionFilter) return false;
+      const q = searchQuery.trim().toLowerCase();
+      if (q) {
+        const hay = [r.customer, r.customerRaw, r.court, r.ref, r.summaryLine, r.bookingId, r.sport, r.phone, r.actionLabel]
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [sortedRows, period, actionFilter, searchQuery]);
+
   const toggleSort = (key: ActivitySortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
@@ -769,7 +1292,7 @@ function StaffActivityLog() {
       <button
         type="button"
         onClick={() => toggleSort(k)}
-        className={`flex items-center gap-1 font-black text-left uppercase tracking-wide text-gray-500 hover:text-gray-300 transition-colors ${className}`}
+        className={`inline-flex items-center gap-1 font-black text-left uppercase tracking-wide text-gray-500 hover:text-gray-300 transition-colors ${className}`}
         style={{ fontSize: 10 }}
       >
         {label}
@@ -783,11 +1306,32 @@ function StaffActivityLog() {
     setOps([]);
     setDetailRow(null);
     setListCleared(true);
-    setClearConfirm(false);
+    setShowClearModal(false);
+  };
+
+  const runExport = () => {
+    if (filteredRows.length === 0) return;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    if (exportFormat === 'csv') {
+      triggerTextDownload(`activity-log-${stamp}.csv`, activityLogToCsv(filteredRows), 'text/csv;charset=utf-8');
+    } else {
+      const payload = filteredRows.map((r) => ({
+        when_ph: r.loggedAtLabel,
+        what: r.actionLabel,
+        summary: r.summaryLine,
+        customer: r.customer,
+        court: r.court,
+        ticket: r.ref,
+        booking_id: r.bookingId,
+        staff_id: r.staffId,
+      }));
+      triggerTextDownload(`activity-log-${stamp}.json`, JSON.stringify(payload, null, 2), 'application/json');
+    }
+    setShowExportModal(false);
   };
 
   const detailFlat = detailRow ? flattenActivityRow(detailRow) : null;
-  const bookingNotesPretty = detailRow?.bookings?.notes
+  const rawNotesForDetails = detailRow?.bookings?.notes
     ? (() => {
         try {
           return JSON.stringify(JSON.parse(detailRow.bookings.notes), null, 2);
@@ -799,45 +1343,32 @@ function StaffActivityLog() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h2 className="text-white font-black" style={{ fontSize: 24 }}>Activity Log</h2>
           <p className="text-gray-500" style={{ fontSize: 13 }}>
-            Sortable register of front-desk actions. Click a row for full details. Clearing only hides rows in this browser session — it does not delete database records.
+            Walk-ins, desk bookings, and check-ins. Times are shown in Philippines (Manila).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {clearConfirm ? (
-            <>
-              <span className="text-amber-400 font-black" style={{ fontSize: 11 }}>Clear this list?</span>
-              <button
-                type="button"
-                onClick={handleClearList}
-                className="px-3 py-2 rounded-xl font-black bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
-                style={{ fontSize: 11 }}
-              >
-                Yes, clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setClearConfirm(false)}
-                className="px-3 py-2 rounded-xl font-black border border-white/10 text-gray-400 hover:bg-white/5"
-                style={{ fontSize: 11 }}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setClearConfirm(true)}
-              disabled={ops.length === 0 || isLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl font-black text-red-300 border border-red-500/20 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-              style={{ fontSize: 12 }}
-            >
-              <Trash2 size={14} /> Clear list
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowExportModal(true)}
+            disabled={filteredRows.length === 0 || isLoading || listCleared}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl font-black text-emerald-200 border border-emerald-500/25 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+            style={{ fontSize: 12 }}
+          >
+            <Download size={14} /> Export
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowClearModal(true)}
+            disabled={ops.length === 0 || isLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl font-black text-red-300 border border-red-500/20 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            style={{ fontSize: 12 }}
+          >
+            <Trash2 size={14} /> Clear
+          </button>
           <button
             type="button"
             onClick={() => void load()}
@@ -856,8 +1387,8 @@ function StaffActivityLog() {
           className="rounded-xl px-4 py-3 border font-black flex flex-wrap items-center gap-3"
           style={{ fontSize: 12, background: 'rgba(59,130,246,0.08)', borderColor: 'rgba(59,130,246,0.25)', color: '#93c5fd' }}
         >
-          <span>List cleared in this view only.</span>
-          <button type="button" onClick={() => void load()} className="underline font-black hover:text-white">Reload from server</button>
+          <span>Table cleared for this tab only.</span>
+          <button type="button" onClick={() => void load()} className="underline font-black hover:text-white">Reload</button>
         </div>
       )}
 
@@ -866,10 +1397,57 @@ function StaffActivityLog() {
           className="rounded-xl px-4 py-3 border font-black"
           style={{ fontSize: 12, background: 'rgba(234,179,8,0.08)', borderColor: 'rgba(234,179,8,0.25)', color: '#fcd34d' }}
         >
-          {usingDemo && (
-            <span>Sample rows help you preview sorting and details. Live rows load when the API returns staff operations from Supabase. </span>
-          )}
-          {loadError && <span className="text-amber-200/90"> ({loadError})</span>}
+          {usingDemo && <span>Showing sample rows until the server returns real activity.</span>}
+          {loadError && <span className="text-amber-200/90"> {loadError}</span>}
+        </div>
+      )}
+
+      {!listCleared && ops.length > 0 && (
+        <div className="rounded-xl border border-white/8 bg-[#1a1f2e] px-3 py-2.5">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3">
+            <div className="flex items-center gap-1.5 text-gray-500 flex-shrink-0">
+              <Filter size={13} className="text-blue-400" />
+              <span className="font-black" style={{ fontSize: 10 }}>FILTER</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+              <PillSelect<ActivityPeriod>
+                ariaLabel="Filter by period"
+                value={period}
+                onChange={setPeriod}
+                options={[
+                  { id: 'today', label: 'Today', icon: <Clock size={14} /> },
+                  { id: '7d', label: 'Last 7 days', icon: <Calendar size={14} />, hint: 'Rolling window' },
+                  { id: '30d', label: 'Last 30 days', icon: <Calendar size={14} />, hint: 'Rolling window' },
+                  { id: 'all', label: 'All loaded', icon: <Layers size={14} /> },
+                ]}
+              />
+              <PillSelect<string>
+                ariaLabel="Filter by activity type"
+                value={actionFilter}
+                onChange={setActionFilter}
+                options={[
+                  { id: 'all', label: 'All types', icon: <Filter size={14} /> },
+                  { id: 'walk_in_booking', label: 'Walk-in', icon: <Users size={14} /> },
+                  { id: 'desk_booking', label: 'Desk / map', icon: <Map size={14} /> },
+                  { id: 'check_in', label: 'Check-in', icon: <ShieldCheck size={14} /> },
+                  { id: 'check_out', label: 'Check-out', icon: <LogOut size={14} /> },
+                ]}
+              />
+              <div className="relative flex-1 min-w-[160px] max-w-md">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search…"
+                  className="w-full rounded-lg pl-8 pr-3 py-1.5 bg-white/[0.06] text-gray-100 placeholder:text-gray-500 border border-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-black"
+                  style={{ fontSize: 12 }}
+                />
+              </div>
+            </div>
+            <span className="text-gray-600 font-black whitespace-nowrap lg:ml-auto" style={{ fontSize: 10 }}>
+              {filteredRows.length} / {sortedRows.length}
+            </span>
+          </div>
         </div>
       )}
 
@@ -888,37 +1466,77 @@ function StaffActivityLog() {
               Reload from server
             </button>
           </div>
+        ) : filteredRows.length === 0 ? (
+          <div className="p-10 text-center space-y-3">
+            <p className="text-gray-500 font-black" style={{ fontSize: 14 }}>No entries match your filters.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setPeriod('all');
+                setActionFilter('all');
+                setSearchQuery('');
+              }}
+              className="px-4 py-2 rounded-xl font-black text-blue-300 border border-blue-500/30 hover:bg-blue-500/10"
+              style={{ fontSize: 12 }}
+            >
+              Reset filters
+            </button>
+          </div>
         ) : (
-          <div className="overflow-x-auto max-h-[70vh]">
-            <table className="w-full text-left min-w-[720px]">
+          <div className="overflow-x-auto max-h-[70vh] custom-scrollbar">
+            <table className="w-full text-left min-w-[880px]">
               <thead className="sticky top-0 z-10 bg-[#141820] border-b border-white/8">
                 <tr>
-                  <th className="px-4 py-3 w-10" />
-                  <th className="px-3 py-3"><SortHead k="loggedAt" label="Logged" /></th>
-                  <th className="px-3 py-3"><SortHead k="action" label="Action" /></th>
-                  <th className="px-3 py-3"><SortHead k="customer" label="Customer" /></th>
-                  <th className="px-3 py-3"><SortHead k="court" label="Court" /></th>
-                  <th className="px-3 py-3"><SortHead k="ref" label="Reference" /></th>
+                  <th className="px-4 py-2.5 w-10 align-middle" />
+                  <th className="px-3 py-2.5 align-middle"><SortHead k="loggedAt" label="When (PH)" /></th>
+                  <th className="px-3 py-2.5 align-middle"><SortHead k="action" label="What" /></th>
+                  <th className="px-3 py-2.5 min-w-[200px] align-middle"><span className="font-black uppercase tracking-wide text-gray-500" style={{ fontSize: 10 }}>Summary</span></th>
+                  <th className="px-3 py-2.5 align-middle"><SortHead k="customer" label="Customer" /></th>
+                  <th className="px-3 py-2.5 align-middle"><SortHead k="court" label="Court" /></th>
+                  <th className="px-3 py-2.5 align-middle"><SortHead k="ref" label="Ticket" /></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
-                {sortedRows.map((r) => (
+              <tbody className="divide-y divide-white/[0.06]">
+                {filteredRows.map((r, idx) => (
                   <tr
                     key={r.id}
                     onClick={() => setDetailRow(r.raw)}
-                    className="hover:bg-white/[0.04] cursor-pointer transition-colors group"
+                    className={`cursor-pointer transition-colors group ${idx % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'} hover:bg-white/[0.06]`}
                   >
-                    <td className="px-4 py-3 text-gray-600">
+                    <td className="px-4 py-3 text-gray-600 align-middle">
                       <Eye size={14} className="opacity-0 group-hover:opacity-100 text-blue-400 transition-opacity" />
                     </td>
-                    <td className="px-3 py-3 text-gray-300 whitespace-nowrap" style={{ fontSize: 12 }}>{r.loggedAtLabel}</td>
-                    <td className="px-3 py-3">
-                      <span className="text-blue-300 font-black" style={{ fontSize: 12 }}>{r.actionLabel}</span>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-200 px-2.5 py-1.5 inline-block min-w-0">
+                        <p className="font-black whitespace-nowrap" style={{ fontSize: 12 }}>{r.loggedDateLabel}</p>
+                        <p className="text-gray-300 font-black mt-0.5 whitespace-nowrap" style={{ fontSize: 11 }}>{r.loggedTimeLabel}</p>
+                        <p className="text-gray-500 font-black mt-0.5" style={{ fontSize: 10 }}>{r.relativeLabel}</p>
+                      </div>
                     </td>
-                    <td className="px-3 py-3 text-white font-black" style={{ fontSize: 12 }}>{r.customer}</td>
-                    <td className="px-3 py-3 text-gray-400" style={{ fontSize: 12 }}>{r.court}</td>
-                    <td className="px-3 py-3">
-                      <span className="font-mono text-gray-500" style={{ fontSize: 11 }}>{r.ref}</span>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-blue-200 px-2.5 py-1.5 font-black" style={{ fontSize: 12 }}>
+                        {r.actionLabel}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-middle max-w-[320px]">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2 leading-snug" style={{ fontSize: 11 }}>
+                        {r.summaryLine}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-100 px-2.5 py-2 font-black" style={{ fontSize: 12 }}>
+                        {r.customer}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2" style={{ fontSize: 12 }}>
+                        {r.court}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2 font-mono" style={{ fontSize: 11 }}>
+                        {r.ref}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -930,123 +1548,211 @@ function StaffActivityLog() {
 
       <AnimatePresence>
         {detailRow && detailFlat && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4" onClick={() => setDetailRow(null)}>
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setDetailRow(null)}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: 16 }}
-              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl border border-white/10 shadow-2xl bg-[#1C1E27]"
-              style={{ scrollbarWidth: 'thin' }}
+              className="w-full max-w-lg max-h-[min(88vh,680px)] flex flex-col rounded-3xl border border-white/10 shadow-2xl bg-[#1A1D26] overflow-hidden"
             >
-              <div className="sticky top-0 flex items-center justify-between px-5 py-4 border-b border-white/8 bg-[#1C1E27]">
-                <div>
-                  <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10, letterSpacing: 1 }}>Activity detail</p>
-                  <p className="text-white font-black" style={{ fontSize: 18 }}>{detailFlat.actionLabel}</p>
+              <div className="flex-shrink-0 flex items-start justify-between gap-3 px-5 py-4 border-b border-white/[0.07] bg-gradient-to-r from-[#0047AB]/20 to-transparent">
+                <div className="min-w-0">
+                  <p className="text-blue-300/90 font-black uppercase tracking-wider" style={{ fontSize: 10 }}>Activity</p>
+                  <p className="text-white font-black truncate" style={{ fontSize: 20 }}>{detailFlat.actionLabel}</p>
+                  <p className="text-gray-500 font-black mt-1" style={{ fontSize: 11 }}>{detailFlat.loggedAtLabel} · {detailFlat.relativeLabel}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setDetailRow(null)}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/5 hover:bg-white/10 text-gray-400"
+                  className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-white/5 hover:bg-white/10 text-gray-400"
                   aria-label="Close"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="p-5 space-y-5">
-                <section className="rounded-2xl border border-white/8 overflow-hidden">
-                  <div className="px-4 py-2 border-b border-white/6 bg-[#0047AB]/15">
-                    <p className="text-blue-300 font-black uppercase" style={{ fontSize: 10, letterSpacing: 1 }}>Log entry</p>
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 py-4 space-y-4">
+                <p className="text-gray-300 leading-relaxed" style={{ fontSize: 13 }}>
+                  {detailFlat.actionBlurb || 'Recorded from the staff dashboard or check-in flow.'}
+                </p>
+
+                <div className="rounded-2xl border border-white/[0.08] bg-black/20 overflow-hidden">
+                  <p className="px-4 py-2 text-gray-500 font-black uppercase border-b border-white/[0.06]" style={{ fontSize: 10 }}>At a glance</p>
+                  <div className="px-4 py-1 divide-y divide-white/[0.06]">
+                    {detailRow.bookings ? (
+                      <>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Guest</span>
+                          <span className="text-white font-black text-right" style={{ fontSize: 13 }}>{detailFlat.customer}</span>
+                        </div>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Court & sport</span>
+                          <span className="text-white font-black text-right" style={{ fontSize: 13 }}>{detailFlat.court} · {detailFlat.sport}</span>
+                        </div>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Play schedule</span>
+                          <span className="text-white font-black text-right" style={{ fontSize: 13 }}>{detailFlat.bookingDateLabel}</span>
+                        </div>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Session time</span>
+                          <span className="text-white font-black text-right" style={{ fontSize: 13 }}>{detailFlat.timeRange}</span>
+                        </div>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Ticket code</span>
+                          <span className="text-blue-300 font-mono font-black" style={{ fontSize: 13 }}>{detailFlat.ref}</span>
+                        </div>
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Booking status</span>
+                          <span className="text-emerald-300 font-black" style={{ fontSize: 13 }}>{detailFlat.bookingStatus}</span>
+                        </div>
+                        {detailFlat.amount != null && Number.isFinite(detailFlat.amount) && (
+                          <div className="py-2.5 flex justify-between gap-3">
+                            <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Amount</span>
+                            <span className="text-white font-black" style={{ fontSize: 13 }}>₱{detailFlat.amount.toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className="py-2.5 flex justify-between gap-3">
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Channel</span>
+                          <span className="text-gray-200 font-black text-right" style={{ fontSize: 12 }}>{detailFlat.sourceChannel}</span>
+                        </div>
+                        {detailFlat.paymentMethod && detailFlat.paymentMethod !== '—' && (
+                          <div className="py-2.5 flex justify-between gap-3">
+                            <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Payment</span>
+                            <span className="text-gray-200 font-black uppercase" style={{ fontSize: 12 }}>{detailFlat.paymentMethod}</span>
+                          </div>
+                        )}
+                        {detailFlat.addOns ? (
+                          <div className="py-2.5">
+                            <span className="text-gray-500 font-black block mb-1" style={{ fontSize: 11 }}>Add-ons & extras</span>
+                            <span className="text-gray-300 leading-snug block" style={{ fontSize: 12 }}>{detailFlat.addOns}</span>
+                          </div>
+                        ) : null}
+                        {detailFlat.facilityMapId && detailFlat.facilityMapId !== '—' ? (
+                          <div className="py-2.5 flex justify-between gap-3">
+                            <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Facility map</span>
+                            <span className="text-gray-400 font-mono text-right text-xs break-all">{detailFlat.facilityMapId}</span>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="py-4 text-gray-500 font-black" style={{ fontSize: 12 }}>No booking row linked — this may be a staff-only note.</p>
+                    )}
                   </div>
-                  <dl className="px-4 py-3 grid grid-cols-1 gap-3">
-                    <div>
-                      <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Operation ID</dt>
-                      <dd className="text-white font-mono mt-0.5" style={{ fontSize: 12 }}>{detailFlat.id}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Logged (Philippines)</dt>
-                      <dd className="text-white mt-0.5" style={{ fontSize: 13 }}>{detailFlat.loggedAtLabel}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Staff user ID</dt>
-                      <dd className="text-gray-300 font-mono mt-0.5" style={{ fontSize: 11 }}>{detailFlat.staffId}</dd>
-                    </div>
-                    {detailFlat.staffNotes && (
-                      <div>
-                        <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Staff notes</dt>
-                        <dd className="text-gray-300 mt-0.5 leading-relaxed" style={{ fontSize: 12 }}>{detailFlat.staffNotes}</dd>
-                      </div>
-                    )}
-                  </dl>
-                </section>
+                </div>
 
-                {detailRow.bookings && (
-                  <section className="rounded-2xl border border-white/8 overflow-hidden">
-                    <div className="px-4 py-2 border-b border-white/6 bg-emerald-500/10">
-                      <p className="text-emerald-300 font-black uppercase" style={{ fontSize: 10, letterSpacing: 1 }}>Linked booking</p>
-                    </div>
-                    <dl className="px-4 py-3 grid grid-cols-1 gap-3">
-                      <div>
-                        <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Booking ID</dt>
-                        <dd className="text-white font-mono mt-0.5" style={{ fontSize: 12 }}>{detailFlat.bookingId}</dd>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Date</dt>
-                          <dd className="text-white mt-0.5" style={{ fontSize: 13 }}>
-                            {detailFlat.bookingDate !== '—'
-                              ? new Date(detailFlat.bookingDate + 'T12:00:00').toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-                              : '—'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Start time</dt>
-                          <dd className="text-white mt-0.5" style={{ fontSize: 13 }}>{detailFlat.startLabel}</dd>
-                        </div>
-                      </div>
-                      <div>
-                        <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Court</dt>
-                        <dd className="text-white font-black mt-0.5" style={{ fontSize: 14 }}>{detailFlat.court}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Ticket reference</dt>
-                        <dd className="text-blue-200 font-mono font-black mt-0.5 tracking-wide" style={{ fontSize: 14 }}>{detailFlat.ref}</dd>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Customer</dt>
-                          <dd className="text-white font-black mt-0.5" style={{ fontSize: 13 }}>{detailFlat.customer}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-gray-600 font-black uppercase" style={{ fontSize: 9 }}>Phone</dt>
-                          <dd className="text-gray-300 mt-0.5" style={{ fontSize: 13 }}>{detailFlat.phone}</dd>
-                        </div>
-                      </div>
-                    </dl>
-                    {bookingNotesPretty && (
-                      <div className="px-4 pb-4">
-                        <p className="text-gray-600 font-black uppercase mb-1" style={{ fontSize: 9 }}>Booking notes (JSON)</p>
-                        <pre className="rounded-xl p-3 bg-black/40 border border-white/6 text-gray-400 overflow-x-auto font-mono" style={{ fontSize: 11, lineHeight: 1.45 }}>
-                          {bookingNotesPretty}
-                        </pre>
-                      </div>
-                    )}
-                  </section>
-                )}
+                <div className="rounded-2xl border border-white/[0.08] bg-black/15 p-4 space-y-2">
+                  <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Technical reference</p>
+                  <div className="grid gap-1.5 text-xs font-mono text-gray-500 break-all">
+                    <div><span className="text-gray-600">Operation</span> {detailFlat.id}</div>
+                    <div><span className="text-gray-600">Booking</span> {detailFlat.bookingId}</div>
+                    <div><span className="text-gray-600">Staff user</span> {detailFlat.staffId}</div>
+                  </div>
+                  {detailFlat.staffNotes && !detailFlat.staffNotes.startsWith('Demo row') && (
+                    <p className="text-gray-400 pt-2 border-t border-white/[0.06]" style={{ fontSize: 12 }}>
+                      <span className="text-gray-600 font-black uppercase block mb-1" style={{ fontSize: 9 }}>Desk note</span>
+                      {detailFlat.staffNotes}
+                    </p>
+                  )}
+                  {rawNotesForDetails ? (
+                    <details className="pt-2 border-t border-white/[0.06] group">
+                      <summary className="cursor-pointer text-gray-500 font-black hover:text-gray-400" style={{ fontSize: 11 }}>
+                        Raw booking metadata (advanced)
+                      </summary>
+                      <pre className="mt-2 rounded-xl p-3 bg-black/50 border border-white/[0.06] text-gray-500 overflow-x-auto font-mono whitespace-pre-wrap" style={{ fontSize: 10, lineHeight: 1.5 }}>
+                        {rawNotesForDetails}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              </div>
 
-                {!detailRow.bookings && detailFlat.staffNotes && (
-                  <p className="text-gray-500" style={{ fontSize: 12 }}>No booking linked to this operation.</p>
-                )}
-
+              <div className="flex-shrink-0 px-5 py-3 border-t border-white/[0.07] bg-[#151821]">
                 <button
                   type="button"
                   onClick={() => setDetailRow(null)}
                   className="w-full py-3 rounded-2xl font-black text-white bg-[#0047AB] hover:brightness-110 transition-all"
                   style={{ fontSize: 14 }}
                 >
-                  Close
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showClearModal && (
+          <ConfirmModal
+            opts={{
+              title: 'Clear this table?',
+              body: 'Rows disappear only in this browser tab. Use Refresh to load them again from the server. Nothing is deleted in the database.',
+              confirmLabel: 'Clear',
+              confirmColor: '#ef4444',
+              stackZ: 'z-[1100]',
+              icon: <Trash2 size={26} className="text-red-400" />,
+              onConfirm: handleClearList,
+              onCancel: () => setShowClearModal(false),
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showExportModal && (
+          <div
+            role="presentation"
+            className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setShowExportModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1C1E27] rounded-3xl p-6 w-full max-w-sm border border-white/[0.08] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                style={{ background: 'rgba(16,185,129,0.12)', border: '1.5px solid rgba(16,185,129,0.28)' }}
+              >
+                <Download size={26} className="text-emerald-400" />
+              </div>
+              <h3 className="text-white font-black text-center mb-1" style={{ fontSize: 17 }}>Export activity</h3>
+              <p className="text-gray-400 text-center mb-5" style={{ fontSize: 13, lineHeight: 1.5 }}>
+                Save <span className="text-white font-black">{filteredRows.length}</span> row{filteredRows.length === 1 ? '' : 's'} currently shown (filters apply).
+              </p>
+              <label className="block text-gray-500 font-black uppercase mb-1.5" style={{ fontSize: 10 }}>Format</label>
+              <div className="mb-5">
+                <PillSelect<'csv' | 'json'>
+                  ariaLabel="Export format"
+                  value={exportFormat}
+                  onChange={setExportFormat}
+                  options={[
+                    { id: 'csv', label: 'CSV (Excel / Sheets)', icon: <Download size={14} /> },
+                    { id: 'json', label: 'JSON', icon: <Layers size={14} /> },
+                  ]}
+                />
+              </div>
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(false)}
+                  className="flex-1 py-3 rounded-xl bg-[#252836] text-gray-300 font-black hover:bg-[#2E3244] transition-colors border border-white/[0.07]"
+                  style={{ fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={runExport}
+                  disabled={filteredRows.length === 0}
+                  className="flex-1 py-3 rounded-xl text-white font-black transition-all hover:brightness-110 disabled:opacity-40"
+                  style={{ fontSize: 13, background: 'linear-gradient(135deg, #059669, #047857)' }}
+                >
+                  Download
                 </button>
               </div>
             </motion.div>
@@ -1117,7 +1823,7 @@ function LiveOperations() {
   const hasBlockingBookings = (courtName: string) => {
     const today = new Date().toISOString().split('T')[0];
     return bookings.filter(b =>
-      b.court === courtName &&
+      bookingAppliesToPublishedMap(b, courtName, activeMap?.id, publishedMaps) &&
       b.date >= today &&
       b.status !== 'cancelled' &&
       b.status !== 'completed' &&
@@ -1133,13 +1839,13 @@ function LiveOperations() {
     });
   };
   const confirmMaintenance = () => {
-    if (!maintenancePrompt) return;
+    if (!maintenancePrompt || !activeMap?.id) return;
     const { court, target, blockedCount } = maintenancePrompt;
     if (target === 'maintenance' && blockedCount > 0) {
       setMaintenancePrompt(null);
       return;
     }
-    updateBlockStatus(court.id, target);
+    updateBlockStatus(activeMap.id, court.id, target);
     setMaintenancePrompt(null);
   };
 
