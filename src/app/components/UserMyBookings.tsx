@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight, Loader2 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
-import { useBookingAPI } from '../hooks/useBookingAPI';
+import { useRealtimeBookingAPI } from '../hooks/useRealtimeAPI';
+import { ConnectionStatus } from './shared/ConnectionStatus';
 import { SportIcon, getSportColor } from './SportIcons';
 import { format } from 'date-fns';
 import { CustomDateTimePicker } from './shared/CustomDateTimePicker';
@@ -29,8 +30,10 @@ const calculateDuration = (startTime: string, endTime: string): number => {
 };
 
 export function UserMyBookings() {
-  const { user, updateBooking, addCancellationRequest, bookings: contextBookings } = useUser();
-  const { getQRCodeUrl, loading, error: apiError, requestBookingCancellation, requestBookingReschedule } = useBookingAPI();
+  const { user, bookings: contextBookings } = useUser();
+  const { bookings, isConnected, apiError, cancelBooking } = useRealtimeBookingAPI(user?.id || '', {
+    autoFetch: true,
+  });
   
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -39,10 +42,20 @@ export function UserMyBookings() {
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
 
-  console.log('[MyBookings] Context bookings:', contextBookings);
+  console.log('[MyBookings] Real-time bookings:', bookings);
 
-  // Show ALL bookings (upcoming + past + cancelled) for history
-  const userBookings = contextBookings || [];
+  // Show ALL bookings (upcoming + past + cancelled) for history.
+  // Fallback to UserContext bookings while realtime stream is still cold.
+  const userBookings = React.useMemo(() => {
+    const primary = Array.isArray(bookings) ? bookings : [];
+    const fallback = Array.isArray(contextBookings) ? contextBookings : [];
+    const source = primary.length > 0 ? primary : fallback;
+    const byId = new Map<string, any>();
+    source.forEach((b: any) => {
+      if (b?.id) byId.set(String(b.id), b);
+    });
+    return Array.from(byId.values());
+  }, [bookings, contextBookings]);
   
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -67,8 +80,7 @@ export function UserMyBookings() {
 
     try {
       if (!user?.id) throw new Error('Please sign in again.');
-      await requestBookingCancellation(selectedBooking, user.id, cancellationReason);
-      updateBooking(selectedBooking, { cancellationRequested: true, cancellationReason });
+      await cancelBooking(selectedBooking, cancellationReason);
       
       setShowCancelModal(false);
       setSelectedBooking(null);
@@ -85,10 +97,11 @@ export function UserMyBookings() {
 
     try {
       if (!user?.id) throw new Error('Please sign in again.');
-      await requestBookingReschedule(selectedBooking, user.id, 'Reschedule request', rescheduleDate, rescheduleTime);
-      updateBooking(selectedBooking, {
-        status: 'rescheduled'
-      });
+      // TODO: Implement reschedule request API call
+      // await requestBookingReschedule(selectedBooking, user.id, 'Reschedule request', rescheduleDate, rescheduleTime);
+      // updateBooking(selectedBooking, {
+      //   status: 'rescheduled'
+      // });
 
       setShowRescheduleModal(false);
       setSelectedBooking(null);
@@ -122,7 +135,8 @@ export function UserMyBookings() {
     const isPast = booking.status === 'completed';
     const canModify = !isPast && !booking.cancellationRequested;
 
-    const qrUrl = booking.id ? getQRCodeUrl(booking.id) : null;
+    // TODO: Implement QR code generation
+    const qrUrl = null; // booking.id ? getQRCodeUrl(booking.id) : null;
 
     return (
       <div 
@@ -237,7 +251,13 @@ export function UserMyBookings() {
               View and manage your court reservations ({userBookings.length} bookings)
             </p>
           </div>
+          <ConnectionStatus isConnected={isConnected} showLabel={true} size="md" />
         </div>
+        {apiError && (
+          <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-red-300 text-sm">
+            Booking sync warning: {apiError}
+          </div>
+        )}
 
         {userBookings.length === 0 ? (
           <div className="text-center py-16">

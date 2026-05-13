@@ -463,7 +463,8 @@ useEffect(() => {
       const syncedUser = await syncUserProfile({ id, email, name, phone: "+63 912 345 6789", role });
       if (authEpochRef.current !== epoch) return { error: null };
       const resolvedId = syncedUser?.id || id;
-      void exchangeDemoApiToken({ authId: id, email }).catch(() => {});
+      // Ensure Bearer token is ready before user-scoped API fetches (bookings/coaching).
+      await exchangeDemoApiToken({ authId: id, email }).catch(() => false);
       setUser({
         id: resolvedId,
         name,

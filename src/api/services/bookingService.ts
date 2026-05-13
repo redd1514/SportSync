@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 import { BookingRequest, BookingResponse } from '../types';
 import { createHash } from 'crypto';
+import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
 
 const USE_MOCK_BOOKINGS = process.env.USE_MOCK_BOOKINGS === 'true';
 
@@ -198,6 +199,9 @@ export const bookingService = {
         throw new Error('Booking insert succeeded but no row was returned');
       }
 
+      // Emit realtime event
+      await emitRealtimeEvent('bookings', 'INSERT', createdBooking);
+      
       return createdBooking as BookingResponse;
     } catch (e) {
       console.error('Create booking error:', e);
@@ -273,12 +277,25 @@ export const bookingService = {
   // Cancel booking
   async cancelBooking(bookingId: string): Promise<void> {
     try {
-      const { error } = await supabase
+      const { data: oldBooking } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', bookingId)
+        .single();
+      
+      const { data: updatedBooking, error } = await supabase
         .from('bookings')
         .update({ status: 'cancelled' })
-        .eq('id', bookingId);
+        .eq('id', bookingId)
+        .select('*')
+        .single();
 
       if (error) throw error;
+      
+      // Emit realtime event
+      if (updatedBooking) {
+        await emitRealtimeEvent('bookings', 'UPDATE', updatedBooking, oldBooking);
+      }
     } catch (e) {
       // Mock cancellation for development
       console.log('Using mock booking cancellation');

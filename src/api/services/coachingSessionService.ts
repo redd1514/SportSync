@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient.ts';
 import { resolveUserRowId } from './bookingService.ts';
+import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
 
 function defaultEndTimeFromStart(start: string): string {
   const parts = String(start || '09:00:00').split(':').map((p) => parseInt(p, 10));
@@ -201,6 +202,10 @@ export const coachingSessionService = {
     const { data, error } = await supabase.from('coaching_sessions').insert([insertRow]).select('*').single();
 
     if (error) throw error;
+    
+    // Emit realtime event
+    await emitRealtimeEvent('coaching_sessions', 'INSERT', data);
+    
     return data as CoachingSessionRow;
   },
 
@@ -222,9 +227,14 @@ export const coachingSessionService = {
     const extraNotes = notesFromProofAndLinked(payment_proof_url, linked_booking_id);
     if (extraNotes) update.notes = extraNotes;
 
+    const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase.from('coaching_sessions').update(update).eq('id', id).select('*').single();
 
     if (error) throw error;
+    
+    // Emit realtime event
+    await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
+    
     return data as CoachingSessionRow;
   },
 
@@ -250,6 +260,7 @@ export const coachingSessionService = {
     const n = notesFromProofAndLinked(paymentProofUrl, linkedBookingId);
     if (n) update.notes = n;
     
+    const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase
       .from('coaching_sessions')
       .update(update)
@@ -258,15 +269,25 @@ export const coachingSessionService = {
       .single();
     
     if (error) throw error;
+    
+    // Emit realtime event
+    await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
+    
     return data as CoachingSessionRow;
   },
 
   async deleteSession(id: string): Promise<void> {
+    const { data: deletedData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { error } = await supabase
       .from('coaching_sessions')
       .delete()
       .eq('id', id);
     
     if (error) throw error;
+    
+    // Emit realtime event
+    if (deletedData) {
+      await emitRealtimeEvent('coaching_sessions', 'DELETE', deletedData);
+    }
   },
 };

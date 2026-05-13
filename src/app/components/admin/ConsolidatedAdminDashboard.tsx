@@ -15,6 +15,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { useUser } from '../../contexts/UserContext';
 import { useCoaching } from '../../contexts/CoachingContext';
+import { useRealtimeAdminDashboard } from '../../hooks/useRealtimeData';
+import { ConnectionStatus } from '../shared/ConnectionStatus';
 import { AnalyticsDashboard } from '../AnalyticsDashboard';
 import { AdminCoachingManagement } from './AdminCoachingManagement';
 import { AdminAddonsManagement } from './AdminAddonsManagement';
@@ -1497,6 +1499,7 @@ function SystemSettingsTab() {
 // ── Main Dashboard Shell ─────────────────────────────────────────────────────
 export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void }) {
   const { user } = useUser();
+  const { isConnected } = useRealtimeAdminDashboard();
   const [activeTab, setActiveTab] = useState<AdminTab>('executive');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1532,9 +1535,12 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
             </div>
             <span className="font-black" style={{ fontSize: 13, color: "#E8E8EA" }}>JRC <span style={{ color: "#FF8C00" }}>Admin</span></span>
           </div>
-          <button onClick={onLogout} className="px-3 py-1 rounded-lg font-black" style={{ fontSize: 10, background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
-            Sign Out
-          </button>
+          <div className="flex items-center gap-3">
+            <ConnectionStatus isConnected={isConnected} showLabel={false} size="sm" />
+            <button onClick={onLogout} className="px-3 py-1 rounded-lg font-black" style={{ fontSize: 10, background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
+              Sign Out
+            </button>
+          </div>
         </div>
         {/* Content */}
         <main className={`flex-1 overflow-x-hidden ${activeTab === 'facility' ? 'overflow-hidden' : 'overflow-y-auto p-4'}`} style={{ background: 'transparent' }}>
@@ -1713,6 +1719,9 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
               </div>
 
               <div className="flex-1" />
+
+              {/* Connection Status */}
+              <ConnectionStatus isConnected={isConnected} showLabel={false} size="sm" />
 
               {/* Admin role chip */}
               <div
