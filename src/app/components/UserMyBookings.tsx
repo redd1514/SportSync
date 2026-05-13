@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight, Loader2, CreditCard } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
+import { useBookingAPI } from '../hooks/useBookingAPI';
 import { useRealtimeBookingAPI } from '../hooks/useRealtimeAPI';
 import { ConnectionStatus } from './shared/ConnectionStatus';
 import { SportIcon, getSportColor } from './SportIcons';
