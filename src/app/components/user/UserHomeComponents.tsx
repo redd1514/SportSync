@@ -28,7 +28,7 @@ export interface RateData {
 }
 export const SPORT_RATES: Record<string, RateData> = {
   Basketball: {
-    image: "https://images.unsplash.com/photo-1720217262350-2dec57765d26?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/basketball.jpg",
     courts: "1 Full-Size Court", color: "#F97316",
     description: "Professional hardwood court with arena-style LED lighting.",
     rates: [
@@ -41,7 +41,7 @@ export const SPORT_RATES: Record<string, RateData> = {
     equipment: ["Hardwood flooring", "Professional backboards", "LED arena lighting", "Proper boundary markings"],
   },
   Volleyball: {
-    image: "https://images.unsplash.com/photo-1619472683502-8f245a2a7fce?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/volleyball.jpg",
     courts: "1 Court", color: "#2563EB",
     description: "Indoor volleyball court with professional nets, poles, and non-slip flooring.",
     rates: [
@@ -54,7 +54,7 @@ export const SPORT_RATES: Record<string, RateData> = {
     equipment: ["Professional nets & poles", "Non-slip flooring", "LED arena lighting", "6–12 player capacity"],
   },
   Badminton: {
-    image: "https://images.unsplash.com/photo-1776999035766-9c2b5cddf613?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/badminton.jpg",
     courts: "3 Courts", color: "#22c55e",
     description: "JRC's most popular sport — 3 courts with excellent lighting and equipment.",
     rates: [{ label: "All Days", time: "7AM – 12MN", price: "₱300 / hr" }],
@@ -62,7 +62,7 @@ export const SPORT_RATES: Record<string, RateData> = {
     equipment: ["3 regulation courts", "Professional nets", "Proper lighting", "Smooth surface"],
   },
   Pickleball: {
-    image: "https://images.unsplash.com/photo-1737229471661-78a6a16f33bf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/pickleball.jpg",
     courts: "2 Courts", color: "#a855f7",
     description: "2 dedicated regulation courts. Fun for all ages!",
     rates: [{ label: "All Days", time: "7AM – 12MN", price: "₱300 / hr" }],
@@ -70,7 +70,7 @@ export const SPORT_RATES: Record<string, RateData> = {
     equipment: ["2 regulation courts", "Proper net height", "Non-slip surface", "Beginner-friendly"],
   },
   Billiards: {
-    image: "https://images.unsplash.com/photo-1774544305775-b21053b290b5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/billiards.jpg",
     courts: "4 Premium Tables", color: "#eab308",
     description: "4 premium billiard tables in a comfortable lounge — cues, balls, chalk included.",
     rates: [{ label: "All Days", time: "7AM – 12MN", price: "₱100 / hr" }],
@@ -78,7 +78,7 @@ export const SPORT_RATES: Record<string, RateData> = {
     equipment: ["4 premium tables", "Cues & balls included", "Chalk provided", "Lounge seating"],
   },
   "Table Tennis": {
-    image: "https://images.unsplash.com/photo-1774755470060-637e42c817ac?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
+    image: "/assets/pingpong.jpg",
     courts: "1 Professional Table", color: "#f43f5e",
     description: "The most affordable option at JRC — professional table with paddles and balls.",
     rates: [{ label: "All Days", time: "7AM – 12MN", price: "₱100 / hr" }],
@@ -88,14 +88,12 @@ export const SPORT_RATES: Record<string, RateData> = {
 };
 
 export const MARQUEE_ITEMS = [
-  { src: "https://images.unsplash.com/photo-1720217262350-2dec57765d26?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Basketball" },
-  { src: "https://images.unsplash.com/photo-1619472683502-8f245a2a7fce?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Volleyball" },
-  { src: "https://images.unsplash.com/photo-1776999035766-9c2b5cddf613?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Badminton" },
-  { src: "https://images.unsplash.com/photo-1737229471661-78a6a16f33bf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Pickleball" },
-  { src: "https://images.unsplash.com/photo-1774544305775-b21053b290b5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Billiards" },
-  { src: "https://images.unsplash.com/photo-1774755470060-637e42c817ac?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Table Tennis" },
-  { src: "https://images.unsplash.com/flagged/photo-1568407371446-a239664fb4f4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "Community" },
-  { src: "https://images.unsplash.com/photo-1768152860036-904a1b65df3a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=600", label: "JRC Arena" },
+  { src: "/assets/com_arena.jpg", label: "Arena" },
+  { src: "/assets/com_basketball.jpg", label: "Basketball" },
+  { src: "/assets/com_billiards.jpg", label: "Billiards" },
+  { src: "/assets/com_community.jpg", label: "Community" },
+  { src: "/assets/com_pickleball.jpg", label: "Pickleball" },
+  { src: "/assets/com_volleyball.jpg", label: "Volleyball" },
 ];
 
 /* ═══ FloatingOrbs ═══ */

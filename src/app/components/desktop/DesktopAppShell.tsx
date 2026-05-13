@@ -465,10 +465,14 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
         {/* Logo + toggle */}
         <div className="flex items-center px-4 py-5 flex-shrink-0" style={{ justifyContent: sidebarCollapsed ? "center" : "space-between" }}>
           <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
-            <div className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center shadow-lg"
-              style={{ background: "linear-gradient(135deg,#FF8C00,#e67e00)" }}>
-              <span className="text-white font-black" style={{ fontSize: 16 }}>J</span>
-            </div>
+              <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
+                  {/* Replaced the div logo with an img tag */}
+                  <img 
+                    src="/pwa-icons/icon-48x48.png" 
+                    alt="JRC Logo"
+                    className="w-9 h-9 rounded-xl flex-shrink-0 object-cover shadow-lg"
+                  />
+              </div>
             <AnimatePresence>
               {!sidebarCollapsed && (
                 <motion.div initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: "auto" }} exit={{ opacity: 0, width: 0 }} transition={{ duration: 0.15 }} style={{ overflow: "hidden", whiteSpace: "nowrap" }}>

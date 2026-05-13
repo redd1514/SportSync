@@ -331,9 +331,13 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
         {/* Content */}
         <div className="relative z-10 flex items-center gap-3 p-10">
-          <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-xl"
-            style={{ background: `linear-gradient(135deg, ${ORANGE}, #ea6b00)`, boxShadow: `0 8px 24px ${ORANGE}50` }}>
-            <span className="text-white font-black" style={{ fontSize: 20 }}>J</span>
+          <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
+            {/* Replaced the div logo with an img tag */}
+            <img 
+              src="/pwa-icons/icon-72x72.png" // Update this path and filename
+              alt="JRC Logo"
+              className="w-9 h-9 rounded-xl flex-shrink-0 object-cover shadow-lg"
+            />
           </div>
           <div>
             <p className="font-black" style={{ fontSize: 20 }}>
