@@ -279,101 +279,71 @@ function DurationPicker({
   );
 }
 
-/* ─── GCash Payment Simulation ───────────────────────────────────── */
-type GCashStep = 'form' | 'processing' | 'success';
+/* ─── In-Person Payment Confirmation ───────────────────────────── */
+function FacilityPaymentConfirm({
+  amount, onSuccess, onCancel,
+}: { amount: number; onSuccess: () => void; onCancel: () => void }) {
+  const [processing, setProcessing] = useState(false);
 
-function GCashPaymentSimulator({
-  amount, refCode, onSuccess, onCancel,
-}: { amount: number; refCode: string; onSuccess: () => void; onCancel: () => void }) {
-  const [step, setStep] = useState<GCashStep>('form');
-  const [phone, setPhone] = useState('');
-  const [phoneError, setPhoneError] = useState('');
-
-  const handlePay = () => {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length !== 11 || !digits.startsWith('09')) {
-      setPhoneError('Enter a valid 11-digit GCash number (09XX-XXXX-XXXX)');
-      return;
-    }
-    setPhoneError('');
-    setStep('processing');
-    setTimeout(() => setStep('success'), 2200);
+  const handleConfirm = () => {
+    setProcessing(true);
+    // Simulate short network delay
+    setTimeout(() => {
+      onSuccess();
+    }, 800);
   };
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg,#0047AB,#005ce6)', padding: '16px' }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-white font-black" style={{ fontSize: 20 }}>G<span style={{ color: '#00E5FF' }}>Cash</span></p>
-            <p className="text-blue-200" style={{ fontSize: 10 }}>SANDBOX – TEST MODE</p>
+      <motion.div 
+        animate={{ boxShadow: ['0px 0px 0px rgba(255,140,0,0)', '0px 0px 20px rgba(255,140,0,0.3)', '0px 0px 0px rgba(255,140,0,0)'] }}
+        transition={{ duration: 2, repeat: Infinity }}
+        className="rounded-3xl overflow-hidden relative" 
+        style={{ background: 'linear-gradient(135deg,#FF8C00,#cc7000)', padding: '20px' }}
+      >
+        <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mt-10 -mr-10 pointer-events-none" />
+        <div className="flex items-center justify-between relative z-10">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+              <p className="text-orange-100 font-black tracking-widest" style={{ fontSize: 10 }}>MANUAL CHECK-IN</p>
+            </div>
+            <p className="text-white font-black leading-tight" style={{ fontSize: 22 }}>Pay at Facility</p>
           </div>
-          <div className="text-right">
-            <p className="text-blue-300" style={{ fontSize: 10 }}>AMOUNT DUE</p>
-            <p className="text-white font-black" style={{ fontSize: 22 }}>{'\u20B1'}{amount.toLocaleString()}</p>
+          <div className="text-right bg-black/20 px-4 py-2 rounded-2xl backdrop-blur-sm border border-white/10 shadow-inner">
+            <p className="text-orange-200 font-bold mb-0.5" style={{ fontSize: 9, letterSpacing: 0.5 }}>AMOUNT DUE</p>
+            <p className="text-white font-black" style={{ fontSize: 22, lineHeight: 1 }}>{'\u20B1'}{amount.toLocaleString()}</p>
           </div>
         </div>
-        <div className="mt-2 pt-2 border-t border-blue-400/30">
-          <p className="text-blue-200" style={{ fontSize: 10 }}>Reference: <span className="text-white font-black">{refCode}</span></p>
-          <p className="text-blue-200" style={{ fontSize: 10 }}>Merchant: JRC Ballpark</p>
+      </motion.div>
+
+      <div className="p-4 bg-orange-500/5 rounded-2xl border border-orange-500/20 text-center flex flex-col items-center gap-2">
+        <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center border border-orange-500/20 shadow-inner">
+          <Building2 size={18} className="text-orange-400" />
         </div>
+        <p className="text-gray-300 font-medium" style={{ fontSize: 13, lineHeight: 1.5 }}>
+          Your court will be instantly reserved. Please proceed to the front desk upon arrival to pay and claim your court.
+        </p>
       </div>
 
-      {step === 'form' && (
-        <>
-          <div>
-            <label className="text-gray-400 block mb-1.5" style={{ fontSize: 11, fontWeight: 700 }}>GCASH MOBILE NUMBER</label>
-            <input
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="09XX-XXXX-XXXX"
-              maxLength={13}
-              className="w-full rounded-xl px-4 py-3 text-white focus:outline-none"
-              style={{ fontSize: 16, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)', letterSpacing: 1 }}
-            />
-            {phoneError && <p className="text-red-400 mt-1" style={{ fontSize: 11 }}>{phoneError}</p>}
-            <p className="text-gray-600 mt-1" style={{ fontSize: 10 }}>Test: any 11 digits starting with 09</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onCancel}
-              className="flex-1 py-3 rounded-xl border border-white/10 text-gray-400 font-black transition-all hover:text-white"
-              style={{ fontSize: 13 }}>
-              Back
-            </button>
-            <button onClick={handlePay}
-              className="flex-1 py-3 rounded-xl text-white font-black transition-all"
-              style={{ fontSize: 14, background: 'linear-gradient(135deg,#0047AB,#005ce6)', boxShadow: '0 4px 16px rgba(0,71,171,0.4)' }}>
-              Pay {'\u20B1'}{amount.toLocaleString()}
-            </button>
-          </div>
-        </>
-      )}
-
-      {step === 'processing' && (
+      {processing ? (
         <div className="flex flex-col items-center gap-3 py-4">
-          <div className="w-12 h-12 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
-          <p className="text-white font-black" style={{ fontSize: 15 }}>Processing Payment...</p>
-          <p className="text-gray-500" style={{ fontSize: 12 }}>Connecting to GCash servers</p>
+          <div className="w-12 h-12 rounded-full border-4 border-orange-500 border-t-transparent animate-spin" />
+          <p className="text-white font-black" style={{ fontSize: 15 }}>Processing Reservation...</p>
         </div>
-      )}
-
-      {step === 'success' && (
-        <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} className="space-y-4">
-          <div className="flex flex-col items-center gap-3 py-2">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'rgba(34,197,94,0.15)', border: '2px solid #22c55e' }}>
-              <CheckCircle size={34} className="text-green-400" />
-            </div>
-            <div className="text-center">
-              <p className="text-white font-black" style={{ fontSize: 18 }}>Payment Successful!</p>
-              <p className="text-gray-400" style={{ fontSize: 12 }}>{'\u20B1'}{amount.toLocaleString()} via GCash · {refCode}</p>
-            </div>
-          </div>
-          <button onClick={onSuccess}
-            className="w-full py-3.5 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all"
-            style={{ fontSize: 14, background: 'linear-gradient(135deg,#22c55e,#16a34a)', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
-            <Receipt size={16} /> View My Booking &amp; QR Ticket
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={onCancel}
+            className="flex-1 py-3 rounded-xl border border-white/10 text-gray-400 font-black transition-all hover:text-white"
+            style={{ fontSize: 13 }}>
+            Back
           </button>
-        </motion.div>
+          <button onClick={handleConfirm}
+            className="flex-1 py-3 rounded-xl text-white font-black transition-all"
+            style={{ fontSize: 14, background: 'linear-gradient(135deg,#FF8C00,#e67e00)', boxShadow: '0 4px 16px rgba(255,140,0,0.4)' }}>
+            Confirm Reservation
+          </button>
+        </div>
       )}
     </div>
   );
@@ -404,12 +374,12 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const todayStr = getLocalDateString(now);
 
   /* Steps
-     customer: Details(0) → Review(1) → Payment(2) → Done(3)
+     customer: Details(0) → Review(1) → Confirm(2) → Done(3)
      staff:    Walk-in(0) → Details(1) → Review(2) → Done(3)
   */
   const steps = mode === 'staff'
     ? ['Walk-in Info', 'Details', 'Review', 'Done']
-    : ['Details', 'Review', 'Payment', 'Done'];
+    : ['Details', 'Review', 'Confirm', 'Done'];
   const totalSteps = steps.length;
   const [step, setStep] = useState(0);
 
@@ -421,7 +391,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const isDone      = step === doneStep;
   const isDetails   = step === detailsStep;
   const isReview    = step === reviewStep;
-  const isPayment   = mode === 'customer' && step === paymentStep;
+  const isConfirm   = mode === 'customer' && step === paymentStep;
   const isWalkIn    = mode === 'staff' && step === 0;
 
   /* Form state */
@@ -484,7 +454,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
     await onConfirm({
       court: courtName, sport, date, time, duration,
       addOns: [addOnLabels, mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
-      paymentMethod: mode === 'staff' ? 'cash' : 'gcash',
+      paymentMethod: mode === 'staff' ? 'cash' : 'pay_at_facility',
       refCode: refCode.current,
       customerName: mode === 'staff' ? customerName : undefined,
       customerPhone: mode === 'staff' ? customerPhone : undefined,
@@ -622,8 +592,11 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               </motion.div>
               <div>
                 <p className="text-white font-black" style={{ fontSize: 20 }}>
-                  {mode === 'staff' ? 'Walk-In Confirmed!' : 'Booking Confirmed!'}
+                  {mode === 'staff' ? 'Walk-In Confirmed!' : 'Booking Reserved!'}
                 </p>
+                {mode === 'customer' && (
+                  <p className="text-orange-400 mt-2 font-black" style={{ fontSize: 13 }}>Please proceed to the facility to pay in person and check in.</p>
+                )}
                 <p className="text-gray-400 mt-1" style={{ fontSize: 13 }}>{courtName} · {dateInfo.label}</p>
                 <p className="text-gray-400" style={{ fontSize: 13 }}>
                   {time && fmt12(parseInt(time))} &ndash; {endHour ? fmt12(endHour) : ''} · {'\u20B1'}{total.toLocaleString()}
@@ -693,7 +666,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500" style={{ fontSize: 11 }}>Payment</span>
-                    <span className="font-black" style={{ fontSize: 11, color: mode === 'staff' ? '#60a5fa' : '#34d399' }}>{mode === 'staff' ? 'Cash (Walk-in)' : 'GCash'}</span>
+                    <span className="font-black" style={{ fontSize: 11, color: mode === 'staff' ? '#60a5fa' : '#FF8C00' }}>{mode === 'staff' ? 'Cash (Walk-in)' : 'Pay at Facility'}</span>
                   </div>
                 </div>
               </div>
@@ -897,14 +870,14 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
             </AnimatePresence>
           )}
 
-          {/* ── Payment (customer only, step 2) ── */}
-          {!isDone && isPayment && (
+          {/* ── Confirm (customer only, step 2) ── */}
+          {!isDone && isConfirm && (
             <AnimatePresence mode="wait">
-              <motion.div key="payment" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
+              <motion.div key="confirm" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
                 {/* Mini summary */}
                 <div className="flex items-center justify-between p-3 rounded-2xl" style={{ background: `${accentColor}10`, border: `1px solid ${accentColor}25` }}>
                   <div className="flex items-center gap-2">
-                    <CreditCard size={15} style={{ color: accentColor }} />
+                    <Clock size={15} style={{ color: accentColor }} />
                     <div>
                       <p className="text-white font-black" style={{ fontSize: 13 }}>{courtName}</p>
                       <p className="text-gray-500" style={{ fontSize: 11 }}>{time && fmt12(parseInt(time))} &ndash; {endHour && fmt12(endHour)}</p>
@@ -913,9 +886,8 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   <p className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</p>
                 </div>
                 {priceBreakdownPanel}
-                <GCashPaymentSimulator
+                <FacilityPaymentConfirm
                   amount={total}
-                  refCode={refCode.current}
                   onSuccess={async () => {
                     setError('');
                     try {
@@ -940,8 +912,8 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
           )}
         </div>
 
-        {/* Footer — hidden on Done and Payment steps (GCash has its own buttons) */}
-        {!isDone && !isPayment && (
+        {/* Footer — hidden on Done and Confirm steps (they have their own buttons) */}
+        {!isDone && !isConfirm && (
           <div className="px-5 pb-5 pt-3 flex gap-2.5 border-t border-white/5 flex-shrink-0">
             <button onClick={step === 0 ? onClose : goPrev}
               className="flex-1 py-3 rounded-xl font-black border border-white/10 text-gray-400 hover:text-white transition-colors"
@@ -953,7 +925,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               style={{ fontSize: 14, background: `linear-gradient(135deg,${accentColor},${accentColor}cc)`, boxShadow: `0 4px 16px ${accentColor}35` }}>
               {isReview
                 ? mode === 'customer'
-                  ? <><Smartphone size={16} /> Proceed to Payment</>
+                  ? <><Smartphone size={16} /> Proceed to Confirm</>
                   : <><Check size={16} /> Confirm Walk-In</>
                 : <>{isWalkIn ? 'Next' : 'Continue'} <ArrowRight size={15} /></>
               }

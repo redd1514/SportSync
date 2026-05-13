@@ -8,7 +8,7 @@ import {
 import {
   CheckCircle, Loader2, ChevronLeft, ChevronRight,
   Clock, User, CreditCard, CalendarDays, Info, AlertTriangle,
-  ArrowRight, Check, X
+  ArrowRight, Check, X, Building2
 } from "lucide-react";
 import { projectId, publicAnonKey } from "../../utils/supabase/info";
 import { useUser } from "../../contexts/UserContext";
@@ -578,8 +578,8 @@ export function MobileBooking() {
             >
               <CheckCircle size={40} className="text-green-400" />
             </motion.div>
-          <h2 className="text-white mb-2" style={{ fontSize: 24, fontWeight: 900 }}>Payment Successful</h2>
-          <p className="text-gray-400 text-sm mb-6 text-center">Your payment has been processed. Your booking is now confirmed.</p>
+          <h2 className="text-white mb-2" style={{ fontSize: 24, fontWeight: 900 }}>Booking Reserved!</h2>
+          <p className="text-gray-400 text-sm mb-6 text-center">Your court has been reserved. Please proceed to the facility to pay in person and check in.</p>
 
           {/* Time range pill */}
           <div className="flex items-center justify-center gap-2 mb-5">
@@ -599,9 +599,9 @@ export function MobileBooking() {
               { label: "Start",      value: startSlot || "" },
               { label: "End",        value: endLabel },
               { label: "Duration",   value: `${selectedDuration} hour${selectedDuration > 1 ? "s" : ""}` },
-              { label: "Total Paid", value: `₱${displayPrice.toLocaleString()}`, highlight: true },
+              { label: "Amount Due", value: `₱${displayPrice.toLocaleString()}`, highlight: true },
               { label: "Booking ID", value: `#${displayBookingId}` },
-              { label: "Status",     value: "Pending Verification", yellow: true },
+              { label: "Status",     value: "Pending Payment", yellow: true },
             ].map(row => (
               <div key={row.label} className="flex items-center justify-between">
                 <span className="text-gray-500" style={{ fontSize: 13 }}>{row.label}</span>
@@ -814,25 +814,27 @@ export function MobileBooking() {
             </div>
           )}
 
-          {/* GCash Payment Gateway */}
-          <div className="bg-[#1A1A1A] rounded-2xl p-4 mb-6 border border-white/5">
-            <h3 className="font-bold text-white mb-3 uppercase tracking-wider text-xs">Payment Method</h3>
-            <div className="bg-[#0047AB]/10 border border-[#0047AB] rounded-xl p-4 flex items-center justify-between cursor-pointer">
-              <div className="flex items-center gap-3">
-                <div className="bg-white p-2 rounded-lg flex items-center justify-center">
-                  <span className="text-[#0047AB] font-black text-sm tracking-tighter italic">GCash</span>
-                </div>
-                <div>
-                  <p className="text-white font-bold text-sm">Pay via GCash Gateway</p>
-                  <p className="text-gray-400 text-xs">Instant confirmation</p>
-                </div>
+          {/* Payment Info */}
+          <motion.div 
+            animate={{ boxShadow: ['0px 0px 0px rgba(255,140,0,0)', '0px 0px 15px rgba(255,140,0,0.15)', '0px 0px 0px rgba(255,140,0,0)'] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="bg-gradient-to-br from-[#FF8C00]/10 to-[#cc7000]/5 rounded-3xl p-5 mb-6 border border-[#FF8C00]/30 relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 w-32 h-32 bg-[#FF8C00]/10 rounded-full blur-3xl -mt-10 -mr-10 pointer-events-none" />
+            <div className="relative z-10 flex flex-col items-center text-center">
+              <div className="w-12 h-12 rounded-full bg-[#FF8C00]/20 flex items-center justify-center border border-[#FF8C00]/30 mb-3 shadow-[0_0_15px_rgba(255,140,0,0.2)]">
+                <Building2 size={22} className="text-[#FF8C00]" />
               </div>
-              <div className="w-5 h-5 rounded-full border-4 border-[#0047AB] bg-[#0047AB]"></div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-2 h-2 rounded-full bg-[#FF8C00] animate-pulse" />
+                <p className="text-[#FF8C00] font-black tracking-widest text-[10px] uppercase">Manual Check-In Required</p>
+              </div>
+              <p className="text-white font-black text-lg mb-2">Pay at Facility</p>
+              <p className="text-gray-400 text-xs leading-relaxed max-w-[260px]">
+                Your court will be instantly reserved. Please pay the total amount at the front desk upon arrival.
+              </p>
             </div>
-            <p className="text-gray-400 text-xs mt-3 text-center italic">
-              "You will be redirected to the secure GCash payment gateway."
-            </p>
-          </div>
+          </motion.div>
         </div>
 
         <div className="px-5 pb-5 pt-3 border-t border-white/5 flex-shrink-0">
@@ -846,9 +848,9 @@ export function MobileBooking() {
             style={{ fontSize: 16, fontWeight: 900 }}
           >
             {isBooking ? (
-              <><Loader2 size={20} className="animate-spin" /> Processing Payment...</>
+              <><Loader2 size={20} className="animate-spin" /> Processing Reservation...</>
             ) : (
-              `Proceed to Payment • ₱${confirmPrice.toLocaleString()}`
+              `Confirm Reservation • ₱${confirmPrice.toLocaleString()}`
             )}
           </motion.button>
         </div>

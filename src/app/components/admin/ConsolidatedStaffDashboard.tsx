@@ -265,11 +265,13 @@ async function safeDisposeHtml5Scanner(h: Html5Qrcode | null | undefined): Promi
 // ── Ticket Verification ──────────────────────────────────────────────────────
 function TicketVerification() {
   const { bookings, updateBooking, addBooking, user } = useUser();
-  const { lookupBookingByRef, checkInBooking, checkOutBooking } = useBookingAPI();
+  const { lookupBookingByRef, checkInBooking, checkOutBooking, cancelBooking } = useBookingAPI();
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<typeof bookings[0] | null | 'notfound'>(null);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{type: 'check_in' | 'check_out' | 'reject', title: string, desc: string} | null>(null);
   const [scanMode, setScanMode] = useState<'check_in' | 'check_out'>('check_in');
   const [actionError, setActionError] = useState<string | null>(null);
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
@@ -445,7 +447,7 @@ function TicketVerification() {
     };
   }, [cameraOpen, readerId]);
 
-  const handleCheckIn = async () => {
+  const performCheckIn = async () => {
     if (!result || result === 'notfound') return;
     setActionError(null);
     setCheckingIn(true);
@@ -462,7 +464,23 @@ function TicketVerification() {
     setCheckingIn(false);
   };
 
-  const handleCheckOut = async () => {
+  const performReject = async () => {
+    if (!result || result === 'notfound') return;
+    setActionError(null);
+    setRejecting(true);
+    try {
+      await cancelBooking(result.id, 'Rejected at desk (no payment/no show)');
+    } catch (e: any) {
+      setActionError(e?.message || 'Rejection failed. Please try again.');
+      setRejecting(false);
+      return;
+    }
+    updateBooking(result.id, { status: 'cancelled' as any });
+    setResult({ ...result, status: 'cancelled' as any });
+    setRejecting(false);
+  };
+
+  const performCheckOut = async () => {
     if (!result || result === 'notfound') return;
     setActionError(null);
     setCheckingOut(true);
@@ -481,11 +499,20 @@ function TicketVerification() {
     setCheckingOut(false);
   };
 
+  const executeConfirmAction = async () => {
+    if (!confirmAction) return;
+    const { type } = confirmAction;
+    setConfirmAction(null);
+    if (type === 'check_in') await performCheckIn();
+    if (type === 'reject') await performReject();
+    if (type === 'check_out') await performCheckOut();
+  };
+
   const bookingStatus = (result && result !== 'notfound' ? (result as any).status : null) as string | null;
   const isCompleted = bookingStatus === 'completed';
   const isCheckedIn = bookingStatus === 'checked_in' || (result && result !== 'notfound' && (result as any).checkInStatus === 'checked_in');
 
-  const canCheckIn = !!result && result !== 'notfound' && !isCompleted && !isCheckedIn;
+  const canCheckIn = !!result && result !== 'notfound' && !isCompleted && !isCheckedIn && bookingStatus !== 'cancelled';
   const canCheckOut = !!result && result !== 'notfound' && !isCompleted && isCheckedIn;
 
   const formatTime = (t: string) => {
@@ -639,8 +666,7 @@ function TicketVerification() {
                 { label: 'COURT', value: result.court },
                 { label: 'DATE', value: result.date },
                 { label: 'TIME', value: `${formatTime(result.time)} · ${result.duration}h` },
-                { label: 'AMOUNT', value: `₱${result.amount.toLocaleString()}` },
-                { label: 'PAYMENT', value: result.paymentStatus === 'paid' ? 'Paid' : result.paymentStatus },
+                { label: result.paymentStatus === 'paid' ? 'AMOUNT PAID' : 'TO COLLECT', value: `₱${result.amount.toLocaleString()}` },
               ].map((f) => (
                 <div key={f.label}>
                   <p className="text-gray-600 font-black" style={{ fontSize: 9, letterSpacing: 0.5 }}>{f.label}</p>
@@ -662,27 +688,49 @@ function TicketVerification() {
                 <p className="text-gray-500 text-center leading-relaxed" style={{ fontSize: 11 }}>
                   Details match the guest in front of you? Use check-in only after you have accepted them at the desk.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => void handleCheckIn()}
-                  disabled={checkingIn || !canCheckIn}
-                  className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
-                  style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: (checkingIn || !canCheckIn) ? 0.55 : 1 }}
-                >
-                  {checkingIn ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck size={16} /> Mark as Checked-In
-                    </>
-                  )}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAction({
+                      type: 'check_in',
+                      title: 'Confirm Check-in',
+                      desc: `Are you sure you want to check in ${result.customerName || 'the guest'}? Make sure you have collected ₱${result.amount.toLocaleString()}.`
+                    })}
+                    disabled={checkingIn || rejecting || !canCheckIn}
+                    className="flex-1 py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: (checkingIn || rejecting || !canCheckIn) ? 0.55 : 1 }}
+                  >
+                    {checkingIn ? (
+                      <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing...</>
+                    ) : (
+                      <><ShieldCheck size={16} /> Mark as Checked-In</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAction({
+                      type: 'reject',
+                      title: 'Reject Ticket',
+                      desc: `Are you sure you want to reject this ticket for ${result.customerName || 'the guest'}? This action will permanently cancel the booking.`
+                    })}
+                    disabled={checkingIn || rejecting || !canCheckIn}
+                    className="px-4 py-3 rounded-xl text-red-300 font-black bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
+                    style={{ fontSize: 14, opacity: (checkingIn || rejecting || !canCheckIn) ? 0.55 : 1 }}
+                  >
+                    {rejecting ? (
+                      <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <><XCircle size={16} /> Reject</>
+                    )}
+                  </button>
+                </div>
+                {!canCheckIn && bookingStatus === 'cancelled' ? (
+                  <p className="text-red-400 text-center font-black" style={{ fontSize: 11 }}>This booking has been cancelled or rejected.</p>
+                ) : null}
                 {!canCheckIn && isCompleted ? (
                   <p className="text-gray-600 text-center font-black" style={{ fontSize: 11 }}>This ticket is already checked out (completed).</p>
                 ) : null}
-                {!canCheckIn && isCheckedIn && !isCompleted ? (
+                {!canCheckIn && isCheckedIn && !isCompleted && bookingStatus !== 'cancelled' ? (
                   <p className="text-gray-600 text-center font-black" style={{ fontSize: 11 }}>Already checked in — switch to Check-out to finish.</p>
                 ) : null}
               </div>
@@ -694,7 +742,11 @@ function TicketVerification() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => void handleCheckOut()}
+                  onClick={() => setConfirmAction({
+                    type: 'check_out',
+                    title: 'Confirm Check-out',
+                    desc: `Are you sure you want to check out ${result.customerName || 'the guest'}? This will mark the session as completed.`
+                  })}
                   disabled={checkingOut || !canCheckOut}
                   className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
                   style={{ background: 'linear-gradient(135deg,#3b82f6,#2563eb)', fontSize: 14, opacity: (checkingOut || !canCheckOut) ? 0.55 : 1 }}
@@ -829,6 +881,53 @@ function TicketVerification() {
                 >
                   Cancel
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {confirmAction && (
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-sm bg-[#1A1A1A] rounded-2xl border border-white/10 p-5 shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center">
+                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-4"
+                  style={{
+                    background: confirmAction.type === 'check_in' ? 'rgba(34,197,94,0.1)' :
+                                confirmAction.type === 'reject' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)',
+                  }}
+                >
+                  <AlertCircle size={24} className={
+                    confirmAction.type === 'check_in' ? 'text-green-400' :
+                    confirmAction.type === 'reject' ? 'text-red-400' : 'text-blue-400'
+                  } />
+                </div>
+                <h3 className="text-white font-black text-lg mb-2">{confirmAction.title}</h3>
+                <p className="text-gray-400 text-sm mb-6 leading-relaxed">{confirmAction.desc}</p>
+                <div className="flex gap-3 w-full">
+                  <button
+                    onClick={() => setConfirmAction(null)}
+                    className="flex-1 py-3 rounded-xl font-black text-gray-400 bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => void executeConfirmAction()}
+                    className="flex-1 py-3 rounded-xl font-black text-white transition-colors"
+                    style={{
+                      background: confirmAction.type === 'check_in' ? 'linear-gradient(135deg,#22c55e,#16a34a)' :
+                                  confirmAction.type === 'reject' ? 'linear-gradient(135deg,#ef4444,#dc2626)' :
+                                  'linear-gradient(135deg,#3b82f6,#2563eb)'
+                    }}
+                  >
+                    Confirm
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

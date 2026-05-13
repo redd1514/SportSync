@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight, Loader2 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Calendar, Clock, MapPin, X, AlertCircle, CheckCircle, RefreshCw, ChevronRight, Loader2, CreditCard } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { useBookingAPI } from '../hooks/useBookingAPI';
 import { SportIcon, getSportColor } from './SportIcons';
@@ -30,7 +32,7 @@ const calculateDuration = (startTime: string, endTime: string): number => {
 
 export function UserMyBookings() {
   const { user, updateBooking, addCancellationRequest, bookings: contextBookings } = useUser();
-  const { getQRCodeUrl, loading, error: apiError, requestBookingCancellation, requestBookingReschedule } = useBookingAPI();
+  const { getQRCodeUrl, loading, error: apiError, requestBookingCancellation, requestBookingReschedule, checkAvailability } = useBookingAPI();
   
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -38,11 +40,42 @@ export function UserMyBookings() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
-
-  console.log('[MyBookings] Context bookings:', contextBookings);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [checkingTimes, setCheckingTimes] = useState(false);
 
   // Show ALL bookings (upcoming + past + cancelled) for history
   const userBookings = contextBookings || [];
+
+  useEffect(() => {
+    if (!selectedBooking || !rescheduleDate) {
+      setAvailableTimes([]);
+      return;
+    }
+    const bookingDetails = userBookings.find(b => b.id === selectedBooking);
+    if (!bookingDetails) return;
+
+    let isMounted = true;
+    const fetchTimes = async () => {
+      setCheckingTimes(true);
+      const promises = Array.from({ length: 16 }, (_, i) => i + 7).map(async hour => {
+        const timeStr = `${String(hour).padStart(2, '0')}:00`;
+        const endStr = `${String(hour + 1).padStart(2, '0')}:00`; // Assuming 1 hr duration
+        const isAvail = await checkAvailability(bookingDetails.court, rescheduleDate, timeStr, endStr);
+        return isAvail ? timeStr : null;
+      });
+
+      const results = await Promise.all(promises);
+      if (isMounted) {
+        setAvailableTimes(results.filter((t): t is string => t !== null));
+        setCheckingTimes(false);
+      }
+    };
+    fetchTimes();
+
+    return () => { isMounted = false; };
+  }, [rescheduleDate, selectedBooking, userBookings, checkAvailability]);
+
+  console.log('[MyBookings] Context bookings:', contextBookings);
   
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -101,126 +134,180 @@ export function UserMyBookings() {
     }
   };
 
-  const StatusBadge = ({ status }: { status: string }) => {
-    const config: Record<string, { bg: string; text: string }> = {
-      confirmed: { bg: 'bg-green-500/15', text: 'text-green-400' },
-      pending_verification: { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
-      pending: { bg: 'bg-gray-500/15', text: 'text-gray-400' },
-      rescheduled: { bg: 'bg-blue-500/15', text: 'text-blue-400' },
-      completed: { bg: 'bg-gray-500/15', text: 'text-gray-400' },
-    };
-    const c = config[status] || config.pending;
+  const StatusBadge = ({ booking }: { booking: any }) => {
+    let label = 'PENDING';
+    let bg = 'bg-gray-500/15';
+    let text = 'text-gray-400';
+    let border = 'border-gray-500/30';
+    let dot = 'bg-gray-400';
+
+    if (booking.status === 'confirmed' || booking.status === 'checked_in') {
+      label = booking.paymentStatus === 'paid' ? 'PAID' : 'RESERVED';
+      bg = booking.paymentStatus === 'paid' ? 'bg-emerald-500/10' : 'bg-[#FF8C00]/10';
+      text = booking.paymentStatus === 'paid' ? 'text-emerald-400' : 'text-[#FF8C00]';
+      border = booking.paymentStatus === 'paid' ? 'border-emerald-500/20' : 'border-[#FF8C00]/20';
+      dot = booking.paymentStatus === 'paid' ? 'bg-emerald-400' : 'bg-[#FF8C00]';
+    } else if (booking.status === 'pending_verification') {
+      label = 'VERIFYING';
+      bg = 'bg-yellow-500/10';
+      text = 'text-yellow-400';
+      border = 'border-yellow-500/20';
+      dot = 'bg-yellow-400';
+    } else if (booking.status === 'rescheduled') {
+      label = 'RESCHEDULED';
+      bg = 'bg-blue-500/10';
+      text = 'text-blue-400';
+      border = 'border-blue-500/20';
+      dot = 'bg-blue-400';
+    } else if (booking.status === 'completed') {
+      label = 'COMPLETED';
+      bg = 'bg-gray-500/10';
+      text = 'text-gray-400';
+      border = 'border-gray-500/20';
+      dot = 'bg-gray-400';
+    } else if (booking.status === 'cancelled') {
+      label = 'CANCELLED';
+      bg = 'bg-red-500/10';
+      text = 'text-red-400';
+      border = 'border-red-500/20';
+      dot = 'bg-red-400';
+    }
+
     return (
-      <span className={`px-3 py-1 rounded-full text-xs font-black ${c.bg} ${c.text} capitalize`}>
-        {status === 'pending_verification' ? 'Verification' : status}
-      </span>
+      <div className={`px-2.5 py-1 rounded-full border ${border} ${bg} flex items-center gap-1.5`}>
+        <div className={`w-1.5 h-1.5 rounded-full ${dot} ${booking.status === 'confirmed' ? 'animate-pulse' : ''}`} />
+        <span className={`${text} font-black uppercase`} style={{ fontSize: 9, letterSpacing: 0.5 }}>{label}</span>
+      </div>
     );
   };
 
   const BookingCard = ({ booking }: { booking: any }) => {
     const color = getSportColor(booking.sport);
-    const isPast = booking.status === 'completed';
+    const isPast = booking.status === 'completed' || booking.status === 'cancelled';
     const canModify = !isPast && !booking.cancellationRequested;
 
-    const qrUrl = booking.id ? getQRCodeUrl(booking.id) : null;
+    const qrValue = booking.refCode || booking.id;
 
     return (
-      <div 
-        className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden hover:border-white/10 transition-all flex flex-col h-full"
+      <motion.div 
+        whileHover={{ y: -4, borderColor: `${color}50` }}
+        transition={{ duration: 0.2 }}
+        className="bg-[#141414] rounded-3xl border border-white/5 overflow-hidden flex flex-col h-full relative"
       >
-        <div 
-          className="h-2"
-          style={{ backgroundColor: color }}
-        />
-        <div className="p-4 sm:p-6 flex flex-col flex-1">
-          <div className="flex items-start justify-between mb-5">
+        <div className="absolute top-0 right-0 w-48 h-48 rounded-full blur-[80px] opacity-20 pointer-events-none" style={{ backgroundColor: color, transform: 'translate(30%, -30%)' }} />
+        
+        <div className="p-5 sm:p-6 flex flex-col flex-1 relative z-10">
+          <div className="flex items-start justify-between mb-6">
             <div className="flex items-center gap-4">
               <div 
-                className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: `${color}20` }}
+                className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-inner border border-white/5"
+                style={{ backgroundColor: `${color}15` }}
               >
-                <SportIcon sport={booking.sport} size={28} color={color} strokeWidth={2} />
+                <SportIcon sport={booking.sport} size={24} color={color} strokeWidth={2.5} />
               </div>
-              <div className="min-w-0">
-                <h3 className="text-white font-black truncate" style={{ fontSize: 18 }}>
+              <div>
+                <h3 className="text-white font-black leading-tight" style={{ fontSize: 18 }}>
                   {booking.sport}
                 </h3>
-                <p className="text-gray-400 truncate" style={{ fontSize: 15 }}>
+                <p className="text-gray-400 font-medium" style={{ fontSize: 13 }}>
                   {booking.court}
                 </p>
               </div>
             </div>
-            <div className="flex-shrink-0 ml-2">
-              <StatusBadge status={booking.status} />
-            </div>
+            <StatusBadge booking={booking} />
           </div>
 
-          <div className="space-y-3 mb-6 flex-1">
-            <div className="flex items-center gap-3 text-gray-300">
-              <Calendar size={18} className="text-gray-500 flex-shrink-0" />
-              <span style={{ fontSize: 15 }} className="break-words">
-                {booking.date.includes('-') ? format(parseBookingDate(booking.date), 'MMMM d, yyyy') : booking.date}
-              </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 flex-1">
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0 border border-white/5">
+                  <Calendar size={14} className="text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Date</p>
+                  <p className="text-gray-200 font-black" style={{ fontSize: 13 }}>
+                    {booking.date.includes('-') ? format(parseBookingDate(booking.date), 'MMM d, yyyy') : booking.date}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0 border border-white/5">
+                  <Clock size={14} className="text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Time</p>
+                  <p className="text-gray-200 font-black" style={{ fontSize: 13 }}>
+                    {booking.time} · {booking.duration} hr
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0 border border-white/5">
+                  <CreditCard size={14} className="text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Amount</p>
+                  <p className="text-[#FF8C00] font-black" style={{ fontSize: 14 }}>
+                    ₱{booking.amount?.toLocaleString() || '0'}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-gray-300">
-              <Clock size={18} className="text-gray-500 flex-shrink-0" />
-              <span style={{ fontSize: 15 }} className="break-words">{booking.time} · {booking.duration} hour(s)</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-gray-500" style={{ fontSize: 15 }}>Amount:</span>
-              <span className="text-green-400 font-black" style={{ fontSize: 18 }}>
-                ₱{booking.amount?.toLocaleString() || '0'}
-              </span>
-            </div>
-            
-            {qrUrl && (
-              <div className="mt-2 flex items-center justify-center bg-white p-2 rounded-lg max-w-[120px] mx-auto">
-                <img src={qrUrl} alt="Booking QR Code" className="w-[100px] h-[100px]" />
+
+            {/* QR Code Section */}
+            {!isPast && qrValue && (
+              <div className="flex flex-col items-center justify-center bg-black/20 rounded-2xl p-4 border border-white/5">
+                <div className="p-2 bg-white rounded-xl shadow-lg mb-2">
+                  <QRCodeSVG value={qrValue} size={90} />
+                </div>
+                <p className="text-gray-500 font-black" style={{ fontSize: 10, letterSpacing: 1 }}>{qrValue}</p>
               </div>
             )}
           </div>
 
-          <div className="mt-auto">
+          <div className="mt-auto border-t border-white/5 pt-5">
             {booking.cancellationRequested && (
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 mb-4">
-                <div className="flex items-center gap-2">
-                  <AlertCircle size={16} className="text-yellow-400 flex-shrink-0" />
-                  <p className="text-yellow-400" style={{ fontSize: 14, fontWeight: 700 }}>
-                    Cancellation request pending admin approval
-                  </p>
-                </div>
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-4 flex items-center gap-2">
+                <AlertCircle size={14} className="text-yellow-400 flex-shrink-0" />
+                <p className="text-yellow-400 font-bold" style={{ fontSize: 11 }}>
+                  Cancellation request pending review
+                </p>
               </div>
             )}
 
             {canModify && (
-              <div className="flex gap-2 sm:gap-3">
+              <div className="flex gap-3">
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedBooking(booking.id);
                     setShowRescheduleModal(true);
                   }}
-                  className="flex-1 bg-[#0047AB]/20 text-[#0047AB] px-2 py-3 sm:px-4 rounded-xl hover:bg-[#0047AB]/30 transition-colors font-black flex items-center justify-center"
-                  style={{ fontSize: 13 }}
+                  className="flex-1 bg-[#0047AB]/10 border border-[#0047AB]/30 text-[#0047AB] py-3 rounded-xl hover:bg-[#0047AB]/20 transition-all font-black flex items-center justify-center"
+                  style={{ fontSize: 12 }}
                 >
-                  <RefreshCw size={16} className="mr-1.5" />
+                  <RefreshCw size={14} className="mr-1.5" />
                   Reschedule
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setSelectedBooking(booking.id);
                     setShowCancelModal(true);
                   }}
-                  className="flex-1 bg-red-500/20 text-red-400 px-2 py-3 sm:px-4 rounded-xl hover:bg-red-500/30 transition-colors font-black flex items-center justify-center"
-                  style={{ fontSize: 13 }}
+                  className="flex-1 bg-red-500/10 border border-red-500/30 text-red-400 py-3 rounded-xl hover:bg-red-500/20 transition-all font-black flex items-center justify-center"
+                  style={{ fontSize: 12 }}
                 >
-                  <X size={16} className="mr-1.5" />
+                  <X size={14} className="mr-1.5" />
                   Cancel
                 </button>
               </div>
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
     );
   };
 
@@ -311,7 +398,7 @@ export function UserMyBookings() {
       {/* Cancel Modal */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 sm:p-6">
-          <div className="bg-[#1A1A1A] rounded-2xl p-5 sm:p-6 max-w-md w-full border border-white/10 max-h-[90vh] overflow-y-auto scrollbar-hide">
+          <div className="bg-[#1A1A1A] rounded-2xl p-5 sm:p-6 max-w-md w-full border border-white/10 max-h-[90vh] overflow-y-auto scrollbar-hide shadow-[0_0_40px_rgba(255,140,0,0.15)]">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-white font-black" style={{ fontSize: 18 }}>
                 Request Cancellation
@@ -379,7 +466,7 @@ export function UserMyBookings() {
       {/* Reschedule Modal */}
       {showRescheduleModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 sm:p-6">
-          <div className="bg-[#1A1A1A] rounded-2xl p-5 sm:p-6 max-w-md w-full border border-white/10 max-h-[90vh] overflow-y-auto scrollbar-hide">
+          <div className="bg-[#1A1A1A] rounded-2xl p-5 sm:p-6 max-w-md w-full border border-white/10 shadow-[0_0_40px_rgba(0,71,171,0.15)] relative" style={{ overflow: 'visible' }}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-white font-black" style={{ fontSize: 18 }}>
                 Reschedule Booking
@@ -407,14 +494,22 @@ export function UserMyBookings() {
             </div>
 
             <div className="space-y-4 mb-5">
-              <CustomDateTimePicker
-                selectedDate={rescheduleDate}
-                selectedTime={rescheduleTime}
-                onDateChange={setRescheduleDate}
-                onTimeChange={setRescheduleTime}
-                minDate={new Date().toISOString().split('T')[0]}
-                accentColor="#0047AB"
-              />
+              {checkingTimes && rescheduleDate ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={24} className="text-[#0047AB] animate-spin mb-2" />
+                  <p className="text-gray-400 text-sm font-black ml-3">Checking availability...</p>
+                </div>
+              ) : (
+                <CustomDateTimePicker
+                  selectedDate={rescheduleDate}
+                  selectedTime={rescheduleTime}
+                  onDateChange={(d) => { setRescheduleDate(d); setRescheduleTime(''); }}
+                  onTimeChange={setRescheduleTime}
+                  minDate={new Date().toISOString().split('T')[0]}
+                  accentColor="#0047AB"
+                  availableTimes={availableTimes}
+                />
+              )}
             </div>
 
             <div className="flex gap-3">

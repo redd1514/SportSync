@@ -9,6 +9,7 @@ interface CustomDateTimePickerProps {
   onTimeChange: (time: string) => void;
   minDate?: string;
   accentColor?: string;
+  availableTimes?: string[];
 }
 
 const BG_CARD  = '#1C1E27';
@@ -26,6 +27,7 @@ export function CustomDateTimePicker({
   onTimeChange,
   minDate,
   accentColor = '#F97316',
+  availableTimes,
 }: CustomDateTimePickerProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     if (selectedDate) return new Date(selectedDate + 'T00:00:00');
@@ -266,19 +268,21 @@ export function CustomDateTimePicker({
                   {Array.from({ length: 16 }, (_, i) => i + 7).map(hour => {
                     const timeStr   = `${String(hour).padStart(2,'0')}:00`;
                     const isSelected = timeStr === selectedTime;
+                    const isAvailable = !availableTimes || availableTimes.includes(timeStr);
                     const displayH  = hour % 12 || 12;
                     const ampm      = hour >= 12 ? 'PM' : 'AM';
                     return (
                       <motion.button
                         key={hour}
-                        onClick={() => { onTimeChange(timeStr); setShowTimePicker(false); }}
-                        whileHover={!isSelected ? { scale: 1.04 } : {}}
-                        whileTap={{ scale: 0.95 }}
-                        className="py-2.5 rounded-xl font-black transition-all"
+                        onClick={() => { if(isAvailable) { onTimeChange(timeStr); setShowTimePicker(false); } }}
+                        disabled={!isAvailable}
+                        whileHover={isAvailable && !isSelected ? { scale: 1.04 } : {}}
+                        whileTap={isAvailable ? { scale: 0.95 } : {}}
+                        className={`py-2.5 rounded-xl font-black transition-all ${!isAvailable ? 'opacity-30 cursor-not-allowed' : ''}`}
                         style={{
                           fontSize: 12,
                           backgroundColor: isSelected ? accentColor : BG_DEEP,
-                          color: isSelected ? '#fff' : MUTED,
+                          color: isSelected ? '#fff' : (isAvailable ? MUTED : '#555'),
                           border: `1px solid ${isSelected ? accentColor : BORDER}`,
                           boxShadow: isSelected ? `0 4px 12px ${accentColor}45` : 'none',
                         }}
