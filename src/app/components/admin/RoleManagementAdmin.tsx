@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Edit2, Trash2, Shield, X, Check, Eye, EyeOff } from "lucide-react";
-import { useUser, StaffAccount } from "../../contexts/UserContext";
+import React, { useState, useEffect, useCallback } from "react";
+import { Plus, Edit2, X, Check, Eye, EyeOff } from "lucide-react";
+import { StaffAccount } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
+import { useStaffAPI } from "../../hooks/useStaffAPI";
 
 const MODULES = [
   "Dashboard",
@@ -9,16 +10,25 @@ const MODULES = [
   "Court Status",
   "Coaching Requests",
   "User Account Management",
-  "Announcements"
+  "Announcements",
 ];
 
+function isStaffPayload(x: unknown): x is StaffAccount {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return typeof o.id === "string" && typeof o.email === "string" && typeof o.name === "string";
+}
+
 export function RoleManagementAdmin() {
-  const { staffAccounts, addStaff, updateStaff } = useUser();
+  const { getStaffAccounts, createStaffAccount, updateStaffAccount } = useStaffAPI();
+  const [staffList, setStaffList] = useState<StaffAccount[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -26,8 +36,34 @@ export function RoleManagementAdmin() {
     password: "",
     role: "staff" as "staff" | "admin",
     status: "active" as "active" | "inactive",
-    permissions: [...MODULES]
+    permissions: [...MODULES],
   });
+
+  const loadStaff = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const rows = await getStaffAccounts();
+      if (!Array.isArray(rows)) {
+        setStaffList([]);
+        return;
+      }
+      const mapped = rows.filter(isStaffPayload).map((r) => ({
+        ...r,
+        permissions: Array.isArray(r.permissions) && r.permissions.length ? r.permissions : [...MODULES],
+      }));
+      setStaffList(mapped);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load staff";
+      setLoadError(msg);
+      setStaffList([]);
+    } finally {
+      setIsInitialLoad(false);
+    }
+  }, [getStaffAccounts]);
+
+  useEffect(() => {
+    void loadStaff();
+  }, [loadStaff]);
 
   const openAddModal = () => {
     setEditingId(null);
@@ -38,7 +74,7 @@ export function RoleManagementAdmin() {
       password: "",
       role: "staff",
       status: "active",
-      permissions: [...MODULES]
+      permissions: [...MODULES],
     });
     setIsModalOpen(true);
   };
@@ -49,71 +85,119 @@ export function RoleManagementAdmin() {
       name: staff.name,
       email: staff.email,
       username: staff.username,
-      password: staff.password || "",
+      password: "",
       role: staff.role,
       status: staff.status,
-      permissions: staff.permissions || [...MODULES]
+      permissions: staff.permissions?.length ? [...staff.permissions] : [...MODULES],
     });
     setIsModalOpen(true);
   };
 
-  const toggleStatus = (staff: StaffAccount) => {
-    updateStaff(staff.id, { status: staff.status === "active" ? "inactive" : "active" });
+  const toggleStatus = async (staff: StaffAccount) => {
+    setLoadError(null);
+    try {
+      const next = staff.status === "active" ? "inactive" : "active";
+      await updateStaffAccount(staff.id, { status: next });
+      await loadStaff();
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Update failed");
+    }
   };
 
   const handleTogglePermission = (mod: string) => {
-    setFormData(prev => {
+    setFormData((prev) => {
       const perms = prev.permissions.includes(mod)
-        ? prev.permissions.filter(p => p !== mod)
+        ? prev.permissions.filter((p) => p !== mod)
         : [...prev.permissions, mod];
       return { ...prev, permissions: perms };
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name || !formData.email || !formData.username) return;
-    
-    if (editingId) {
-      updateStaff(editingId, formData);
-    } else {
-      addStaff({
-        id: `STAFF${Date.now()}`,
-        ...formData
-      });
-    }
-    setIsModalOpen(false);
-  };
+    if (!editingId && formData.password.length < 6) return;
 
-  useEffect(() => {
-    const t = setTimeout(() => setIsInitialLoad(false), 600);
-    return () => clearTimeout(t);
-  }, []);
+    setLoadError(null);
+    setSaving(true);
+    try {
+      if (editingId) {
+        const body: Record<string, unknown> = {
+          name: formData.name,
+          email: formData.email,
+          username: formData.username,
+          role: formData.role,
+          status: formData.status,
+          permissions: formData.permissions,
+        };
+        if (formData.password.length >= 6) body.password = formData.password;
+        const updated = await updateStaffAccount(editingId, body);
+        if (isStaffPayload(updated)) {
+          setStaffList((prev) =>
+            prev.map((s) =>
+              s.id === editingId
+                ? {
+                    ...s,
+                    ...updated,
+                    permissions: Array.isArray(updated.permissions) ? updated.permissions : formData.permissions,
+                  }
+                : s,
+            ),
+          );
+        } else await loadStaff();
+      } else {
+        await createStaffAccount({
+          name: formData.name,
+          email: formData.email,
+          username: formData.username,
+          password: formData.password,
+          role: formData.role,
+          status: formData.status,
+          permissions: formData.permissions,
+        });
+        await loadStaff();
+      }
+      setIsModalOpen(false);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (isInitialLoad) {
     return (
       <div className="flex flex-col h-full items-center justify-center min-h-[400px] bg-[#131314]">
-        <SectionLoader label="Loading role management…" accentColor="#F97316" />
+        <SectionLoader label="Loading staff from database…" accentColor="#F97316" />
       </div>
     );
   }
+
+  const createPasswordOk = editingId ? true : formData.password.length >= 6;
+  const canSubmit = !!(formData.name && formData.email && formData.username && createPasswordOk);
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center bg-[#1A1A1A] p-6 rounded-2xl border border-white/5">
         <div>
           <h2 className="text-2xl font-black text-white mb-2 flex items-center gap-3">
-            <Shield className="w-6 h-6 text-[#FF8C00]" />
             Staff Roles & Access Management
           </h2>
-          <p className="text-gray-400">Manage staff accounts and permissions</p>
+          <p className="text-gray-400">Manage staff and admin accounts from the database</p>
         </div>
         <button
+          type="button"
           onClick={openAddModal}
           className="bg-[#FF8C00] hover:bg-[#e67e00] text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all"
         >
           <Plus className="w-5 h-5" /> Create Staff Account
         </button>
       </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300 text-sm font-semibold">
+          {loadError}
+        </div>
+      )}
 
       <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden">
         <div className="overflow-x-auto">
@@ -128,7 +212,7 @@ export function RoleManagementAdmin() {
               </tr>
             </thead>
             <tbody>
-              {staffAccounts.map(staff => (
+              {staffList.map((staff) => (
                 <tr key={staff.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                   <td className="p-4">
                     <div className="font-bold text-white">{staff.name}</div>
@@ -138,14 +222,16 @@ export function RoleManagementAdmin() {
                     <div className="text-xs text-gray-500">@{staff.username}</div>
                   </td>
                   <td className="p-4">
-                    <span className="px-3 py-1 bg-[#0047AB]/20 text-[#0047AB] rounded-full text-xs font-bold capitalize">
-                      {staff.role} Admin
+                    <span className="px-3 py-1 bg-[#0047AB]/20 text-[#60a5fa] rounded-full text-xs font-bold">
+                      {staff.role === "admin" ? "Super Admin" : "Staff"}
                     </span>
                   </td>
                   <td className="p-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      staff.status === "active" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                    }`}>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        staff.status === "active" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                      }`}
+                    >
                       {staff.status === "active" ? "Active" : "Inactive"}
                     </span>
                   </td>
@@ -159,10 +245,10 @@ export function RoleManagementAdmin() {
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => toggleStatus(staff)}
+                        onClick={() => void toggleStatus(staff)}
                         className={`p-2 rounded-lg transition-colors ${
-                          staff.status === "active" 
-                            ? "hover:bg-red-500/20 text-gray-400 hover:text-red-400" 
+                          staff.status === "active"
+                            ? "hover:bg-red-500/20 text-gray-400 hover:text-red-400"
                             : "hover:bg-green-500/20 text-gray-400 hover:text-green-400"
                         }`}
                         title={staff.status === "active" ? "Deactivate" : "Activate"}
@@ -173,10 +259,11 @@ export function RoleManagementAdmin() {
                   </td>
                 </tr>
               ))}
-              {staffAccounts.length === 0 && (
+              {staffList.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-gray-400">
-                    No staff accounts found.
+                    No staff or admin accounts found. Users must have role <code className="text-gray-500">staff</code> or{" "}
+                    <code className="text-gray-500">admin</code> in the database.
                   </td>
                 </tr>
               )}
@@ -192,14 +279,11 @@ export function RoleManagementAdmin() {
               <h3 className="text-xl font-black text-white">
                 {editingId ? "Edit Staff Account" : "Create Staff Account"}
               </h3>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -207,7 +291,7 @@ export function RoleManagementAdmin() {
                   <input
                     type="text"
                     value={formData.name}
-                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
                     placeholder="e.g. Juan Staff"
                   />
@@ -217,7 +301,7 @@ export function RoleManagementAdmin() {
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={e => setFormData({...formData, email: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
                     placeholder="staff@jrc.com"
                   />
@@ -230,22 +314,24 @@ export function RoleManagementAdmin() {
                   <input
                     type="text"
                     value={formData.username}
-                    onChange={e => setFormData({...formData, username: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
                     placeholder="jstaff"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-400">Password</label>
+                  <label className="text-sm font-semibold text-gray-400">
+                    Password {editingId && <span className="text-gray-600 font-normal">(optional)</span>}
+                  </label>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
                       value={formData.password}
-                      onChange={e => setFormData({...formData, password: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00] pr-10"
-                      placeholder="Enter password"
+                      placeholder={editingId ? "Leave blank to keep current" : "At least 6 characters"}
                     />
-                    <button 
+                    <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
@@ -260,11 +346,11 @@ export function RoleManagementAdmin() {
                 <label className="text-sm font-semibold text-gray-400">Role</label>
                 <select
                   value={formData.role}
-                  onChange={e => setFormData({...formData, role: e.target.value as "staff" | "admin"})}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value as "staff" | "admin" })}
                   className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
                 >
-                  <option value="staff">Staff Admin (Limited Access)</option>
-                  <option value="admin">Super Admin (Full Access)</option>
+                  <option value="staff">Staff (facility operations)</option>
+                  <option value="admin">Admin (full access)</option>
                 </select>
               </div>
 
@@ -272,9 +358,12 @@ export function RoleManagementAdmin() {
                 <div className="space-y-3">
                   <label className="text-sm font-semibold text-gray-400">Module Access</label>
                   <div className="grid grid-cols-2 gap-3">
-                    {MODULES.map(mod => (
-                      <label key={mod} className="flex items-center gap-3 p-3 rounded-xl bg-[#0D0D0D] border border-white/5 cursor-pointer hover:border-white/20 transition-colors">
-                        <input 
+                    {MODULES.map((mod) => (
+                      <label
+                        key={mod}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-[#0D0D0D] border border-white/5 cursor-pointer hover:border-white/20 transition-colors"
+                      >
+                        <input
                           type="checkbox"
                           checked={formData.permissions.includes(mod)}
                           onChange={() => handleTogglePermission(mod)}
@@ -296,8 +385,9 @@ export function RoleManagementAdmin() {
                 Cancel
               </button>
               <button
-                onClick={handleSave}
-                disabled={!formData.name || !formData.email || !formData.username}
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={!canSubmit || saving}
                 className="flex-1 py-3 rounded-xl font-bold text-white bg-[#FF8C00] hover:bg-[#e67e00] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingId ? "Save Changes" : "Create Account"}

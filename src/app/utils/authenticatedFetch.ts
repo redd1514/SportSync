@@ -30,7 +30,7 @@ export async function getAccessTokenForApi(): Promise<string | null> {
 }
 
 /** Mint a SportSync API JWT after demo `/api/users/sync` (requires `SPORTSYNC_API_JWT_SECRET` on the API). */
-export async function exchangeDemoApiToken(params: { authId: string; email: string }): Promise<boolean> {
+export async function exchangeDemoApiToken(params: { authId: string; email: string }): Promise<{ error: string | null }> {
   const res = await fetch(`${getApiBaseUrl()}/api/auth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -40,10 +40,10 @@ export async function exchangeDemoApiToken(params: { authId: string; email: stri
   if (!res.ok || !data.access_token) {
     clearDemoApiToken();
     if (data.error) console.warn('[api] Demo token exchange failed:', data.error);
-    return false;
+    return { error: data.error || 'Unable to create a demo login token.' };
   }
   setDemoApiToken(data.access_token);
-  return true;
+  return { error: null };
 }
 
 /** Authenticated fetch to the Node API (Supabase access_token or demo API JWT). */

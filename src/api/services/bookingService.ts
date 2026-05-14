@@ -168,6 +168,20 @@ export const bookingService = {
 
       const totalPrice = basePrice + addonsTotal;
 
+      // Snapshot display name for admin/realtime (raw booking rows have no users join)
+      let notesFromCustomer: string | null = null;
+      if (resolvedUserId) {
+        const { data: urow } = await supabase
+          .from('users')
+          .select('full_name, email')
+          .eq('id', resolvedUserId)
+          .maybeSingle();
+        const nm = String(urow?.full_name || urow?.email || '').trim();
+        if (nm) {
+          notesFromCustomer = JSON.stringify({ customerName: nm });
+        }
+      }
+
       // Create booking
       const rowStatus = booking.status ?? 'pending';
       const { error: insertError } = await supabase
@@ -183,6 +197,7 @@ export const bookingService = {
             status: rowStatus,
             base_price: basePrice,
             total_price: totalPrice,
+            ...(notesFromCustomer ? { notes: notesFromCustomer } : {}),
           },
         ]);
 
@@ -200,7 +215,13 @@ export const bookingService = {
       }
 
       // Emit realtime event
-      await emitRealtimeEvent('bookings', 'INSERT', createdBooking);
+      console.log('[BookingService] Created booking:', createdBooking.id, 'user_id:', createdBooking.user_id);
+      try {
+        await emitRealtimeEvent('bookings', 'INSERT', createdBooking);
+        console.log('[BookingService] emitRealtimeEvent called for booking', createdBooking.id);
+      } catch (emitErr) {
+        console.error('[BookingService] emitRealtimeEvent error:', (emitErr as any)?.message || emitErr);
+      }
       
       return createdBooking as BookingResponse;
     } catch (e) {
@@ -309,21 +330,72 @@ async getAllBookings(filters?: { date?: string; start?: string; end?: string }) 
     try {
         let query = supabase
             .from('bookings')
-            .select('*, users!inner(full_name, email)')
-            .order('booking_date', { ascending: false })
+      .select('*, users(full_name, email), courts(name)')
+      .order('created_at', { ascending: false })
+      .order('booking_date', { ascending: false })
+      .order('start_time', { ascending: false })
             .limit(500);
 
-        // Apply their filters to your Supabase query
+    // Apply filters to Supabase query
         if (filters?.date) {
             query = query.eq('booking_date', filters.date);
         }
+    if (filters?.start) {
+      query = query.gte('booking_date', filters.start);
+    }
+    if (filters?.end) {
+      query = query.lte('booking_date', filters.end);
+    }
 
         const { data, error } = await query;
 
         if (error) throw error;
+
+    const rows = data || [];
+    const unresolvedUserIds = [...new Set(
+      rows
+        .filter((b: any) => !b.users?.full_name && !b.users?.email && b.user_id)
+        .map((b: any) => String(b.user_id))
+    )];
+
+    const customerByAnyId: Record<string, string> = {};
+    if (unresolvedUserIds.length > 0) {
+      const [{ data: usersById }, { data: usersByAuthId }] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, auth_id, full_name, email')
+          .in('id', unresolvedUserIds),
+        supabase
+          .from('users')
+          .select('id, auth_id, full_name, email')
+          .in('auth_id', unresolvedUserIds),
+      ]);
+
+      for (const u of usersById || []) {
+        const name = u.full_name || u.email || '';
+        if (name) {
+          customerByAnyId[String(u.id)] = name;
+          if (u.auth_id) customerByAnyId[String(u.auth_id)] = name;
+        }
+      }
+
+      for (const u of usersByAuthId || []) {
+        const name = u.full_name || u.email || '';
+        if (name) {
+          customerByAnyId[String(u.id)] = name;
+          if (u.auth_id) customerByAnyId[String(u.auth_id)] = name;
+        }
+      }
+    }
+
         return (data || []).map((b: any) => ({
             ...b,
-            customer_name: b.users?.full_name || b.users?.email || null,
+      customer_name:
+        b.users?.full_name ||
+        b.users?.email ||
+        customerByAnyId[String(b.user_id || '')] ||
+        null,
+      court_name: b.courts?.name || null,
         }));
     } catch (e) {
         console.error('[bookingService] getAllBookings', e);

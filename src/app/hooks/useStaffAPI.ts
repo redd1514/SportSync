@@ -14,8 +14,15 @@ export const useStaffAPI = () => {
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         ...options,
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.statusText}`);
-      return await response.json();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const msg =
+          typeof (payload as { error?: string })?.error === 'string'
+            ? (payload as { error: string }).error
+            : `Request failed (${response.status})`;
+        throw new Error(msg);
+      }
+      return payload;
     } catch (err: any) {
       setError(err.message);
       throw err;
@@ -29,72 +36,72 @@ export const useStaffAPI = () => {
     [handleRequest]
   );
 
-  const getPendingRequests = () => {
+  const getPendingRequests = useCallback(() => {
     return handleRequest(`/api/staff/requests/pending`);
-  };
+  }, [handleRequest]);
 
-  const approveCancellationRequest = (requestId: string) => {
+  const approveCancellationRequest = useCallback((requestId: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/cancel/approve`, {
       method: 'PUT',
     });
-  };
+  }, [handleRequest]);
 
-  const rejectCancellationRequest = (requestId: string, reason: string) => {
+  const rejectCancellationRequest = useCallback((requestId: string, reason: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/cancel/reject`, {
       method: 'PUT',
       body: JSON.stringify({ reason }),
     });
-  };
+  }, [handleRequest]);
 
-  const approveRescheduleRequest = (requestId: string) => {
+  const approveRescheduleRequest = useCallback((requestId: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/reschedule/approve`, {
       method: 'PUT',
     });
-  };
+  }, [handleRequest]);
 
-  const rejectRescheduleRequest = (requestId: string, reason: string) => {
+  const rejectRescheduleRequest = useCallback((requestId: string, reason: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/reschedule/reject`, {
       method: 'PUT',
       body: JSON.stringify({ reason }),
     });
-  };
+  }, [handleRequest]);
 
-  const verifyCoachingPayment = (requestId: string) => {
+  const verifyCoachingPayment = useCallback((requestId: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/coaching/verify`, {
       method: 'PUT',
     });
-  };
+  }, [handleRequest]);
 
-  const rejectCoachingPayment = (requestId: string, reason: string) => {
+  const rejectCoachingPayment = useCallback((requestId: string, reason: string) => {
     return handleRequest(`/api/staff/requests/${requestId}/coaching/reject`, {
       method: 'PUT',
       body: JSON.stringify({ reason }),
     });
-  };
+  }, [handleRequest]);
 
-  const getStaffAccounts = () => {
+  const getStaffAccounts = useCallback(() => {
     return handleRequest(`/api/admin/staff`);
-  };
+  }, [handleRequest]);
 
-  const createStaffAccount = (data: any) => {
+  const createStaffAccount = useCallback((data: unknown) => {
     return handleRequest(`/api/admin/staff`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
-  };
+  }, [handleRequest]);
 
-  const updateStaffAccount = (staffId: string, updates: any) => {
+  const updateStaffAccount = useCallback((staffId: string, updates: unknown) => {
     return handleRequest(`/api/admin/staff/${staffId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
-  };
+  }, [handleRequest]);
 
-  const deactivateStaffAccount = (staffId: string) => {
+  const deactivateStaffAccount = useCallback((staffId: string) => {
     return handleRequest(`/api/admin/staff/${staffId}/deactivate`, {
       method: 'PUT',
     });
-  };
+  }, [handleRequest]);
 
   return {
     getStaffOperations,

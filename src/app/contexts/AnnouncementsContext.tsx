@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, ReactNode } from 'react';
 import { apiFetch } from '../utils/authenticatedFetch';
 import { useUser } from './UserContext';
+import { realtimeManager } from '../utils/realtime/realtimeManager';
 
 export interface Announcement {
   id: string;
@@ -32,7 +33,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -57,12 +58,12 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
     // refresh on login change
-  }, [user?.id]);
+  }, [user?.id, refresh]);
 
   useEffect(() => {
     // keep notifications fresh (without requiring reload)
@@ -75,7 +76,30 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       window.clearInterval(t);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, []);
+  }, [refresh]);
+
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const channelKey = 'announcements-live-all';
+    const scheduleRefresh = () => {
+      if (refreshDebounceRef.current) window.clearTimeout(refreshDebounceRef.current);
+      refreshDebounceRef.current = window.setTimeout(() => {
+        refreshDebounceRef.current = null;
+        void refresh();
+      }, 350);
+    };
+    const subscriberId = realtimeManager.subscribe(
+      channelKey,
+      { table: 'announcements', event: '*', schema: 'public' },
+      () => {
+        scheduleRefresh();
+      }
+    );
+    return () => {
+      realtimeManager.unsubscribe(channelKey, subscriberId);
+      if (refreshDebounceRef.current) window.clearTimeout(refreshDebounceRef.current);
+    };
+  }, [refresh]);
 
   const addAnnouncement = async (a: Omit<Announcement, 'id' | 'createdAt' | 'dismissed'>) => {
     setError(null);
@@ -155,4 +179,5 @@ export const ANNOUNCEMENT_COLORS: Record<Announcement['type'], { bg: string; bor
   reminder: { bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)', text: '#60a5fa' },
   update: { bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)', text: '#22c55e' },
   alert: { bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)', text: '#ef4444' },
+  general: { bg: 'rgba(148,163,184,0.08)', border: 'rgba(148,163,184,0.25)', text: '#94a3b8' },
 };

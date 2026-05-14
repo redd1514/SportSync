@@ -1,5 +1,5 @@
 import { FacilityMapBuilder } from './FacilityMapBuilder';
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { AdminBookingCalendar } from './AdminBookingCalendar';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -28,8 +28,9 @@ import { useAddons } from '../../contexts/AddonsContext';
 import { useFacilityMap, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import { useAnnouncements, type Announcement } from '../../contexts/AnnouncementsContext';
 import { useAdminAPI } from '../../hooks/useAdminAPI';
+import { parseBookingNotes } from '../../../api/utils/bookingMap.ts';
 
-type AdminTab = 'executive' | 'facility' | 'calendar' | 'settings';
+type AdminTab = 'executive' | 'facility' | 'calendar' | 'coaching' | 'settings';
 
 /* ─── Reusable Confirm Modal ─────────────────────────────────────── */
 interface ConfirmOptions {
@@ -94,10 +95,11 @@ function PhoneInput({ value, onChange, accentColor = '#FF8C00', placeholder = '9
 }
 
 const ADMIN_TABS: { id: AdminTab; icon: any; label: string; sub: string }[] = [
-  { id: 'executive', icon: TrendingUp,  label: 'Executive Overview',   sub: 'KPIs, Analytics, Users, Payments'  },
-  { id: 'facility',  icon: MapPin,      label: 'Facility Management',  sub: 'Courts, Map Layout, Add-ons'        },
-  { id: 'calendar',  icon: Calendar,    label: 'Master Calendar',      sub: 'Bookings, Schedule, Requests'       },
-  { id: 'settings',  icon: Settings,    label: 'System Settings',      sub: 'Business Config, Staff, Coaching'   },
+  { id: 'executive', icon: TrendingUp,    label: 'Executive Overview',   sub: 'KPIs, Analytics, Users, Payments'  },
+  { id: 'facility',  icon: MapPin,        label: 'Facility Management',  sub: 'Courts, Map Layout, Add-ons'        },
+  { id: 'calendar',  icon: Calendar,      label: 'Master Calendar',      sub: 'Bookings, Schedule, Requests'       },
+  { id: 'coaching',  icon: GraduationCap, label: 'Coaching Management',  sub: 'Coaches, Requests, Applications'   },
+  { id: 'settings',  icon: Settings,      label: 'System Settings',      sub: 'Business Config, Staff, Notices'    },
 ];
 
 const SPORT_COLORS: Record<string, string> = {
@@ -125,31 +127,117 @@ function StatusBadge({ status }: { status: string }) {
 type ExecSubTab = 'overview' | 'analytics' | 'users' | 'payments' | 'loyalty';
 
 function ExecutiveOverview() {
-  const { allUsers: staticUsers, updateUser, cancellationRequests } = useUser();
-  const { getAnalytics, getAllBookings, getAllUsers, getPaymentTransactions, getLoyaltyProgram } = (useAdminAPI as any)();
+  const { cancellationRequests } = useUser();
+  const { getAnalytics, getAllBookings, getAllUsers, updateUser, getPaymentTransactions, getLoyaltyProgram } = (useAdminAPI as any)();
   const [sub, setSub] = useState<ExecSubTab>('overview');
   const [userConfirm, setUserConfirm] = useState<{ id: string; name: string; action: 'suspend' | 'activate' } | null>(null);
 
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [apiBookings, setApiBookings] = useState<any[]>([]);
   const [apiUsers, setApiUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [apiPayments, setApiPayments] = useState<any[]>([]);
   const [apiLoyalty, setApiLoyalty] = useState<any>(null);
+
+  const analyticsSummary = analyticsData?.summary || {};
+  const analyticsBookings = Array.isArray(analyticsData?.bookings) ? analyticsData.bookings : [];
+  const { bookings: realtimeBookings } = useRealtimeAdminDashboard();
+
+  const bookingSortTs = (row: any) => {
+    const datePart = row?.date || row?.booking_date || '';
+    const startTimePart = row?.startTime || row?.start_time || (typeof row?.time === 'string' ? row.time.split(' - ')[0] : '00:00') || '00:00';
+    const createdAt = row?.createdAt || row?.created_at || '';
+    const dt = datePart ? new Date(`${datePart}T${startTimePart}:00`) : null;
+    const dtMs = dt && !Number.isNaN(dt.getTime()) ? dt.getTime() : 0;
+    const createdMs = createdAt ? new Date(createdAt).getTime() : 0;
+    return Math.max(dtMs, Number.isNaN(createdMs) ? 0 : createdMs);
+  };
+
+  const sortBookingsNewestFirst = (rows: any[]) => {
+    return [...rows].sort((a: any, b: any) => {
+      const tsDiff = bookingSortTs(b) - bookingSortTs(a);
+      if (tsDiff !== 0) return tsDiff;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
+    });
+  };
+
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const users = await getAllUsers();
+      setApiUsers(Array.isArray(users) ? users : []);
+    } catch (err) {
+      console.error('Failed to fetch admin users:', err);
+      setApiUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [getAllUsers]);
+
+  // Map realtime booking rows (DB shape) to client-shaped rows used in the table
+  const mapDbBookingToClient = (row: any) => {
+    const fromNotes = parseBookingNotes(row.notes).customerName;
+    return {
+    id: row.id,
+    refCode: row.id,
+    customerName:
+      row.customerName ||
+      row.users?.full_name ||
+      row.customer_name ||
+      fromNotes ||
+      row.users?.email ||
+      'Customer',
+    court: row.courts?.name || row.court_id || row.court || 'Court',
+    date: row.booking_date || row.session_date || row.requestedDate || '',
+    startTime: row.start_time || (typeof row.time === 'string' ? row.time.split(' - ')[0] : ''),
+    time: row.start_time && row.end_time ? `${row.start_time} - ${row.end_time}` : row.time || '',
+    amount: row.total_price ?? row.amount ?? 0,
+    status: row.status || 'pending',
+    createdAt: row.created_at || row.createdAt || '',
+  };
+  };
+
+  // Keep apiBookings in sync with realtime feed when available
+  useEffect(() => {
+    if (!Array.isArray(realtimeBookings) || realtimeBookings.length === 0) return;
+    try {
+      setApiBookings((prev) => {
+        const prevById = Object.fromEntries((prev || []).filter(Boolean).map((b: any) => [b.id, b]));
+        const mapped = realtimeBookings.map(mapDbBookingToClient);
+        const byId: Record<string, any> = {};
+        for (const b of mapped) {
+          const prior = prevById[b.id];
+          const priorName = prior?.customerName;
+          const hasGoodPrior =
+            typeof priorName === 'string' && priorName.trim() !== '' && priorName !== 'Customer';
+          byId[b.id] = hasGoodPrior ? { ...b, customerName: priorName } : b;
+        }
+        for (const b of prev || []) {
+          if (!byId[b.id]) byId[b.id] = b;
+        }
+        return sortBookingsNewestFirst(Object.values(byId));
+      });
+    } catch {
+      // ignore realtime merge errors
+    }
+  }, [realtimeBookings]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         if (sub === 'overview' || sub === 'analytics') {
           const now = new Date();
-          const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-          const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+          const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          const start = startDate.toISOString().split('T')[0];
+          const end = endDate.toISOString().split('T')[0];
           const data = await getAnalytics({ start, end });
           setAnalyticsData(data);
-          const bookings = await getAllBookings({ date: new Date().toISOString().split('T')[0] });
-          setApiBookings(bookings || []);
+          // Fetch full booking list (no date filter) so we can show the 6 most recent bookings
+          const allBookings = await getAllBookings();
+          setApiBookings(sortBookingsNewestFirst(allBookings || []));
         } else if (sub === 'users') {
-          const users = await getAllUsers();
-          setApiUsers(users || []);
+          await fetchUsers();
         } else if (sub === 'payments') {
           const payments = await getPaymentTransactions();
           setApiPayments(payments || []);
@@ -162,31 +250,86 @@ function ExecutiveOverview() {
       }
     };
     fetchData();
-  }, [sub, getAnalytics, getAllBookings, getAllUsers, getPaymentTransactions, getLoyaltyProgram]);
+  }, [sub, getAnalytics, getAllBookings, fetchUsers, getPaymentTransactions, getLoyaltyProgram]);
 
-  const bookings = apiBookings.length > 0 ? apiBookings : []; // Fallback logic can be fine-tuned
-  const allUsers = apiUsers.length > 0 ? apiUsers : staticUsers;
+  useEffect(() => {
+    if (sub !== 'users') return;
+
+    void fetchUsers();
+    const refreshTimer = window.setInterval(() => {
+      void fetchUsers();
+    }, 30000);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [sub, fetchUsers]);
+
+  // Format date for display: "May 25, 2026"
+  const formatDisplayDate = (isoDateStr: string) => {
+    try {
+      const d = new Date(isoDateStr);
+      return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } catch (e) {
+      return isoDateStr;
+    }
+  };
+
+  const bookings = sortBookingsNewestFirst(
+    [...analyticsBookings, ...apiBookings]
+      .filter(Boolean)
+      .reduce((acc: any[], row: any) => {
+        const id = row?.id;
+        if (!id) return acc;
+        const existingIndex = acc.findIndex((item) => item.id === id);
+        if (existingIndex === -1) {
+          acc.push(row);
+          return acc;
+        }
+        const existing = acc[existingIndex];
+        const rowTs = bookingSortTs(row);
+        const exTs = bookingSortTs(existing);
+        const fresher = rowTs >= exTs ? row : existing;
+        const older = rowTs >= exTs ? existing : row;
+        const freshName = fresher.customerName;
+        const oldName = older.customerName;
+        const merged =
+          (freshName === 'Customer' || !freshName) && oldName && oldName !== 'Customer'
+            ? { ...fresher, customerName: oldName }
+            : fresher;
+        acc[existingIndex] = merged;
+        return acc;
+      }, [])
+  );
+  const recentBookings = bookings.slice(0, 6);
+  const allUsers = apiUsers;
   const transactions = apiPayments;
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const nowLocal = new Date();
+  const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
   const todayBookings = bookings.filter(b => b.date === todayStr);
-  const totalRevToday = analyticsData?.revenue?.[0]?.amount || todayBookings.reduce((s, b) => s + b.amount, 0);
-  const openCourts = 9;
+  const totalRevToday = todayBookings.reduce((s, b) => {
+    if (b.status === 'cancelled' || b.status === 'rejected') return s;
+    return s + Number(b.amount || 0);
+  }, 0);
+  const openCourts = analyticsSummary.openCourts ?? 9;
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length;
 
-  const REVENUE_DATA = [
-    { day: 'Mon', revenue: 3800 }, { day: 'Tue', revenue: 4200 },
-    { day: 'Wed', revenue: 3100 }, { day: 'Thu', revenue: 5600 },
-    { day: 'Fri', revenue: 6800 }, { day: 'Sat', revenue: 9200 },
-    { day: 'Sun', revenue: 7400 },
-  ];
+  const REVENUE_DATA = Array.isArray(analyticsData?.weeklyRevenue) && analyticsData.weeklyRevenue.length > 0
+    ? analyticsData.weeklyRevenue.map((row: any) => ({ day: row.day, revenue: row.amount }))
+    : [
+        { day: 'Mon', revenue: 0 }, { day: 'Tue', revenue: 0 },
+        { day: 'Wed', revenue: 0 }, { day: 'Thu', revenue: 0 },
+        { day: 'Fri', revenue: 0 }, { day: 'Sat', revenue: 0 },
+        { day: 'Sun', revenue: 0 },
+      ];
 
-  const sportPie = Object.entries(
-    bookings.reduce((acc: Record<string, number>, b) => {
-      acc[b.sport] = (acc[b.sport] || 0) + b.amount;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
+  const sportPie: Array<{ name: string; value: number }> = Array.isArray(analyticsData?.revenueBySport) && analyticsData.revenueBySport.length > 0
+    ? analyticsData.revenueBySport
+    : Object.entries(
+        bookings.reduce((acc: Record<string, number>, b) => {
+          acc[b.sport] = (acc[b.sport] || 0) + b.amount;
+          return acc;
+        }, {})
+      ).map(([name, value]) => ({ name, value }));
 
   const SUB_TABS: { id: ExecSubTab; icon: any; label: string }[] = [
     { id: 'overview',  icon: BarChart2,  label: 'Overview'  },
@@ -226,8 +369,8 @@ function ExecutiveOverview() {
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
             {[
               { label: "Today's Revenue", value: `₱${totalRevToday.toLocaleString()}`, icon: DollarSign, color: '#FF8C00', sub: `${todayBookings.length} bookings today` },
-              { label: 'Total Bookings', value: bookings.length, icon: Calendar, color: '#22c55e', sub: 'All time' },
-              { label: 'Courts Open', value: `${openCourts}/12`, icon: MapPin, color: '#fb923c', sub: `${12 - openCourts} currently occupied` },
+              { label: 'Total Bookings', value: analyticsSummary.totalBookings ?? bookings.length, icon: Calendar, color: '#22c55e', sub: 'From selected analytics range' },
+              { label: 'Courts Open', value: `${openCourts}/${analyticsSummary.totalCourts ?? 12}`, icon: MapPin, color: '#fb923c', sub: `${Math.max((analyticsSummary.totalCourts ?? 12) - openCourts, 0)} currently unavailable` },
               { label: 'Pending Requests', value: pendingCancellations, icon: AlertTriangle, color: '#a855f7', sub: 'Awaiting review' },
             ].map(kpi => (
               <motion.div key={kpi.label} whileHover={{ y: -3 }} className="rounded-2xl p-5 border border-white/10 relative overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.32)]" style={{ background: `linear-gradient(135deg, ${kpi.color}12 0%, ${kpi.color}06 100%)`, borderColor: `${kpi.color}20` }}>
@@ -290,12 +433,12 @@ function ExecutiveOverview() {
                   ))}</tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {bookings.slice(0, 6).map(b => (
+                  {recentBookings.map((b: any) => (
                     <tr key={b.id} className="hover:bg-white/2 transition-colors">
                       <td className="px-5 py-3 text-gray-600 font-black" style={{ fontSize: 11 }}>#{(b.refCode || b.id).slice(-8).toUpperCase()}</td>
                       <td className="px-5 py-3 text-white font-black" style={{ fontSize: 13 }}>{b.customerName}</td>
                       <td className="px-5 py-3 text-gray-300" style={{ fontSize: 13 }}>{b.court}</td>
-                      <td className="px-5 py-3 text-gray-300" style={{ fontSize: 13 }}>{b.date}</td>
+                      <td className="px-5 py-3 text-gray-300" style={{ fontSize: 13 }}>{formatDisplayDate(b.date)}</td>
                       <td className="px-5 py-3 text-green-400 font-black" style={{ fontSize: 13 }}>₱{b.amount.toLocaleString()}</td>
                       <td className="px-5 py-3"><StatusBadge status={b.status} /></td>
                     </tr>
@@ -308,7 +451,7 @@ function ExecutiveOverview() {
       )}
 
       {/* Analytics */}
-      {sub === 'analytics' && <AnalyticsDashboard />}
+      {sub === 'analytics' && <AnalyticsDashboard analyticsData={analyticsData} />}
 
       {/* Users */}
       {sub === 'users' && (
@@ -323,7 +466,15 @@ function ExecutiveOverview() {
                   ))}</tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {allUsers.map(u => (
+                  {usersLoading && allUsers.length === 0 ? (
+                    <tr>
+                      <td className="px-5 py-6 text-gray-400" colSpan={7} style={{ fontSize: 13 }}>Refreshing users from Supabase…</td>
+                    </tr>
+                  ) : allUsers.length === 0 ? (
+                    <tr>
+                      <td className="px-5 py-6 text-gray-400" colSpan={7} style={{ fontSize: 13 }}>No users found in Supabase.</td>
+                    </tr>
+                  ) : allUsers.map(u => (
                     <tr key={u.id} className="hover:bg-white/3 transition-colors">
                       <td className="px-5 py-3 text-white font-black" style={{ fontSize: 13 }}>{u.name}</td>
                       <td className="px-5 py-3 text-gray-400" style={{ fontSize: 12 }}>{u.email}</td>
@@ -458,7 +609,16 @@ function ExecutiveOverview() {
             confirmLabel: userConfirm.action === 'suspend' ? 'Yes, Suspend' : 'Yes, Activate',
             confirmColor: userConfirm.action === 'suspend' ? '#ef4444' : '#22c55e',
             icon: userConfirm.action === 'suspend' ? <UserX size={28} className="text-red-400" /> : <UserCheck size={28} className="text-green-400" />,
-            onConfirm: () => { updateUser(userConfirm.id, { accountStatus: userConfirm.action === 'suspend' ? 'suspended' : 'active' }); setUserConfirm(null); },
+            onConfirm: async () => {
+              try {
+                await updateUser(userConfirm.id, { accountStatus: userConfirm.action === 'suspend' ? 'suspended' : 'active' });
+                await fetchUsers();
+              } catch (error) {
+                console.error('Failed to update user status:', error);
+              } finally {
+                setUserConfirm(null);
+              }
+            },
             onCancel: () => setUserConfirm(null),
           }} />
         )}
@@ -1040,8 +1200,13 @@ function MasterCalendarTab() {
   );
 }
 
+// ── Coaching Management ─────────────────────────────────────────────────────
+function CoachingManagementTab() {
+  return <AdminCoachingManagement />;
+}
+
 // ── System Settings ──────────────────────────────────────────────────────────
-type SettingsSubTab = 'business' | 'pricing' | 'roles' | 'announcements' | 'coaching';
+type SettingsSubTab = 'business' | 'pricing' | 'roles' | 'announcements';
 
 /* ── Custom Time Picker (no native <select> or <input type=time>) ── */
 function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -1293,11 +1458,10 @@ function SystemSettingsTab() {
   const [savedBiz, setSavedBiz] = useState(false);
 
   const SETTINGS_TABS: { id: SettingsSubTab; icon: any; label: string; desc: string }[] = [
-    { id: 'business',      icon: Building,      label: 'Business Config', desc: 'Hours & policies'       },
-    { id: 'pricing',       icon: DollarSign,    label: 'Pricing & Rates', desc: 'Court & add-on pricing' },
-    { id: 'roles',         icon: Users,         label: 'Staff & Roles',   desc: 'Accounts & access'     },
-    { id: 'announcements', icon: Megaphone,     label: 'Announcements',   desc: 'Send to users'         },
-    { id: 'coaching',      icon: GraduationCap, label: 'Coaching Mgmt',   desc: 'Coaches & sessions'    },
+    { id: 'business',      icon: Building,   label: 'Business Config', desc: 'Hours & policies'       },
+    { id: 'pricing',       icon: DollarSign, label: 'Pricing & Rates', desc: 'Court & add-on pricing' },
+    { id: 'roles',         icon: Users,      label: 'Staff & Roles',   desc: 'Accounts & access'     },
+    { id: 'announcements', icon: Megaphone,  label: 'Announcements',   desc: 'Send to users'         },
   ];
 
   const INPUT = "w-full bg-[#252525] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF8C00]";
@@ -1443,9 +1607,9 @@ function SystemSettingsTab() {
                 )}
               </AnimatePresence>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!announcementForm.title.trim()) return;
-                  addAnnouncement({ title: announcementForm.title, message: announcementForm.message, type: announcementForm.type });
+                  await addAnnouncement({ title: announcementForm.title, message: announcementForm.message, type: announcementForm.type });
                   const tLabel = ANN_TYPES.find(t => t.value === announcementForm.type)?.label || '';
                   setAnnounceSent(`"${announcementForm.title}" sent as ${tLabel} — visible in user notifications.`);
                   setAnnouncementForm({ title: '', message: '', type: 'promotion' });
@@ -1491,7 +1655,6 @@ function SystemSettingsTab() {
         </div>
       )}
 
-      {sub === 'coaching' && <AdminCoachingManagement />}
     </div>
   );
 }
@@ -1509,6 +1672,7 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
       case 'executive': return <ExecutiveOverview />;
       case 'facility':  return <FacilityMapBuilderTab />;
       case 'calendar':  return <MasterCalendarTab />;
+      case 'coaching':  return <CoachingManagementTab />;
       case 'settings':  return <SystemSettingsTab />;
     }
   };

@@ -2,12 +2,13 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Home, CalendarDays, Users, User, Bell, LogOut, Trophy, Clock, MapPin, Star, Zap,
-  ChevronRight, ArrowRight, Shield, X, CheckCircle, Gift, AlertCircle,
+  ChevronRight, ArrowRight, X, Megaphone,
   BookOpen, Activity, Plus, ChevronLeft, ChevronDown, Settings,
   LayoutDashboard, CalendarCheck, Map, BookMarked, GraduationCap, Award,
   Pencil,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useAnnouncements, ANNOUNCEMENT_COLORS } from "../../contexts/AnnouncementsContext";
 import { MobileProfileScreen } from "../mobile/MobileProfileScreen";
 import { SportIcon, getSportColor, getSportBg } from "../SportIcons";
 import { SportDetailModal } from "../SportDetailModal";
@@ -70,12 +71,16 @@ const QUICK_STATS = [
   { icon: Zap,    label: "Available", value: "9 / 12 courts",    color: "#22c55e" },
 ];
 
-const DESKTOP_NOTIFS = [
-  { id: "1", icon: CalendarDays, color: "#FF8C00", title: "Upcoming Booking",  message: "Basketball Court A — Mar 5 at 2:00 PM",     time: "2h ago",  unread: true,  tab: "booking" as Tab },
-  { id: "2", icon: Gift,         color: "#FFD700", title: "Loyalty Reward",    message: "You earned 1 point from your last booking",  time: "1d ago",  unread: true,  tab: "account" as Tab },
-  { id: "3", icon: CheckCircle,  color: "#22c55e", title: "Booking Confirmed", message: "Badminton Court B — Feb 15 completed",        time: "2d ago",  unread: false, tab: "account" as Tab },
-  { id: "4", icon: AlertCircle,  color: "#0047AB", title: "Court Update",      message: "Volleyball Court B now available",            time: "3d ago",  unread: false, tab: "booking" as Tab },
-];
+function formatRelativeTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if (sec < 45) return "Just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  if (sec < 604800) return `${Math.floor(sec / 86400)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 /* ─── Tooltip wrapper (for collapsed sidebar) ─── */
 function SidebarTooltip({ label, children, danger }: { label: string; children: React.ReactNode; danger?: boolean }) {
@@ -247,14 +252,14 @@ interface DesktopAppShellProps { onLogout: () => void; }
 
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const { user, logout, isAdmin, isStaff } = useUser();
+  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [notifs, setNotifs] = useState(DESKTOP_NOTIFS);
   const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
-  const unread = notifs.filter(n => n.unread).length;
+  const unread = undismissedCount;
 
   const handleLogout = async () => {
     await logout();
@@ -628,21 +633,44 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                       <X size={14} />
                     </button>
                   </div>
-                  {notifs.map(n => (
-                    <button key={n.id} onClick={() => { setNotifs(p => p.map(x => x.id === n.id ? { ...x, unread: false } : x)); navigate(n.tab); setShowNotifs(false); }}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
-                    >
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `${n.color}15` }}>
-                        <n.icon size={14} style={{ color: n.color }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
-                        <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{n.message}</p>
-                        <p className="text-gray-700" style={{ fontSize: 10 }}>{n.time}</p>
-                      </div>
-                      {n.unread && <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: n.color }} />}
-                    </button>
-                  ))}
+                  {announcements.length === 0 ? (
+                    <div className="px-4 py-10 text-center">
+                      <Megaphone size={28} className="mx-auto mb-2 text-gray-700" />
+                      <p className="text-gray-500" style={{ fontSize: 12 }}>No announcements yet</p>
+                    </div>
+                  ) : (
+                    announcements.map((ann) => {
+                      const accent = ANNOUNCEMENT_COLORS[ann.type]?.text || "#FF8C00";
+                      return (
+                        <button
+                          key={ann.id}
+                          onClick={() => {
+                            if (!ann.dismissed) dismissAnnouncement(ann.id);
+                            navigate("home");
+                            setShowNotifs(false);
+                          }}
+                          className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
+                        >
+                          <div
+                            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                            style={{ backgroundColor: `${accent}18` }}
+                          >
+                            <Megaphone size={14} style={{ color: accent }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-black" style={{ fontSize: 12 }}>{ann.title}</p>
+                            {ann.message ? (
+                              <p className="text-gray-500 line-clamp-2" style={{ fontSize: 11 }}>{ann.message}</p>
+                            ) : null}
+                            <p className="text-gray-700" style={{ fontSize: 10 }}>{formatRelativeTime(ann.createdAt)}</p>
+                          </div>
+                          {!ann.dismissed && (
+                            <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: accent }} />
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

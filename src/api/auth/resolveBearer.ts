@@ -25,11 +25,15 @@ async function buildContextFromUserRow(row: Record<string, any>, supabaseAuthUse
   return { userId, email, dbRole, appRole, supabaseAuthUserId };
 }
 
-export function getJwtSecret(): string {
-  return String(process.env.SPORTSYNC_API_JWT_SECRET || '').trim();
+export function isUserRowSuspended(row: Record<string, any> | null | undefined): boolean {
+  if (!row) return false;
+  if (row.is_active === false) return true;
+
+  const status = String(row.account_status ?? row.accountStatus ?? row.status ?? '').trim().toLowerCase();
+  return status === 'suspended' || status === 'inactive';
 }
 
-export async function resolveBearer(authHeader: string | undefined): Promise<ApiAuthContext | null> {
+export async function resolveBearerUserRow(authHeader: string | undefined): Promise<Record<string, any> | null> {
   const m = authHeader?.match(/^Bearer\s+(.+)$/i);
   const raw = m?.[1]?.trim();
   if (!raw) return null;
@@ -38,8 +42,7 @@ export async function resolveBearer(authHeader: string | undefined): Promise<Api
   if (secret && raw.split('.').length === 3) {
     const demo = verifySportsyncDemoJwt(raw, secret);
     if (demo) {
-      const row = await findUserRow(demo.sub);
-      if (row) return buildContextFromUserRow(row as Record<string, any>);
+      return (await findUserRow(demo.sub)) as Record<string, any> | null;
     }
   }
 
@@ -48,11 +51,22 @@ export async function resolveBearer(authHeader: string | undefined): Promise<Api
 
   const authUid = data.user.id;
   const { data: rowByAuthId } = await supabase.from('users').select('*').eq('auth_id', authUid).maybeSingle();
-  let userRow = rowByAuthId;
-  if (!userRow) {
-    const { data: rowById } = await supabase.from('users').select('*').eq('id', authUid).maybeSingle();
-    userRow = rowById;
-  }
-  if (!userRow) return null;
-  return buildContextFromUserRow(userRow as Record<string, any>, authUid);
+  if (rowByAuthId) return rowByAuthId as Record<string, any>;
+
+  const { data: rowById } = await supabase.from('users').select('*').eq('id', authUid).maybeSingle();
+  if (rowById) return rowById as Record<string, any>;
+
+  return null;
+}
+
+export function getJwtSecret(): string {
+  return String(process.env.SPORTSYNC_API_JWT_SECRET || '').trim();
+}
+
+export async function resolveBearer(authHeader: string | undefined): Promise<ApiAuthContext | null> {
+  const row = await resolveBearerUserRow(authHeader);
+  if (!row || isUserRowSuspended(row)) return null;
+
+  const authUid = String(row.auth_id || row.id || '');
+  return buildContextFromUserRow(row, authUid || undefined);
 }

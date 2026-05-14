@@ -6,6 +6,7 @@ export function isPublicApiRoute(method: string, path: string): boolean {
   if (path === '/health' || path === '/') return true;
   if (method === 'POST' && (path === '/api/users/sync' || path.endsWith('/api/users/sync'))) return true;
   if (method === 'POST' && (path === '/api/auth/token' || path.endsWith('/api/auth/token'))) return true;
+  if (method === 'GET' && (path === '/api/auth/status' || path.endsWith('/api/auth/status'))) return true;
   if (method === 'GET' && (path === '/api/announcements/published' || path.endsWith('/api/announcements/published')))
     return true;
   if (method === 'GET' && path === '/api/coaches') return true;

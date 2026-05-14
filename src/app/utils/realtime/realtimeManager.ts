@@ -158,6 +158,7 @@ class RealtimeSubscriptionManager {
    * Handle incoming realtime event with deduplication
    */
   private handleEvent(channelKey: string, payload: any): void {
+    console.log(`[Realtime] handleEvent channel=${channelKey} payload:`, payload);
     const event = this.parsePayload(payload);
 
     // Deduplicate events

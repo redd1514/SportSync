@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { apiFetch } from '../utils/authenticatedFetch';
 
 export const useAdminAPI = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRequest = async (url: string, options?: RequestInit) => {
+  const handleRequest = useCallback(async (url: string, options?: RequestInit) => {
     setLoading(true);
     setError(null);
     try {
@@ -22,42 +22,50 @@ export const useAdminAPI = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const getAnalytics = (dateRange: { start: string; end: string }) => {
+  const getAnalytics = useCallback((dateRange: { start: string; end: string }) => {
     return handleRequest(`/api/admin/analytics?start=${encodeURIComponent(dateRange.start)}&end=${encodeURIComponent(dateRange.end)}`);
-  };
+  }, [handleRequest]);
 
-  const getAllBookings = (filters?: any) => {
+  const getAllBookings = useCallback((filters?: any) => {
     const query = filters ? `?${new URLSearchParams(filters).toString()}` : '';
     return handleRequest(`/api/admin/bookings${query}`);
-  };
+  }, [handleRequest]);
 
-  const getAllUsers = () => {
+  const getAllUsers = useCallback(() => {
     return handleRequest(`/api/admin/users`);
-  };
+  }, [handleRequest]);
 
-  const getUserBookingHistory = (userId: string) => {
+  const updateUser = useCallback((userId: string, updates: Record<string, unknown>) => {
+    return handleRequest(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }, [handleRequest]);
+
+  const getUserBookingHistory = useCallback((userId: string) => {
     return handleRequest(`/api/admin/users/${userId}/bookings`);
-  };
+  }, [handleRequest]);
 
-  const getPaymentTransactions = (filters?: any) => {
+  const getPaymentTransactions = useCallback((filters?: any) => {
     const query = filters ? `?${new URLSearchParams(filters).toString()}` : '';
     return handleRequest(`/api/admin/payments${query}`);
-  };
+  }, [handleRequest]);
 
-  const getLoyaltyProgram = () => {
+  const getLoyaltyProgram = useCallback(() => {
     return handleRequest(`/api/admin/loyalty-program`);
-  };
+  }, [handleRequest]);
 
-  const getOperationalStats = (date: string) => {
+  const getOperationalStats = useCallback((date: string) => {
     return handleRequest(`/api/admin/operations/stats?date=${encodeURIComponent(date)}`);
-  };
+  }, [handleRequest]);
 
   return {
     getAnalytics,
     getAllBookings,
     getAllUsers,
+    updateUser,
     getUserBookingHistory,
     getPaymentTransactions,
     getLoyaltyProgram,

@@ -3,7 +3,7 @@
  * Automatically emits realtime events for all CRUD operations
  */
 
-import { RealtimeEventEmitter } from '../services/realtimeEventEmitter.ts';
+import { RealtimeEventEmitter } from '../services/realtimeEventEmitter';
 
 export interface RealtimeServiceConfig {
   table: string;

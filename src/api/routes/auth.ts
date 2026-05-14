@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { signSportsyncDemoJwt } from '../auth/apiJwt.ts';
-import { getJwtSecret } from '../auth/resolveBearer.ts';
+import { getJwtSecret, isUserRowSuspended, resolveBearerUserRow } from '../auth/resolveBearer.ts';
 import { findUserRow, isUuid, toStableUuid } from '../services/userRowQuery.ts';
 
 const authRouter = new Hono();
@@ -37,6 +37,12 @@ authRouter.post('/token', async (c) => {
     if (String(row.email || '').trim().toLowerCase() !== email.toLowerCase()) {
       return c.json({ error: 'email does not match this account.' }, 401);
     }
+    if (isUserRowSuspended(row as Record<string, any>)) {
+      return c.json(
+        { error: 'Your account is suspended. Please contact an administrator.', code: 'ACCOUNT_SUSPENDED' },
+        403
+      );
+    }
 
     const access_token = signSportsyncDemoJwt({ sub: String(row.id), email: String(row.email) }, secret);
     const exp = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
@@ -48,6 +54,32 @@ authRouter.post('/token', async (c) => {
     });
   } catch (e: any) {
     return c.json({ error: e?.message || 'Token error' }, 400);
+  }
+});
+
+authRouter.get('/status', async (c) => {
+  try {
+    const row = await resolveBearerUserRow(c.req.header('Authorization'));
+    if (!row) {
+      return c.json({ error: 'Unauthorized', code: 'AUTH_REQUIRED' }, 401);
+    }
+
+    if (isUserRowSuspended(row)) {
+      return c.json(
+        { error: 'Your account is suspended. Please contact an administrator.', code: 'ACCOUNT_SUSPENDED' },
+        403
+      );
+    }
+
+    return c.json({
+      ok: true,
+      code: 'ACCOUNT_ACTIVE',
+      userId: String(row.id),
+      email: String(row.email || ''),
+      accountStatus: 'active',
+    });
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Status error' }, 400);
   }
 });
 

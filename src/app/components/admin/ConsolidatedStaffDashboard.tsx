@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode';
 import {
   Activity, Calendar, Inbox, Shield, Menu, X, LogOut,
-  MapPin, AlertTriangle, Check, Plus, Bell, Users,
+  MapPin, AlertTriangle, AlertCircle, Check, Plus, Bell, Users,
   DollarSign, Clock, UserCheck, Map, ChevronLeft, ChevronRight, CheckCircle,
   QrCode, Search, ShieldCheck, ScanLine, Building2, GraduationCap, Camera,
   Megaphone, XCircle, MessageSquare, User, Layers, Phone, Loader2,
@@ -21,7 +21,6 @@ import { useUser } from '../../contexts/UserContext';
 import { useCoaching } from '../../contexts/CoachingContext';
 import { useAnnouncements } from '../../contexts/AnnouncementsContext';
 import { AdminBookingCalendar } from './AdminBookingCalendar';
-import { useStaffAPI } from '../../hooks/useStaffAPI';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { ALL_COURTS, SPORTS_INFO } from '../sportsData';
 import { useFacilityMap, getSportMapColor, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
@@ -41,6 +40,27 @@ const STAFF_TABS: { id: StaffTab; icon: any; label: string; sub: string }[] = [
   { id: 'inbox',      icon: Inbox,     label: 'Front Desk Inbox',  sub: 'Requests, Coaching, Alerts' },
   { id: 'activity',   icon: History,   label: 'Activity Log',      sub: 'Walk-ins, check-ins, desk' },
 ];
+
+const LIVE_OPERATIONS_TZ = 'Asia/Manila';
+
+function toMinutesOfDay(value: string): number {
+  const [hours, minutes] = value.split(':').map((part) => Number(part));
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return 0;
+  return hours * 60 + minutes;
+}
+
+function getManilaDateKey(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: LIVE_OPERATIONS_TZ }).format(date);
+}
+
+function getManilaTimeKey(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: LIVE_OPERATIONS_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
 
 /* ─── Confirm Dialog ─────────────────────────────────────────────── */
 interface ConfirmOptions {
@@ -1297,7 +1317,7 @@ function StaffActivityLog() {
     setIsLoading(true);
     setLoadError(null);
     setListCleared(false);
-    const date = new Date().toISOString().split('T')[0];
+    const date = getManilaDateKey();
     try {
       const ac = new AbortController();
       const timer = window.setTimeout(() => ac.abort(), 8000);
@@ -1864,7 +1884,7 @@ function StaffActivityLog() {
 
 // ── Live Operations ──────────────────────────────────────────────────────────
 function LiveOperations() {
-  const { bookings } = useUser();
+  const { bookings, refreshBookingsFromApi } = useUser();
   const { maps, updateBlockStatus } = useFacilityMap();
   const [view, setView] = useState<'map' | 'list' | 'verify'>('map');
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
@@ -1873,33 +1893,83 @@ function LiveOperations() {
     target: 'available' | 'maintenance';
     blockedCount: number;
   } | null>(null);
-
-  const { getStaffOperations, loading: apiLoading } = useStaffAPI();
-  const [operationsData, setOperationsData] = useState<any>(null);
+  const [operationsData, setOperationsData] = useState<{
+    bookingsCount: number;
+    revenue: number;
+    activeCourts: number;
+    pendingRequests: number;
+  } | null>(null);
   const [opsHydrated, setOpsHydrated] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const res = await getStaffOperations(todayStr);
-        setOperationsData(res);
-      } catch (err) {
-        console.error("Failed to fetch staff operations:", err);
-      } finally {
-        setOpsHydrated(true);
-      }
-    };
-    void fetchData();
-    const interval = setInterval(() => void fetchData(), 45000);
-    return () => clearInterval(interval);
-  }, [getStaffOperations]);
-
-  const publishedMaps = useMemo(() => maps.filter(m => m.isPublished), [maps]);
+  const publishedMaps = useMemo(() => maps.filter((m) => m.isPublished), [maps]);
   const activeMap = selectedMapId
-    ? publishedMaps.find(m => m.id === selectedMapId) ?? publishedMaps[0]
+    ? publishedMaps.find((m) => m.id === selectedMapId) ?? publishedMaps[0]
     : publishedMaps[0];
   const publishedLayout = activeMap?.blocks ?? [];
+
+  const loadLiveOperations = useCallback(async () => {
+    const todayStr = getManilaDateKey();
+    const currentMinutes = toMinutesOfDay(getManilaTimeKey());
+    try {
+      const res = await apiFetch(`/api/staff/operations?date=${encodeURIComponent(todayStr)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as {
+        bookingsCount?: number;
+        revenue?: number;
+        pendingRequests?: number;
+      };
+      const bookingsCount = Number(d.bookingsCount ?? 0);
+      const revenue = Number(d.revenue ?? 0);
+      const pendingRequests = Number(d.pendingRequests ?? 0);
+
+      const activeCourtNames = new Set<string>();
+      for (const booking of bookings) {
+        if (booking.date !== todayStr) continue;
+        if (booking.status !== 'confirmed') continue;
+        const startMinutes = toMinutesOfDay(booking.time || '00:00');
+        const durationMins = Math.max(1, Math.round(Number(booking.duration ?? 1) * 60));
+        const endMinutes = startMinutes + durationMins;
+        if (currentMinutes < startMinutes || currentMinutes >= endMinutes) continue;
+        const courtName = String(booking.court || '').trim();
+        if (!courtName) continue;
+        if (
+          !bookingAppliesToPublishedMap(
+            { court: courtName, facilityMapId: booking.facilityMapId },
+            courtName,
+            activeMap?.id,
+            publishedMaps,
+          )
+        ) {
+          continue;
+        }
+        activeCourtNames.add(courtName);
+      }
+
+      setOperationsData({
+        bookingsCount,
+        revenue,
+        activeCourts: activeCourtNames.size,
+        pendingRequests,
+      });
+      setOpsHydrated(true);
+    } catch (err) {
+      console.error('Failed to load live operations:', err);
+      setOperationsData({ bookingsCount: 0, revenue: 0, activeCourts: 0, pendingRequests: 0 });
+      setOpsHydrated(true);
+    }
+  }, [activeMap?.id, publishedMaps, bookings]);
+
+  useEffect(() => {
+    void refreshBookingsFromApi();
+  }, [refreshBookingsFromApi]);
+
+  useEffect(() => {
+    void loadLiveOperations();
+    const id = window.setInterval(() => {
+      void loadLiveOperations();
+    }, 45_000);
+    return () => window.clearInterval(id);
+  }, [loadLiveOperations]);
 
   const todayBookingsCount = opsHydrated ? (operationsData?.bookingsCount ?? 0) : null;
   const totalRevToday = opsHydrated ? (operationsData?.revenue ?? 0) : null;
@@ -1920,7 +1990,7 @@ function LiveOperations() {
     { label: 'Pending Requests', value: pendingCancellations === null ? '—' : pendingCancellations, icon: AlertTriangle, color: '#a855f7', bg: '#1A0A25' },
   ];
   const hasBlockingBookings = (courtName: string) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getManilaDateKey();
     return bookings.filter(b =>
       bookingAppliesToPublishedMap(b, courtName, activeMap?.id, publishedMaps) &&
       b.date >= today &&

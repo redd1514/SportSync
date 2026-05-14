@@ -13,13 +13,14 @@ staffRouter.get('/operations', async (c) => {
   const date = c.req.query('date') || new Date().toISOString().split('T')[0];
 
   try {
-    const [{ data: payRows }, { data: bookRows }, ops] = await Promise.all([
+    const [{ data: payRows }, { data: bookRows }, { data: pendingReqRows }, ops] = await Promise.all([
       supabase.from('payments').select('amount, created_at, completed_at').eq('status', 'completed').limit(800),
       supabase
         .from('bookings')
         .select('id')
         .eq('booking_date', date)
         .not('status', 'eq', 'cancelled'),
+      supabase.from('booking_requests').select('id').eq('status', 'pending').limit(500),
       listStaffOperationsRecent(100),
     ]);
 
@@ -34,13 +35,14 @@ staffRouter.get('/operations', async (c) => {
     }
 
     const bookingsCount = bookRows?.length ?? 0;
+    const pendingRequests = pendingReqRows?.length ?? 0;
 
     return c.json({
       date,
       bookingsCount,
       revenue,
       activeCourts: null,
-      pendingRequests: null,
+      pendingRequests,
       operations: ops,
     });
   } catch (e: any) {
@@ -50,7 +52,7 @@ staffRouter.get('/operations', async (c) => {
       bookingsCount: 0,
       revenue: 0,
       activeCourts: null,
-      pendingRequests: null,
+      pendingRequests: 0,
       operations: [],
     });
   }

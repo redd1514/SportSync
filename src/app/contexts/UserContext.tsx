@@ -110,6 +110,18 @@ export interface UserProfile {
   permissions?: string[];
 }
 
+/** Map `public.users.role` from /api/users/sync response into client profile role. */
+function roleFromSyncedUserRow(
+  synced: Record<string, unknown> | null | undefined,
+  fallback: NonNullable<UserProfile["role"]>
+): NonNullable<UserProfile["role"]> {
+  const r = String(synced?.role ?? "").toLowerCase();
+  if (r === "admin") return "admin";
+  if (r === "staff") return "staff";
+  if (r === "coach") return "coach";
+  return fallback;
+}
+
 interface UserContextType {
   user: UserProfile | null;
   setUser: (user: UserProfile | null) => void;
@@ -251,6 +263,27 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const verifyAccountAccess = useCallback(async (accessToken: string) => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/status`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (response.ok) {
+        return { allowed: true as const, error: null as string | null };
+      }
+
+      if (response.status === 403 && payload?.code === 'ACCOUNT_SUSPENDED') {
+        return { allowed: false as const, error: payload?.error || 'Your account is suspended. Please contact an administrator.' };
+      }
+
+      return { allowed: false as const, error: payload?.error || 'Unable to verify account status.' };
+    } catch (error: any) {
+      return { allowed: false as const, error: error?.message || 'Unable to verify account status.' };
+    }
+  }, []);
+
   const normalizeBooking = (booking: any): Booking => ({
     id: booking.id,
     sport: booking.sport || 'Court Booking',
@@ -356,8 +389,25 @@ useEffect(() => {
       if (authEpochRef.current !== epoch) return;
 
       const resolvedUser = syncedUser
-        ? { ...nextUser, id: syncedUser.id }
+        ? {
+            ...nextUser,
+            id: String((syncedUser as { id?: string }).id || nextUser.id),
+            name: String((syncedUser as { full_name?: string; name?: string }).full_name || (syncedUser as { name?: string }).name || nextUser.name),
+            role: roleFromSyncedUserRow(syncedUser as Record<string, unknown>, "user"),
+          }
         : nextUser;
+
+      if (session?.access_token) {
+        const accessCheck = await verifyAccountAccess(session.access_token);
+        if (!accessCheck.allowed) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setBookings([]);
+          setError(accessCheck.error);
+          setIsLoading(false);
+          return;
+        }
+      }
 
       setUser(resolvedUser);
 
@@ -407,8 +457,29 @@ useEffect(() => {
         if (authEpochRef.current !== epoch) return;
 
         const resolvedUser = syncedUser
-          ? { ...nextUser, id: syncedUser.id }
+          ? {
+              ...nextUser,
+              id: String((syncedUser as { id?: string }).id || nextUser.id),
+              name: String((syncedUser as { full_name?: string; name?: string }).full_name || (syncedUser as { name?: string }).name || nextUser.name),
+              role: roleFromSyncedUserRow(syncedUser as Record<string, unknown>, "user"),
+            }
           : nextUser;
+
+        if (session?.access_token) {
+          verifyAccountAccess(session.access_token).then(async (accessCheck) => {
+            if (authEpochRef.current !== epoch) return;
+            if (!accessCheck.allowed) {
+              await supabase.auth.signOut();
+              setUser(null);
+              setBookings([]);
+              setError(accessCheck.error);
+              return;
+            }
+
+            setUser(resolvedUser);
+          });
+          return;
+        }
 
         setUser(resolvedUser);
 
@@ -464,7 +535,10 @@ useEffect(() => {
       if (authEpochRef.current !== epoch) return { error: null };
       const resolvedId = syncedUser?.id || id;
       // Ensure Bearer token is ready before user-scoped API fetches (bookings/coaching).
-      await exchangeDemoApiToken({ authId: id, email }).catch(() => false);
+      const demoTokenResult = await exchangeDemoApiToken({ authId: id, email });
+      if (demoTokenResult.error) {
+        return { error: demoTokenResult.error };
+      }
       setUser({
         id: resolvedId,
         name,
@@ -485,7 +559,22 @@ useEffect(() => {
     clearDemoApiToken();
     // If it's not one of the 3 demo accounts above, try real Supabase Login
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message || null };
+    if (error) return { error: error.message };
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session?.access_token) {
+      const accessCheck = await verifyAccountAccess(session.access_token);
+      if (!accessCheck.allowed) {
+        await supabase.auth.signOut();
+        clearDemoApiToken();
+        return { error: accessCheck.error };
+      }
+    }
+
+    return { error: null };
   };
 
   // 3. Real Supabase Sign Up

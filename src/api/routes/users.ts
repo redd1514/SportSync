@@ -68,13 +68,7 @@ usersRouter.post('/sync', async (c) => {
     }
 
     const authKey = isUuid(authId) ? authId : toStableUuid(authId);
-    const payload = {
-      auth_id: authKey,
-      email,
-      role: normalizeUserRoleForDb(body.role),
-      full_name: body.full_name || body.name || 'User',
-      phone: body.phone || null,
-    };
+    const incomingRole = normalizeUserRoleForDb(body.role);
 
     const { data: byAuth } = await supabase.from('users').select('*').eq('auth_id', authKey).maybeSingle();
     let existingRow = byAuth;
@@ -82,6 +76,24 @@ usersRouter.post('/sync', async (c) => {
     if (!existingRow) {
       const { data: byEmail } = await supabase.from('users').select('*').ilike('email', email).maybeSingle();
       existingRow = byEmail ?? null;
+    }
+
+    /** Do not let a generic "user" sync from the client wipe staff/admin rows (Supabase session bootstrap sends role user). */
+    const payload: Record<string, unknown> = {
+      auth_id: authKey,
+      email,
+      full_name: body.full_name || body.name || 'User',
+      phone: body.phone || null,
+    };
+    if (!existingRow) {
+      payload.role = incomingRole;
+    } else {
+      const existingRole = String(existingRow.role || 'user').toLowerCase();
+      const wouldDowngradeStaffOrAdmin =
+        (existingRole === 'staff' || existingRole === 'admin') && incomingRole === 'user';
+      if (!wouldDowngradeStaffOrAdmin) {
+        payload.role = incomingRole;
+      }
     }
 
     const { data, error } = existingRow
@@ -213,7 +225,14 @@ usersRouter.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { data, error } = await supabase.from('users').update(body).eq('id', id).select('*').single();
+    const updates: Record<string, unknown> = { ...body };
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'accountStatus')) {
+      updates.is_active = String(updates.accountStatus).toLowerCase() !== 'suspended';
+      delete updates.accountStatus;
+    }
+
+    const { data, error } = await supabase.from('users').update(updates).eq('id', id).select('*').single();
     if (error) throw error;
     return c.json(data);
   } catch (error: any) {

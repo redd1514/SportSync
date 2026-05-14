@@ -25,13 +25,19 @@ class RealtimeEventEmitter {
     options?: { userId?: string }
   ): Promise<void> {
     try {
-      await supabase.from('realtime_events').insert({
+      console.log(`[RealtimeEventEmitter] Inserting realtime_events row for table=${table}, id=${record?.id}`);
+      const res = await supabase.from('realtime_events').insert({
         event_type: 'INSERT',
         table_name: table,
         record,
         user_id: options?.userId,
         created_at: new Date().toISOString(),
       });
+      if (res.error) {
+        console.error('[RealtimeEventEmitter] Insert error:', res.error.message || res.error);
+      } else {
+        console.log('[RealtimeEventEmitter] Inserted realtime_events row successfully');
+      }
     } catch (error) {
       console.error(`[RealtimeEventEmitter] Failed to emit INSERT for ${table}:`, error);
     }
@@ -47,7 +53,8 @@ class RealtimeEventEmitter {
     options?: { userId?: string }
   ): Promise<void> {
     try {
-      await supabase.from('realtime_events').insert({
+      console.log(`[RealtimeEventEmitter] Inserting realtime_events UPDATE for table=${table}, id=${record?.id}`);
+      const res = await supabase.from('realtime_events').insert({
         event_type: 'UPDATE',
         table_name: table,
         record,
@@ -55,6 +62,7 @@ class RealtimeEventEmitter {
         user_id: options?.userId,
         created_at: new Date().toISOString(),
       });
+      if (res.error) console.error('[RealtimeEventEmitter] Update insert error:', res.error.message || res.error);
     } catch (error) {
       console.error(`[RealtimeEventEmitter] Failed to emit UPDATE for ${table}:`, error);
     }
@@ -69,13 +77,15 @@ class RealtimeEventEmitter {
     options?: { userId?: string }
   ): Promise<void> {
     try {
-      await supabase.from('realtime_events').insert({
+      console.log(`[RealtimeEventEmitter] Inserting realtime_events DELETE for table=${table}, id=${record?.id}`);
+      const res = await supabase.from('realtime_events').insert({
         event_type: 'DELETE',
         table_name: table,
         record,
         user_id: options?.userId,
         created_at: new Date().toISOString(),
       });
+      if (res.error) console.error('[RealtimeEventEmitter] Delete insert error:', res.error.message || res.error);
     } catch (error) {
       console.error(`[RealtimeEventEmitter] Failed to emit DELETE for ${table}:`, error);
     }
@@ -86,19 +96,25 @@ class RealtimeEventEmitter {
    * Uses Postgres NOTIFY for real-time updates
    */
   static async broadcast(
-    channel: string,
+    channelName: string,
     event: string,
     payload: Record<string, any>
   ): Promise<void> {
     try {
-      // Use Supabase client's realtime broadcast
-      await supabase.realtime.send({
-        type: 'broadcast',
+      const channel = supabase.channel(channelName);
+
+      await channel.subscribe();
+
+      await channel.send({
+        type: "broadcast",
         event,
         payload,
-      } as any);
+      });
     } catch (error) {
-      console.error(`[RealtimeEventEmitter] Failed to broadcast:`, error);
+      console.error(
+        "[RealtimeEventEmitter] Failed to broadcast:",
+        error
+      );
     }
   }
 

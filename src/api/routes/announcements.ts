@@ -33,14 +33,16 @@ announcementsRouter.get('/published', async (c) => {
 announcementsRouter.post('/', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
+    const auth = c.get('auth');
     const title = String(body.title || '').trim();
-    const description = String(body.description || '').trim();
+    const rawDescription = String(body.description || body.message || '').trim();
+    const description = rawDescription || title;
     const announcementType = String(body.announcement_type || body.type || 'general').trim() || 'general';
-    const createdBy = String(body.created_by || body.createdBy || '').trim();
+    const createdBy = String(auth?.userId || body.created_by || body.createdBy || '').trim();
     const publish = body.publish !== false;
     const expiresAt = body.expires_at ? String(body.expires_at) : null;
 
-    if (!title || !description) return c.json({ error: 'title and description are required' }, 400);
+    if (!title) return c.json({ error: 'title is required' }, 400);
     if (!createdBy || !isUuid(createdBy)) {
       return c.json({ error: 'created_by must be a valid UUID (log in with a real Supabase user/staff account).' }, 400);
     }
