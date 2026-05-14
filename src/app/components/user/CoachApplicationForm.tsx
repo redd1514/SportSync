@@ -1,9 +1,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { GraduationCap, CheckCircle, X, Send, Award, Clock, DollarSign, Users, ChevronRight } from "lucide-react";
+import {
+  GraduationCap, CheckCircle, Send, Award, Clock, DollarSign, Users, ChevronRight,
+  RefreshCw, Loader2, Edit3, Trash2, MessageSquare, Shield,
+} from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useCoaching } from "../../contexts/CoachingContext";
 import { SectionLoader } from "../shared/LoadingScreen";
 import { apiFetch } from "../../utils/authenticatedFetch";
+import { PhotoAvatar, ProfilePhotoPicker } from "../shared/ProfilePhotoPicker";
 
 export interface CoachApplication {
   id: string;
@@ -16,6 +21,9 @@ export interface CoachApplication {
   availability: string[];
   requestedRate: number;
   certifications: string;
+  photoUrl?: string;
+  applicationType?: "new" | "change_request" | "removal_request";
+  requestDetails?: string;
   status: "pending" | "approved" | "rejected";
   submittedAt: string;
 }
@@ -44,7 +52,10 @@ function ProgressStep({ num, label, active, done }: { num: number; label: string
 
 export function CoachApplicationForm() {
   const { user } = useUser();
+  const { coaches } = useCoaching();
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [applications, setApplications] = useState<CoachApplication[]>([]);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(true);
   const [step, setStep] = useState(0); // 0=intro, 1=sport, 2=profile, 3=done
   const [sport, setSport] = useState("");
   const [experience, setExperience] = useState("");
@@ -53,11 +64,48 @@ export function CoachApplicationForm() {
   const [requestedRate, setRequestedRate] = useState("800");
   const [certifications, setCertifications] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [requestMode, setRequestMode] = useState<"change_request" | "removal_request">("change_request");
+  const [requestDetails, setRequestDetails] = useState("");
+  const [requestSent, setRequestSent] = useState(false);
 
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
+  const myCoach = user?.email
+    ? coaches.find((coach) =>
+        user.email.toLowerCase() !== "user@jrc.com" &&
+        coach.email?.toLowerCase() === user.email.toLowerCase()
+      )
+    : undefined;
+  const myApplications = applications.filter((app) => {
+    const sameEmail = user?.email && app.userEmail?.toLowerCase() === user.email.toLowerCase();
+    const sameId = user?.id && app.userId === user.id;
+    return sameEmail || sameId;
+  });
+  const activeNewApplication = myApplications.find((app) =>
+    (app.applicationType || "new") === "new" && app.status === "pending"
+  );
+  const pendingCoachRequest = myApplications.find((app) =>
+    app.applicationType !== "new" && app.status === "pending"
+  );
+
+  const loadApplications = async () => {
+    setIsLoadingApplications(true);
+    try {
+      const res = await apiFetch(`/api/coach-applications`);
+      const data = await res.json().catch(() => []);
+      setApplications(Array.isArray(data) ? data : []);
+    } catch {
+      setApplications([]);
+    } finally {
+      setIsLoadingApplications(false);
+    }
+  };
+
   const handleSubmit = async () => {
-    if (!sport || !bio || availability.length === 0) return;
+    if (!sport || !bio || availability.length === 0 || !photoUrl || isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
@@ -72,6 +120,9 @@ export function CoachApplicationForm() {
           availability,
           requestedRate: parseInt(requestedRate, 10) || 800,
           certifications,
+          photoUrl: photoUrl || null,
+          photo_url: photoUrl || null,
+          applicationType: "new",
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -80,6 +131,8 @@ export function CoachApplicationForm() {
       setStep(3);
     } catch (e) {
       alert(e instanceof Error ? e.message : "Could not submit application");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -88,13 +141,169 @@ export function CoachApplicationForm() {
 
   useEffect(() => {
     const t = setTimeout(() => setIsInitialLoad(false), 600);
+    void loadApplications();
     return () => clearTimeout(t);
-  }, []);
+  }, [user?.id, user?.email]);
 
-  if (isInitialLoad) {
+  const submitCoachProfileRequest = async () => {
+    if (!myCoach || !requestDetails.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const res = await apiFetch(`/api/coach-applications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id || "guest",
+          userName: user?.name || myCoach.name,
+          userEmail: user?.email || myCoach.email || "",
+          sport: myCoach.sport,
+          experience: requestMode === "change_request" ? "Coach profile change request" : "Coach removal request",
+          bio: requestDetails.trim(),
+          availability: myCoach.availableDays || [],
+          requestedRate: myCoach.hourlyRate || 0,
+          certifications: "",
+          photoUrl: myCoach.image || null,
+          applicationType: requestMode,
+          requestDetails: requestDetails.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || "Could not notify admin");
+      setRequestSent(true);
+      setRequestDetails("");
+      await loadApplications();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not notify admin");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isInitialLoad || isLoadingApplications) {
     return (
       <div className="flex flex-col h-full items-center justify-center bg-[#131314]">
         <SectionLoader label="Loading application…" accentColor="#2563EB" />
+      </div>
+    );
+  }
+
+  if (myCoach) {
+    const actionLabel = requestMode === "change_request" ? "Request Profile Changes" : "Request Coach Removal";
+    return (
+      <div className="min-h-full px-4 md:px-8 py-8" style={{ background: BG, fontFamily: "'Outfit','Inter',sans-serif" }}>
+        <div className="max-w-5xl mx-auto space-y-5">
+          <div className="rounded-3xl border overflow-hidden" style={{ background: SURFACE, borderColor: BORDER }}>
+            <div className="p-6 md:p-7 flex flex-col md:flex-row gap-5 md:items-center">
+              <PhotoAvatar src={myCoach.image} name={myCoach.name} size={88} rounded={24} />
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                  <h1 className="text-white font-black" style={{ fontSize: 24 }}>{myCoach.name}</h1>
+                  <span className="px-2.5 py-1 rounded-full font-black text-green-400" style={{ fontSize: 10, background: "rgba(34,197,94,0.14)" }}>ACTIVE COACH</span>
+                </div>
+                <p style={{ color: TEXT_SECONDARY, fontSize: 13 }}>{myCoach.sport} · ₱{myCoach.hourlyRate?.toLocaleString()}/hr · {myCoach.timeRange || "Flexible hours"}</p>
+                <p className="mt-2 max-w-2xl" style={{ color: TEXT_SECONDARY, fontSize: 13, lineHeight: 1.6 }}>{myCoach.description || "Your coach profile is live in the Coaching Hub."}</p>
+              </div>
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: `${ACCENT_BLUE}18`, border: `1px solid ${ACCENT_BLUE}35` }}>
+                <Shield size={22} color={ACCENT_BLUE} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-[1.2fr_0.8fr] gap-5">
+            <div className="rounded-3xl border p-6" style={{ background: SURFACE, borderColor: BORDER }}>
+              <h2 className="text-white font-black mb-1" style={{ fontSize: 18 }}>Coach Profile Requests</h2>
+              <p style={{ color: TEXT_SECONDARY, fontSize: 13, marginBottom: 18 }}>
+                Since you already have a coach profile, this tab now sends profile-change or removal requests to admin instead of creating another application.
+              </p>
+              {pendingCoachRequest && !requestSent ? (
+                <div className="rounded-2xl p-5 border" style={{ background: "rgba(234,179,8,0.08)", borderColor: "rgba(234,179,8,0.25)" }}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Clock size={18} className="text-yellow-400" />
+                    <p className="text-yellow-400 font-black" style={{ fontSize: 14 }}>Admin request already pending</p>
+                  </div>
+                  <p style={{ color: TEXT_SECONDARY, fontSize: 13 }}>
+                    Your {pendingCoachRequest.applicationType === "removal_request" ? "removal" : "profile change"} request is waiting for admin review.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {[
+                      { id: "change_request" as const, icon: Edit3, title: "Change Profile", desc: "Update photo, rate, sport, bio, schedule, or availability." },
+                      { id: "removal_request" as const, icon: Trash2, title: "Remove Coaching", desc: "Ask admin to hide or remove your coach profile." },
+                    ].map((item) => {
+                      const active = requestMode === item.id;
+                      return (
+                        <button key={item.id} type="button" onClick={() => setRequestMode(item.id)}
+                          className="text-left rounded-2xl border p-4 transition-all"
+                          style={{ background: active ? `${ACCENT_BLUE}14` : SURFACE2, borderColor: active ? ACCENT_BLUE : BORDER }}>
+                          <item.icon size={18} color={active ? ACCENT_BLUE : TEXT_SECONDARY} />
+                          <p className="font-black mt-3" style={{ color: active ? "#fff" : TEXT_PRIMARY, fontSize: 14 }}>{item.title}</p>
+                          <p style={{ color: TEXT_SECONDARY, fontSize: 12, lineHeight: 1.5 }}>{item.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={requestDetails}
+                    onChange={(e) => setRequestDetails(e.target.value)}
+                    rows={5}
+                    placeholder={requestMode === "change_request" ? "Tell admin exactly what you want changed." : "Tell admin why you want your coaching profile removed or paused."}
+                    className={INPUT}
+                    style={{ ...inputStyle, resize: "none" }}
+                  />
+                  <button type="button" onClick={submitCoachProfileRequest}
+                    disabled={!requestDetails.trim() || isSubmitting}
+                    className="w-full py-3.5 rounded-2xl text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
+                    style={{ fontSize: 14, background: `linear-gradient(135deg, ${ACCENT_BLUE}, #1d4ed8)` }}>
+                    {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Sending request...</> : <><MessageSquare size={16} /> {actionLabel}</>}
+                  </button>
+                  {requestSent && (
+                    <div className="rounded-2xl p-4 border" style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.25)" }}>
+                      <p className="text-green-400 font-black" style={{ fontSize: 13 }}>Request sent to admin.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-3xl border p-6" style={{ background: SURFACE, borderColor: BORDER }}>
+              <h3 className="text-white font-black mb-4" style={{ fontSize: 16 }}>Current Profile</h3>
+              <div className="space-y-3">
+                {[
+                  ["Sport", myCoach.sport],
+                  ["Rate", `₱${myCoach.hourlyRate?.toLocaleString()}/hr`],
+                  ["Hours", myCoach.timeRange || "Flexible"],
+                  ["Availability", `${myCoach.availableDays?.length || 0} dates listed`],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl p-3" style={{ background: SURFACE2 }}>
+                    <p style={{ color: TEXT_SECONDARY, fontSize: 10, fontWeight: 800 }}>{label.toUpperCase()}</p>
+                    <p className="text-white font-black" style={{ fontSize: 13 }}>{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeNewApplication) {
+    return (
+      <div className="min-h-full flex items-center justify-center px-6 py-12" style={{ background: BG, fontFamily: "'Outfit','Inter',sans-serif" }}>
+        <div className="max-w-lg w-full rounded-3xl border p-8 text-center" style={{ background: SURFACE, borderColor: BORDER }}>
+          <div className="w-16 h-16 rounded-3xl mx-auto mb-5 flex items-center justify-center" style={{ background: activeNewApplication.status === "pending" ? "rgba(234,179,8,0.13)" : "rgba(34,197,94,0.13)" }}>
+            {activeNewApplication.status === "pending" ? <Clock size={30} className="text-yellow-400" /> : <CheckCircle size={30} className="text-green-400" />}
+          </div>
+          <h2 className="text-white font-black mb-2" style={{ fontSize: 22 }}>
+            {activeNewApplication.status === "pending" ? "Application Under Review" : "Application Approved"}
+          </h2>
+          <p style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 1.6 }}>
+            You already have a coach application for <strong className="text-white">{activeNewApplication.sport}</strong>.
+            {activeNewApplication.status === "pending" ? " Admin will review it soon, so another application is not needed." : " Your coach profile should appear in the Coaching Hub."}
+          </p>
+        </div>
       </div>
     );
   }
@@ -132,10 +341,14 @@ export function CoachApplicationForm() {
               </div>
             </div>
           </div>
-          <button onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); }}
-            style={{ color: ACCENT_BLUE, fontSize: 13, fontWeight: 700 }}>
-            Submit another application
-          </button>
+          <motion.button
+            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); setPhotoUrl(""); }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black transition-all"
+            style={{ fontSize: 14, background: `${ACCENT_BLUE}18`, border: `1px solid ${ACCENT_BLUE}40`, color: "#60a5fa" }}
+          >
+            <RefreshCw size={15} /> Submit Another Application
+          </motion.button>
         </motion.div>
       </div>
     );
@@ -330,6 +543,20 @@ export function CoachApplicationForm() {
                       className={INPUT} style={{ ...inputStyle, marginTop: 6, resize: "none" }} />
                   </div>
                   <div>
+                    <label style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>PROFILE PHOTO (REQUIRED)</label>
+                    <div className="mt-2 rounded-2xl border p-3" style={{ background: SURFACE2, borderColor: photoUrl ? `${ACCENT_BLUE}80` : BORDER }}>
+                      <ProfilePhotoPicker
+                        value={photoUrl}
+                        name={user?.name || "Coach"}
+                        onChange={setPhotoUrl}
+                        title="Coach Profile Photo"
+                        accentColor={ACCENT_BLUE}
+                        buttonLabel={photoUrl ? "Change Photo" : "Choose Photo"}
+                      />
+                      <p style={{ color: TEXT_SECONDARY, fontSize: 10, marginTop: 10 }}>Pick from your gallery or desktop, crop it, then save the preview.</p>
+                    </div>
+                  </div>
+                  <div>
                     <label style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>CERTIFICATIONS (Optional)</label>
                     <input value={certifications} onChange={e => setCertifications(e.target.value)}
                       placeholder="e.g. PAABA Level 1, PSC Certified Coach..."
@@ -366,10 +593,10 @@ export function CoachApplicationForm() {
                   style={{ fontSize: 14, background: SURFACE2, borderColor: BORDER, color: TEXT_SECONDARY }}>Back</button>
                 <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                   onClick={handleSubmit}
-                  disabled={!bio || availability.length === 0}
+                  disabled={!bio || availability.length === 0 || !photoUrl || isSubmitting}
                   className="flex-1 py-3 rounded-2xl text-white font-black flex items-center justify-center gap-2"
-                  style={{ fontSize: 14, background: (bio && availability.length > 0) ? `linear-gradient(135deg, ${ACCENT_BLUE}, #1d4ed8)` : SURFACE2, color: (bio && availability.length > 0) ? "white" : TEXT_SECONDARY, opacity: (bio && availability.length > 0) ? 1 : 0.5, boxShadow: (bio && availability.length > 0) ? `0 6px 20px ${ACCENT_BLUE}40` : "none" }}>
-                  <Send size={15} /> Submit Application
+                  style={{ fontSize: 14, background: (bio && availability.length > 0 && photoUrl) ? `linear-gradient(135deg, ${ACCENT_BLUE}, #1d4ed8)` : SURFACE2, color: (bio && availability.length > 0 && photoUrl) ? "white" : TEXT_SECONDARY, opacity: (bio && availability.length > 0 && photoUrl) ? 1 : 0.5, boxShadow: (bio && availability.length > 0 && photoUrl) ? `0 6px 20px ${ACCENT_BLUE}40` : "none" }}>
+                  {isSubmitting ? <><Loader2 size={15} className="animate-spin" /> Saving...</> : <><Send size={15} /> Submit Application</>}
                 </motion.button>
               </div>
             </motion.div>

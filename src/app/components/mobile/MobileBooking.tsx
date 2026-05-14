@@ -10,13 +10,13 @@ import {
   Clock, User, CreditCard, CalendarDays, Info, AlertTriangle,
   ArrowRight, Check, X, Building2
 } from "lucide-react";
-import { projectId, publicAnonKey } from "../../utils/supabase/info";
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useAddons } from "../../contexts/AddonsContext";
 import { useBookingAPI } from "../../hooks/useBookingAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { getDynamicPrice, RATE_CARD, SPORTS_INFO, type AddOn } from "../sportsData";
+import { projectId, publicAnonKey } from "../../utils/supabase/info";
 
 const SPORTS = [
   { name: "Basketball" },

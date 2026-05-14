@@ -35,6 +35,7 @@ export interface Booking {
   checkOutTime?: string;
   /** Facility map id when booking was made from a specific published map */
   facilityMapId?: string;
+  userId?: string;
 }
 
 export interface CancellationRequest {
@@ -307,6 +308,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     checkOutStatus: booking.checkOutStatus || booking.check_out_status,
     checkOutTime: booking.checkOutTime || booking.check_out_time,
     facilityMapId: booking.facilityMapId || booking.facility_map_id,
+    userId: booking.userId || booking.user_id,
   });
 
   const loadBookingsForUser = async (userId: string) => {

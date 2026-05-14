@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient.ts';
 import { resolveUserRowId } from './bookingService.ts';
 import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
+import { RealtimeEventEmitter } from './realtimeEventEmitter.ts';
 
 function defaultEndTimeFromStart(start: string): string {
   const parts = String(start || '09:00:00').split(':').map((p) => parseInt(p, 10));
@@ -18,6 +19,16 @@ function notesFromProofAndLinked(paymentProofUrl?: string, linkedBookingId?: str
   if (paymentProofUrl) parts.push(String(paymentProofUrl).trim());
   if (linkedBookingId) parts.push(`linked_booking:${String(linkedBookingId).trim()}`);
   return parts.length > 0 ? parts.join('\n') : undefined;
+}
+
+async function notifyUser(userId: string | undefined, eventType: string, title: string, message: string, extra?: Record<string, unknown>) {
+  if (!userId) return;
+  await RealtimeEventEmitter.notifyUser(userId, eventType, {
+    title,
+    message,
+    type: eventType.includes('rejected') ? 'alert' : 'update',
+    ...extra,
+  });
 }
 
 export type CoachingSessionPayload = {
@@ -52,6 +63,7 @@ export async function listCoachProfileIdsForViewer(usersTableId: string): Promis
   if (vuErr) throw vuErr;
 
   const viewerEmail = (viewerUser?.email || '').trim().toLowerCase();
+  if (viewerEmail === 'user@jrc.com') return [];
 
   const { data: coachRows, error: cErr } = await supabase.from('coaches').select('id, user_id, users(email)');
   if (cErr) throw cErr;
@@ -149,6 +161,17 @@ export const coachingSessionService = {
     const user_id = await resolveUserRowId(String(input.user_id));
     const coach_id = String(input.coach_id).trim();
 
+    const { data: activePending, error: pendingErr } = await supabase
+      .from('coaching_sessions')
+      .select('id')
+      .eq('user_id', user_id)
+      .eq('status', 'pending')
+      .limit(1);
+    if (pendingErr) throw pendingErr;
+    if ((activePending || []).length > 0) {
+      throw new Error('You already have a pending coaching request. Please wait for the coach to accept or decline before requesting another session.');
+    }
+
     const { data: coachRow, error: coachErr } = await supabase
       .from('coaches')
       .select('id')
@@ -205,6 +228,19 @@ export const coachingSessionService = {
     
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'INSERT', data);
+
+    const { data: coachOwnerRow } = await supabase
+      .from('coaches')
+      .select('user_id')
+      .eq('id', coach_id)
+      .maybeSingle();
+    await notifyUser(
+      coachOwnerRow?.user_id,
+      'coaching_request_created',
+      'New coaching request',
+      'A student requested a coaching session. Open My Coaching to review and reserve a court.',
+      { sessionId: data.id, studentId: user_id, sessionDate: input.session_date, startTime: input.start_time },
+    );
     
     return data as CoachingSessionRow;
   },
@@ -234,31 +270,46 @@ export const coachingSessionService = {
     
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
+
+    if (dbStatus === 'approved') {
+      await notifyUser(
+        data?.user_id,
+        'coaching_request_approved',
+        'Coach accepted your session',
+        'Your coach reserved the court. Open My Coaching to view your coaching fee and ticket.',
+        { sessionId: data.id, status: dbStatus },
+      );
+    } else if (dbStatus === 'rejected') {
+      await notifyUser(
+        data?.user_id,
+        'coaching_request_rejected',
+        'Coach declined your session',
+        'Your coaching request was declined. You can request another coach or choose a different time.',
+        { sessionId: data.id, status: dbStatus },
+      );
+    }
     
     return data as CoachingSessionRow;
   },
 
   async updateSessionStatus(
     id: string,
-    status: 'pending' | 'pending_verification' | 'confirmed' | 'rejected' | 'cancelled' | 'approved' | 'scheduled' | 'completed',
-    paymentProofUrl?: string,
-    linkedBookingId?: string
+    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved',
+    adminNotes?: string,
   ): Promise<CoachingSessionRow> {
+    // Map UI status → DB status
+    // DB only knows: pending | approved | rejected | cancelled
     const dbStatus =
-      status === 'confirmed'
+      status === 'confirmed' || status === 'approved'
         ? 'approved'
-        : status === 'pending_verification'
-          ? 'pending'
-          : status === 'cancelled'
-            ? 'cancelled'
-            : status === 'rejected'
-              ? 'rejected'
-              : status === 'approved' || status === 'scheduled' || status === 'completed' || status === 'pending'
-                ? status
-                : 'pending';
+        : status === 'cancelled'
+          ? 'cancelled'
+          : status === 'rejected'
+            ? 'rejected'
+            : 'pending';
+
     const update: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
-    const n = notesFromProofAndLinked(paymentProofUrl, linkedBookingId);
-    if (n) update.notes = n;
+    if (adminNotes !== undefined) update.admin_notes = adminNotes;
     
     const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase

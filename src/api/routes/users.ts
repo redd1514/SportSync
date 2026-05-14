@@ -172,13 +172,6 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
       const coachUser = coach ? userMap.get(coach.user_id) : null;
       const student = userMap.get(session.user_id);
       const notes = typeof session.notes === 'string' ? session.notes : '';
-      const linkedMatch = notes.match(/linked_booking:([^\s]+)/);
-      const proofFromNotes = notes
-        .split('\n')
-        .map((line: string) => line.trim())
-        .find((line: string) => /^https?:\/\//i.test(line));
-      const paymentProofUrl = session.payment_proof_url || proofFromNotes;
-
       const viewerIsStudent = String(session.user_id) === String(usersTableId);
       const viewerIsCoachForThisSession = viewerCoachIdSet.has(String(session.coach_id));
 
@@ -191,11 +184,11 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
         sport: sport?.name || 'Unknown Sport',
         requestedDate: session.session_date,
         requestedTime: session.start_time,
+        endTime: session.end_time,
         message: notes,
-        durationHours: session.duration_hours,
+        adminNotes: session.admin_notes,
+        durationHours: session.duration_hours != null ? Number(session.duration_hours) : undefined,
         status: mapSessionStatusForUi(String(session.status || 'pending')),
-        paymentProofUrl,
-        linkedBookingId: linkedMatch?.[1],
         viewerIsStudent,
         viewerIsCoachForThisSession,
       };
@@ -225,14 +218,26 @@ usersRouter.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const updates: Record<string, unknown> = { ...body };
 
+    // 1. Logic from Incoming: Get the specific target ID
+    const user = await findUserRow(id);
+    const targetId = user?.id || id;
+
+    // 2. Logic from Current: Transform account status
+    const updates: Record<string, unknown> = { ...body };
     if (Object.prototype.hasOwnProperty.call(updates, 'accountStatus')) {
       updates.is_active = String(updates.accountStatus).toLowerCase() !== 'suspended';
       delete updates.accountStatus;
     }
 
-    const { data, error } = await supabase.from('users').update(updates).eq('id', id).select('*').single();
+    // 3. Update Supabase using the targetId and the cleaned updates object
+    const { data, error } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', targetId)
+      .select('*')
+      .single();
+
     if (error) throw error;
     return c.json(data);
   } catch (error: any) {

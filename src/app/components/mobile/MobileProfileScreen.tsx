@@ -1,16 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
-  HelpCircle, MapPin, Star, CheckCircle, Clock, XCircle, Settings,
-  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download,
+  HelpCircle, Star, CheckCircle, Clock, XCircle,
+  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download, Camera,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useCoaching } from "../../contexts/CoachingContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
 import { downloadTicketQrPng } from "../../../shared/qrDownload";
+import { toast } from "sonner";
+import { PhotoAvatar, PhotoCropperModal, loadProfilePhoto, saveProfilePhoto } from "../shared/ProfilePhotoPicker";
 
 interface MobileProfileScreenProps {
   onLogout: () => void;
@@ -231,73 +234,133 @@ function RescheduleDialog({ booking, onClose, onConfirm }: {
   );
 }
 
-/* ── QR Ticket Viewer ── */
+/* ── QR Ticket Viewer (Styled) ── */
 function QRTicketDialog({ booking, onClose }: {
-  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number };
+  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number; status?: string };
   onClose: () => void;
 }) {
-  const [downloadBusy, setDownloadBusy] = useState(false);
-  const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
-  const endH = parseInt(booking.time) + (booking.duration || 1);
   const qrValue = (booking.refCode || booking.id || '').toString();
-  const fileBase = (booking.refCode || booking.id || 'ticket').toString().replace(/\s+/g, '_');
+  const displayToken = qrValue.startsWith('JRC-') ? qrValue : `JRC-${qrValue.slice(0, 6).toUpperCase()}`;
+  const color = getSportColor(booking.sport);
+  const ticketId = 'jrc-ticket-canvas-mobile';
+
+  const downloadTicket = async () => {
+    const ticketEl = document.getElementById(ticketId);
+    if (!ticketEl) return;
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(ticketEl, { scale: 3, backgroundColor: null, useCORS: true });
+      const a = document.createElement('a');
+      a.download = `${displayToken}-JRC-Ticket.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+      toast.success('Ticket downloaded!');
+    } catch {
+      // fallback
+      const svg = ticketEl.querySelector('svg');
+      if (!svg) return;
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const a = document.createElement('a');
+      a.download = `${displayToken}-Ticket.svg`;
+      a.href = 'data:image/svg+xml;base64,' + btoa(svgData);
+      a.click();
+      toast.success('QR downloaded!');
+    }
+  };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}>
-      <motion.div initial={{ scale: 0.88, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 24 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-xs rounded-3xl overflow-hidden"
-        style={{ background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.1)' }}>
-        <div className="p-5 flex flex-col items-center gap-4">
-          <div className="flex items-center justify-between w-full">
-            <p className="text-white font-black" style={{ fontSize: 16 }}>Your QR Ticket</p>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/8 flex items-center justify-center"><X size={14} className="text-gray-400" /></button>
+    <div
+      className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex flex-col items-center gap-4 w-full max-w-xs"
+      >
+        <div
+          id={ticketId}
+          className="w-full rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)]"
+          style={{ background: '#111' }}
+        >
+          <div className="px-6 pt-6 pb-4" style={{ background: `linear-gradient(135deg, ${color}22, ${color}08)`, borderBottom: `1px solid ${color}30` }}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${color}20`, border: `1px solid ${color}40` }}>
+                <SportIcon sport={booking.sport} size={20} color={color} strokeWidth={2.5} />
+              </div>
+              <div>
+                <p className="text-white font-black" style={{ fontSize: 18 }}>{booking.sport || 'Court Booking'}</p>
+                <p className="text-gray-400 font-medium" style={{ fontSize: 12 }}>{booking.court} · JRC Facility</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+              <span className="font-black uppercase" style={{ fontSize: 9, letterSpacing: 1, color }}>{booking.status?.toUpperCase() || 'RESERVED'}</span>
+            </div>
           </div>
-          <div className="bg-white rounded-2xl p-4 flex flex-col items-center gap-2 w-full">
-            <QRCodeSVG value={qrValue} size={160} level="H" />
-            <button
-              type="button"
-              disabled={downloadBusy || !qrValue}
-              onClick={async () => {
-                setDownloadBusy(true);
-                try {
-                  await downloadTicketQrPng({
-                    value: qrValue,
-                    fileBaseName: fileBase,
-                    displayCode: booking.refCode || qrValue,
-                  });
-                } catch (e) {
-                  console.error(e);
-                } finally {
-                  setDownloadBusy(false);
-                }
-              }}
-              className="w-full py-2.5 rounded-xl font-black text-gray-800 bg-gray-100 border border-gray-200 flex items-center justify-center gap-2 disabled:opacity-45"
-              style={{ fontSize: 12 }}
-            >
-              <Download size={14} />
-              {downloadBusy ? 'Preparing…' : 'Download QR image'}
-            </button>
+
+          <div className="px-6 py-4 space-y-3 border-b border-white/5">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Date</span>
+              <span className="text-white font-black" style={{ fontSize: 13 }}>
+                {booking.date ? new Date(booking.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Time</span>
+              <span className="text-white font-black" style={{ fontSize: 13 }}>
+                {booking.time ? (() => { const [h] = booking.time.split(':').map(Number); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; })() : '—'} · {booking.duration || 1}hr
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Amount</span>
+              <span className="font-black" style={{ fontSize: 13, color: '#FF8C00' }}>₱{(booking.amount || 0).toLocaleString()}</span>
+            </div>
           </div>
-          <p className="font-black text-white tracking-widest" style={{ fontSize: 16 }}>{booking.refCode || 'NO CODE'}</p>
-          <p className="text-gray-400 text-center" style={{ fontSize: 12 }}>Show this at the front desk to check in</p>
-          <div className="w-full bg-[#111] rounded-xl p-3 space-y-1.5 border border-white/5">
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Sport</span><span className="text-white font-black" style={{ fontSize: 12 }}>{booking.sport}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Court</span><span className="text-white font-black" style={{ fontSize: 12 }}>{booking.court}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Date</span><span className="text-white font-black" style={{ fontSize: 12 }}>{new Date(booking.date + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Time</span><span className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(booking.time)} – {fmt12(String(endH))}</span></div>
-            <div className="flex justify-between border-t border-white/8 pt-1.5"><span className="text-gray-500" style={{ fontSize: 12 }}>Amount</span><span className="text-[#FF8C00] font-black" style={{ fontSize: 14 }}>₱{booking.amount.toLocaleString()}</span></div>
+
+          <div className="relative flex items-center px-0 py-0">
+            <div className="w-6 h-6 rounded-full bg-black/95 -ml-3 flex-shrink-0" />
+            <div className="flex-1 border-t-2 border-dashed border-white/10" />
+            <div className="w-6 h-6 rounded-full bg-black/95 -mr-3 flex-shrink-0" />
+          </div>
+
+          <div className="px-6 pt-4 pb-6 flex flex-col items-center">
+            <div className="p-3 bg-white rounded-2xl shadow-lg mb-3">
+              <QRCodeSVG value={qrValue} size={140} />
+            </div>
+            <p className="text-gray-500 font-bold uppercase mb-1" style={{ fontSize: 9, letterSpacing: 1 }}>Show at front desk</p>
+            <p className="text-white font-black" style={{ fontSize: 15, letterSpacing: 1 }}>{displayToken}</p>
+          </div>
+
+          <div className="px-6 py-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            <p className="text-gray-700 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 1.5 }}>JRC Sports Complex · Valenzuela City</p>
           </div>
         </div>
+
+        <div className="flex gap-3 w-full">
+          <button
+            onClick={downloadTicket}
+            className="flex-1 bg-white text-black py-3.5 rounded-2xl font-black text-sm hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
+          >
+            Download Ticket
+          </button>
+          <button
+            onClick={onClose}
+            className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-white hover:bg-white/20 transition-colors flex-shrink-0"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </motion.div>
-    </motion.div>
+    </div>
   );
 }
 
 export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
-  const { user, bookings, logout, updateBooking, addCancellationRequest } = useUser();
+  const { user, bookings, logout, updateBooking, addCancellationRequest, updateUser } = useUser();
+  const { findCoachByEmail } = useCoaching();
   const { getUserProfile, getUserLoyaltyPoints, updateUserProfile } = useUserAPI();
   const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -308,8 +371,19 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [profileData, setProfileData] = useState<any>(null);
   const [loyaltyData, setLoyaltyData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
+  const [profilePhotoSource, setProfilePhotoSource] = useState("");
+  const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [isEditingAccount, setIsEditingAccount] = useState(false);
+  const [accountName, setAccountName] = useState(user?.name || "");
+  const [accountPhone, setAccountPhone] = useState(user?.phone || "");
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAdmin = user?.email === "admin@jrc.com";
+  const coachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
+  const roleLabel = coachProfile ? "COACH" : isAdmin ? "ADMIN" : "USER";
+  const roleColor = coachProfile ? "#2563EB" : isAdmin ? "#FFD700" : "#22c55e";
 
   // Fetch profile data from API on mount
   const loadProfileData = async () => {
@@ -318,6 +392,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     try {
       const profile = await getUserProfile(user.id);
       setProfileData(profile);
+      if (profile?.profile_picture_url && !loadProfilePhoto(user.id)) {
+        saveProfilePhoto(user.id, profile.profile_picture_url);
+        setProfilePhoto(profile.profile_picture_url);
+      }
       const loyalty = await getUserLoyaltyPoints(user.id);
       setLoyaltyData(loyalty);
     } catch (error) {
@@ -337,19 +415,95 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     fetchProfileOnMount();
   }, [user?.id]);
 
-  const userBookings = bookings.filter(b => 
-    b.customerName === user?.name || (b as any).userId === user?.id
-  );
+  useEffect(() => {
+    setProfilePhoto(loadProfilePhoto(user?.id));
+    setAccountName(user?.name || "");
+    setAccountPhone(user?.phone || "");
+  }, [user?.id]);
 
-  const filteredBookings = userBookings.filter((b) =>
-    activeTab === "upcoming"
-      ? ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status)
-      : (b.status === "completed" || b.status === "cancelled")
-  );
+  const userBookings = bookings;
+
+  const localPendingRequests = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_localPendingRequests') || '[]');
+    } catch {
+      return [];
+    }
+  })();
+
+  const [hiddenCompletedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_hiddenCompletedIds') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const parseBookingDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const filteredBookings = userBookings.filter((b) => {
+    const isPastDate = parseBookingDate(b.date) < today;
+    const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
+    
+    if (activeTab === "upcoming") {
+      if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      if (isPendingReq) return false;
+      return true;
+    } else {
+      if (hiddenCompletedIds.includes(b.id)) return false;
+      return isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
+    }
+  });
 
   const handleLogout = async () => {
     await logout();
     onLogout();
+  };
+
+  const handlePhotoFile = (file?: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => setProfilePhotoSource(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveProfilePhoto = async (dataUrl: string) => {
+    setIsSavingPhoto(true);
+    saveProfilePhoto(user?.id, dataUrl);
+    setProfilePhoto(dataUrl);
+    try {
+      await updateUserProfile(user?.id || "", { profile_picture_url: dataUrl });
+    } catch {
+      /* The local preview is still saved for demo/offline accounts. */
+    } finally {
+      setIsSavingPhoto(false);
+    }
+  };
+
+  const handleSaveAccount = async () => {
+    if (!user?.id) return;
+    const nextName = accountName.trim() || user.name;
+    const nextPhone = accountPhone.trim();
+    setIsSavingAccount(true);
+    try {
+      await updateUserProfile(user.id, { full_name: nextName, phone: nextPhone });
+      updateUser(user.id, { name: nextName, phone: nextPhone });
+      toast.success("Account info updated");
+      setIsEditingAccount(false);
+      setActiveModal(null);
+    } catch (error) {
+      console.error(error);
+      toast.error("Could not update account info");
+    } finally {
+      setIsSavingAccount(false);
+    }
   };
 
   if (!user) return null;
@@ -361,45 +515,56 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         <div className="absolute inset-0 bg-gradient-to-b from-[#FF8C00]/20 to-transparent" />
         <div className="relative px-5 pt-6 pb-5">
           <div className="flex items-start justify-between mb-5">
-            <h2 className="text-white" style={{ fontSize: 22, fontWeight: 900 }}>Profile</h2>
+            <div>
+              <h2 className="text-white" style={{ fontSize: 22, fontWeight: 900 }}>Account & Activity</h2>
+              <p className="text-gray-500" style={{ fontSize: 12 }}>Profile, bookings, rewards, and support</p>
+            </div>
             <button
               onClick={() => setActiveModal("settings")}
               className="w-10 h-10 rounded-xl bg-[#1E1E1E] border border-white/10 flex items-center justify-center"
             >
-              <Settings size={17} className="text-gray-400" />
+              <User size={17} className="text-gray-400" />
             </button>
           </div>
 
           {/* User card */}
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#FF8C00] to-[#e67e00] flex items-center justify-center shadow-lg shadow-orange-500/30">
-                <span className="text-white font-black" style={{ fontSize: 26 }}>
-                  {user.name.charAt(0).toUpperCase()}
-                </span>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => handlePhotoFile(event.target.files?.[0])}
+            />
+            <button type="button" className="relative cursor-pointer" onClick={() => photoInputRef.current?.click()}>
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-orange-500/20 border-2 border-white/10 hover:border-[#FF8C00]/60 transition-colors">
+                <PhotoAvatar src={profilePhoto} name={user.name} size={64} rounded={16} />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#FF8C00] flex items-center justify-center">
+                <Camera size={10} className="text-white" />
               </div>
               {isAdmin && (
                 <div className="absolute -top-1.5 -right-1.5 bg-[#FFD700] rounded-full p-1">
                   <Shield size={10} className="text-black" />
                 </div>
               )}
-            </div>
-            <div className="flex-1">
+            </button>
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
-                <h3 className="text-white font-black" style={{ fontSize: 18 }}>{user.name}</h3>
-                {isAdmin && (
-                  <span
-                    className="rounded-full px-2 py-0.5"
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      backgroundColor: "#FFD70020",
-                      color: "#FFD700",
-                    }}
-                  >
-                    ADMIN
-                  </span>
-                )}
+                <h3 className="text-white font-black truncate" style={{ fontSize: 18 }}>{user.name}</h3>
+                <motion.span
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="rounded-full px-2 py-0.5 flex-shrink-0"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    backgroundColor: `${roleColor}20`,
+                    color: roleColor,
+                  }}
+                >
+                  {roleLabel}
+                </motion.span>
               </div>
               <p className="text-gray-400" style={{ fontSize: 13 }}>{user.email}</p>
               <p className="text-gray-500" style={{ fontSize: 12, marginTop: 2 }}>
@@ -417,15 +582,18 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             { icon: CalendarDays, label: "Bookings", value: userBookings.length, color: "#FF8C00" },
             { icon: Trophy, label: "Points", value: user.loyaltyPoints, color: "#FFD700" },
             { icon: Star, label: "Sports", value: user.favoriteSports.length, color: "#0047AB" },
-          ].map((stat) => (
-            <div
+          ].map((stat, index) => (
+            <motion.div
               key={stat.label}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
               className="bg-[#1A1A1A] rounded-2xl p-3.5 border border-white/5 flex flex-col items-center gap-1"
             >
               <stat.icon size={19} style={{ color: stat.color }} />
               <span className="text-white font-black" style={{ fontSize: 22 }}>{stat.value}</span>
               <span className="text-gray-500" style={{ fontSize: 11 }}>{stat.label}</span>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -479,7 +647,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         </div>
 
         {/* Booking list */}
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1 pb-10">
           {filteredBookings.length === 0 ? (
             <div className="text-center py-8 text-gray-500" style={{ fontSize: 14 }}>
               No {activeTab} bookings yet
@@ -558,7 +726,20 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
       {/* Contact Info */}
       <div className="px-5 mb-5">
-        <h3 className="text-white mb-3" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditingAccount(false);
+              setActiveModal("settings");
+            }}
+            className="px-3 py-1.5 rounded-xl text-[#FF8C00] font-black"
+            style={{ fontSize: 12, background: "rgba(255,140,0,0.1)", border: "1px solid rgba(255,140,0,0.22)" }}
+          >
+            Edit
+          </button>
+        </div>
         <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-white/5 space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center flex-shrink-0">
@@ -583,16 +764,31 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
       {/* Account Menu */}
       <div className="px-5 mb-5">
-        <h3 className="text-white mb-3" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditingAccount(false);
+              setActiveModal("settings");
+            }}
+            className="px-3 py-1.5 rounded-xl text-gray-300 font-black"
+            style={{ fontSize: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            Account Info
+          </button>
+        </div>
         <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
           {[
             { icon: Bell, label: "Notifications", color: "#0047AB", key: "notifications" },
-            { icon: MapPin, label: "Saved Locations", color: "#22c55e", key: "locations" },
             { icon: HelpCircle, label: "Help & Support", color: "#a855f7", key: "help" },
             { icon: Shield, label: "Privacy Policy", color: "#06b6d4", key: "privacy" },
-          ].map((item) => (
-            <button
+          ].map((item, index) => (
+            <motion.button
               key={item.label}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.04 }}
               onClick={() => setActiveModal(item.key)}
               className="w-full flex items-center gap-3 px-4 py-4 hover:bg-white/3 transition-all active:bg-white/5"
             >
@@ -606,7 +802,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                 {item.label}
               </span>
               <ChevronRight size={15} className="text-gray-600" />
-            </button>
+            </motion.button>
           ))}
         </div>
       </div>
@@ -672,23 +868,76 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
       {/* Settings Modal */}
       <AnimatePresence>
         {activeModal === "settings" && (
-          <SettingsModal title="Account Settings" onClose={() => setActiveModal(null)}>
-            <div className="space-y-3">
-              <div>
-                <label className="text-gray-500 block mb-1" style={{ fontSize: 12, fontWeight: 700 }}>Display Name</label>
-                <div className="bg-[#252525] rounded-xl px-4 py-3 border border-white/10">
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>{user.name}</p>
+          <SettingsModal title="Account Info" onClose={() => { setIsEditingAccount(false); setActiveModal(null); }}>
+            <div className="space-y-4">
+              <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: `${roleColor}10`, border: `1px solid ${roleColor}25` }}>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: `${roleColor}18` }}>
+                  {coachProfile ? <Trophy size={18} style={{ color: roleColor }} /> : <User size={18} style={{ color: roleColor }} />}
+                </div>
+                <div>
+                  <p className="text-white font-black" style={{ fontSize: 14 }}>{roleLabel === "COACH" ? "Coach account" : "User account"}</p>
+                  <p className="text-gray-500" style={{ fontSize: 12 }}>{coachProfile ? `${coachProfile.sport} coach profile active` : "Standard JRC member access"}</p>
                 </div>
               </div>
               <div>
-                <label className="text-gray-500 block mb-1" style={{ fontSize: 12, fontWeight: 700 }}>Email</label>
-                <div className="bg-[#252525] rounded-xl px-4 py-3 border border-white/10">
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>{user.email}</p>
-                </div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Display Name</label>
+                <input
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
+                  disabled={!isEditingAccount}
+                  className="w-full bg-[#252525] rounded-xl px-4 py-3 border border-white/10 text-white font-black outline-none focus:border-[#FF8C00]/50 disabled:opacity-80"
+                  style={{ fontSize: 14 }}
+                />
               </div>
-              <p className="text-gray-500 text-center pt-2" style={{ fontSize: 12 }}>
-                Contact support to update your profile details.
-              </p>
+              <div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Phone</label>
+                <input
+                  value={accountPhone}
+                  onChange={(event) => setAccountPhone(event.target.value)}
+                  disabled={!isEditingAccount}
+                  className="w-full bg-[#252525] rounded-xl px-4 py-3 border border-white/10 text-white font-black outline-none focus:border-[#FF8C00]/50 disabled:opacity-80"
+                  style={{ fontSize: 14 }}
+                  placeholder="09XX XXX XXXX"
+                />
+              </div>
+              <div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Email</label>
+                <div className="bg-[#202020] rounded-xl px-4 py-3 border border-white/8">
+                  <p className="text-gray-300 font-black" style={{ fontSize: 14 }}>{user.email}</p>
+                </div>
+                <p className="text-gray-500 mt-1.5" style={{ fontSize: 11 }}>Email cannot be changed here. Please contact front desk support for email updates.</p>
+              </div>
+              {isEditingAccount ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setAccountName(user.name || "");
+                      setAccountPhone(user.phone || "");
+                      setIsEditingAccount(false);
+                    }}
+                    className="py-3.5 rounded-2xl text-gray-300 font-black"
+                    style={{ background: "rgba(255,255,255,0.07)", fontSize: 14 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveAccount}
+                    disabled={isSavingAccount}
+                    className="py-3.5 rounded-2xl text-white font-black disabled:opacity-60"
+                    style={{ background: "linear-gradient(135deg,#FF8C00,#EA580C)", fontSize: 14 }}
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsEditingAccount(true)}
+                  className="w-full py-3.5 rounded-2xl text-white font-black"
+                  style={{ background: "linear-gradient(135deg,#FF8C00,#EA580C)", fontSize: 14 }}
+                >
+                  Edit Account Info
+                </button>
+              )}
             </div>
           </SettingsModal>
         )}
@@ -748,22 +997,48 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             </div>
           </SettingsModal>
         )}
-        {activeModal === "locations" && (
-          <SettingsModal title="Saved Locations" onClose={() => setActiveModal(null)}>
-            <div className="space-y-3">
-              <div className="bg-[#252525] rounded-xl p-4 border border-[#FF8C00]/20 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center">
-                  <MapPin size={16} className="text-[#FF8C00]" />
-                </div>
-                <div>
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>JRC Ballpark Complex</p>
-                  <p className="text-gray-500" style={{ fontSize: 12 }}>106 McArthur Hwy, Valenzuela City</p>
-                </div>
-                <CheckCircle size={16} className="text-green-400 ml-auto" />
+      </AnimatePresence>
+
+      {/* Profile Photo Cropper */}
+      <AnimatePresence>
+        {profilePhotoSource && (
+          <PhotoCropperModal
+            source={profilePhotoSource}
+            title="Profile Picture"
+            accentColor="#FF8C00"
+            saveLabel="Save Profile Picture"
+            onClose={() => {
+              setProfilePhotoSource("");
+              if (photoInputRef.current) photoInputRef.current.value = "";
+            }}
+            onSave={async (dataUrl) => {
+              await handleSaveProfilePhoto(dataUrl);
+              if (photoInputRef.current) photoInputRef.current.value = "";
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {(isSavingPhoto || isSavingAccount) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1001] bg-black/80 backdrop-blur-sm flex items-center justify-center"
+          >
+            <div className="rounded-3xl px-8 py-7 border border-white/10 bg-[#181819] shadow-2xl">
+              <div className="flex items-center gap-3">
+                <motion.div
+                  className="w-6 h-6 rounded-full border-2"
+                  style={{ borderColor: "rgba(255,140,0,0.25)", borderTopColor: "#FF8C00" }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                />
+                <p className="text-white font-black" style={{ fontSize: 14 }}>{isSavingAccount ? "Saving account info..." : "Saving profile picture..."}</p>
               </div>
-              <p className="text-gray-500 text-center" style={{ fontSize: 12 }}>Your default facility is set.</p>
             </div>
-          </SettingsModal>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -805,16 +1080,16 @@ function SettingsModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[55] flex items-end"
+      className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[55] flex items-end sm:items-center justify-center sm:p-4"
       onClick={onClose}
     >
       <motion.div
-        initial={{ y: 300 }}
-        animate={{ y: 0 }}
-        exit={{ y: 300 }}
+        initial={{ y: 300, opacity: 0.8, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 300, opacity: 0.8, scale: 0.98 }}
         transition={{ type: 'spring', stiffness: 320, damping: 32 }}
         onClick={e => e.stopPropagation()}
-        className="w-full rounded-t-3xl p-6 border-t border-white/10"
+        className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 border-t sm:border border-white/10"
         style={{ background: '#1A1A1A', maxHeight: '90vh', overflowY: 'auto' }}
       >
         <div className="flex items-center justify-between mb-4">

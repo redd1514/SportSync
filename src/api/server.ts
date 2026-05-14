@@ -15,6 +15,7 @@ import appDataRouter from './routes/appData.ts';
 import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
 import { coachApplicationService } from './services/coachApplicationService.ts';
 import announcementsRouter from './routes/announcements.ts';
+import notificationsRouter from './routes/notifications.ts';
 import authRouter from './routes/auth.ts';
 import { attachOrRequireAuth, requireAppRoles } from './middleware/authGate.ts';
 
@@ -136,6 +137,9 @@ app.post('/api/coach-applications', async (c) => {
       availability: Array.isArray(body.availability) ? body.availability : [],
       requestedRate: Number(body.requestedRate ?? body.requested_rate) || 0,
       certifications: String(body.certifications || ''),
+      photoUrl: body.photoUrl || body.photo_url || null,
+      applicationType: body.applicationType || body.application_type || 'new',
+      requestDetails: body.requestDetails || body.request_details || '',
     });
     return c.json(created, 201);
   } catch (error: any) {
@@ -159,6 +163,7 @@ staffMount.route('/', staffRouter);
 app.route('/api/staff', staffMount);
 
 app.route('/api/announcements', announcementsRouter);
+app.route('/api/notifications', notificationsRouter);
 app.route('/api/facilities', facilitiesRouter);
 
 // 404 handler

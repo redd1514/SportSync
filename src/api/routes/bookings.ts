@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { bookingService } from '../services/bookingService.ts';
+import { bookingService, resolveUserRowId } from '../services/bookingService.ts';
 import { BookingRequest } from '../types';
 import { supabase } from '../services/supabaseClient.ts';
 import {
@@ -143,10 +143,12 @@ bookingsRouter.post('/:id/request-cancellation', async (c) => {
     if (!userId) return c.json({ error: 'user_id required' }, 400);
     if (!reason) return c.json({ error: 'reason required' }, 400);
 
+    const resolvedUserId = await resolveUserRowId(userId);
+
     const { data: b, error: bErr } = await supabase.from('bookings').select('id,status,user_id').eq('id', id).maybeSingle();
     if (bErr) throw bErr;
     if (!b) return c.json({ error: 'Booking not found' }, 404);
-    if (String(b.user_id) !== userId) return c.json({ error: 'Forbidden' }, 403);
+    if (String(b.user_id) !== resolvedUserId) return c.json({ error: 'Forbidden' }, 403);
     if (b.status === 'cancelled' || b.status === 'completed') return c.json({ error: 'Booking already finished' }, 400);
 
     const { data: existing } = await supabase
@@ -184,6 +186,8 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
     if (!userId) return c.json({ error: 'user_id required' }, 400);
     if (!newDate || !newStart) return c.json({ error: 'requested_new_date and requested_new_start_time required' }, 400);
 
+    const resolvedUserId = await resolveUserRowId(userId);
+
     const { data: b, error: bErr } = await supabase
       .from('bookings')
       .select('id,status,user_id,start_time,end_time')
@@ -191,7 +195,7 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
       .maybeSingle();
     if (bErr) throw bErr;
     if (!b) return c.json({ error: 'Booking not found' }, 404);
-    if (String(b.user_id) !== userId) return c.json({ error: 'Forbidden' }, 403);
+    if (String(b.user_id) !== resolvedUserId) return c.json({ error: 'Forbidden' }, 403);
     if (b.status === 'cancelled' || b.status === 'completed') return c.json({ error: 'Booking already finished' }, 400);
 
     const { data: existing } = await supabase
@@ -285,9 +289,22 @@ bookingsRouter.delete('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await bookingService.cancelBooking(id);
-    return c.json({ success: true });
+
+    // Fetch and return the updated booking
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return c.json({ success: true, message: 'Booking cancelled' });
+    }
+
+    return c.json({ success: true, booking: data });
   } catch (error: any) {
-    return c.json({ error: error.message }, 400);
+    console.error('[bookings/delete]', error.message);
+    return c.json({ error: error.message || 'Failed to cancel booking' }, 400);
   }
 });
 

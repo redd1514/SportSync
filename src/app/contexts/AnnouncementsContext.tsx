@@ -33,6 +33,9 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Added from image_8390be.jpg (Current side)
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -49,36 +52,65 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         createdAt: String(r.published_at || r.created_at || new Date().toISOString()),
         dismissed: false,
       }));
+      
+      let userNotifications: Announcement[] = [];
+      if (user?.id) {
+        const notifRes = await apiFetch(`/api/notifications/${encodeURIComponent(user.id)}`);
+        const notifData = await notifRes.json().catch(() => []);
+        if (notifRes.ok && Array.isArray(notifData)) {
+          userNotifications = notifData.map((r: any) => {
+            const data = r.data && typeof r.data === 'object' ? r.data : {};
+            return {
+              id: `notif:${String(r.id)}`,
+              title: String(data.title || 'Notification'),
+              message: String(data.message || ''),
+              type: (String(data.type || 'update') as Announcement['type']),
+              createdAt: String(r.created_at || new Date().toISOString()),
+              dismissed: Boolean(r.read_at),
+            };
+          });
+        }
+      }
+      
       setAnnouncements((prev) => {
         const dismissed = new Set(prev.filter((p) => p.dismissed).map((p) => p.id));
-        return mapped.map((m) => ({ ...m, dismissed: dismissed.has(m.id) }));
+        return [...userNotifications, ...mapped]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map((m) => ({ ...m, dismissed: m.dismissed || dismissed.has(m.id) }));
       });
     } catch (e: any) {
       setError(e?.message || 'Could not load announcements');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user?.id]); // Updated dependency to include user.id for notifications
 
   useEffect(() => {
     void refresh();
-    // refresh on login change
   }, [user?.id, refresh]);
 
+  // MERGED EFFECT BLOCK FROM image_8390be.jpg
   useEffect(() => {
-    // keep notifications fresh (without requiring reload)
+    // 1. Existing Polling and Visibility Logic
     const t = window.setInterval(() => void refresh(), 20000);
     const onVis = () => {
       if (document.visibilityState === 'visible') void refresh();
     };
+    
+    // 2. Custom Event Listener (Incoming side of image_8390be.jpg)
+    const onNotificationsRefresh = () => void refresh();
+    
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('sportsync:notifications-refresh', onNotificationsRefresh);
+
     return () => {
       window.clearInterval(t);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('sportsync:notifications-refresh', onNotificationsRefresh);
     };
   }, [refresh]);
 
-  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 3. New Real-time Subscription Effect (Current side of image_8390be.jpg)
   useEffect(() => {
     const channelKey = 'announcements-live-all';
     const scheduleRefresh = () => {
@@ -88,6 +120,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         void refresh();
       }, 350);
     };
+
     const subscriberId = realtimeManager.subscribe(
       channelKey,
       { table: 'announcements', event: '*', schema: 'public' },
@@ -95,6 +128,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         scheduleRefresh();
       }
     );
+
     return () => {
       realtimeManager.unsubscribe(channelKey, subscriberId);
       if (refreshDebounceRef.current) window.clearTimeout(refreshDebounceRef.current);
@@ -128,7 +162,6 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         dismissed: false,
       };
     } catch (e: any) {
-      // Demo-friendly fallback: still show locally if backend can't accept the post.
       const local: Announcement = { ...a, id: `ANN${Date.now()}`, createdAt: new Date().toISOString(), dismissed: false };
       setAnnouncements((prev) => [local, ...prev]);
       setError(e?.message || 'Saved locally (demo mode)');
@@ -137,14 +170,19 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   };
 
   const dismissAnnouncement = (id: string) => {
+    if (id.startsWith('notif:')) {
+      void apiFetch(`/api/notifications/${encodeURIComponent(id.slice(6))}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read_at: new Date().toISOString() }),
+      });
+    }
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
   };
 
   const clearAnnouncements = async () => {
     try {
-      // Mock clearing via backend if needed, or just clear locally.
-      const res = await apiFetch(`/api/announcements`, { method: 'DELETE' });
-      // ignore errors for now, just clear locally
+      await apiFetch(`/api/announcements`, { method: 'DELETE' });
     } catch (e) {}
     setAnnouncements([]);
   };
@@ -157,7 +195,6 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     </AnnouncementsContext.Provider>
   );
 }
-
 export function useAnnouncements() {
   const ctx = useContext(AnnouncementsContext);
   if (!ctx) throw new Error('useAnnouncements must be inside AnnouncementsProvider');

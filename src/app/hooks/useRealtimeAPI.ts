@@ -24,28 +24,56 @@ export interface UseRealtimeAPIOptions {
 /**
  * Enhanced booking API with realtime sync
  */
+
+const COURT_UUID_MAP: Record<string, {name: string, sport: string}> = {
+  '71ef892a-d708-4afa-a945-3668f1bba623': { name: 'Badminton 1', sport: 'Badminton' },
+  '717b1e0f-a58c-48aa-90f4-1552681c3e3c': { name: 'Table Tennis 2', sport: 'Table Tennis' },
+  '2334d4b2-6495-4a0a-ba6f-c0778125cda2': { name: 'Billiards 2', sport: 'Billiards' },
+  '1782a805-1605-4f12-881a-4d7c6f406f7a': { name: 'Table Tennis 3', sport: 'Table Tennis' },
+  'f235e0c6-1bf8-416c-b880-85835ef6b2ae': { name: 'Billiards 4', sport: 'Billiards' },
+  'a0acebdd-a6de-46d6-8ae1-0e62b91ca679': { name: 'Badminton 2', sport: 'Badminton' },
+  'df145909-f3f1-4b3b-9276-fb131a5e79ed': { name: 'Badminton 3', sport: 'Badminton' },
+  '9974c2bc-439d-4f05-86de-acdaeb30097f': { name: 'Billiards 3', sport: 'Billiards' },
+  '77c813e9-f952-4364-8b67-8466b87b10aa': { name: 'Basketball 1', sport: 'Basketball' },
+  '04eeb810-d218-4a63-9b63-47a7e83ca302': { name: 'Volleyball 1', sport: 'Volleyball' },
+  'f7939718-a28e-4e48-b0fb-163d45cc5375': { name: 'Pickleball 2', sport: 'Pickleball' },
+  '8d13ba51-7f45-426f-bf05-ab874989efd3': { name: 'Pickleball 1', sport: 'Pickleball' },
+  'cfa2ac3d-8c34-490a-b18b-e7c21da56dbf': { name: 'Table Tennis 1', sport: 'Table Tennis' },
+  '6eef54d4-1eb8-45f4-b3bd-ab4c2e588aa6': { name: 'Table Tennis 4', sport: 'Table Tennis' },
+  '72f6a182-0c5c-4745-9125-c8f44eebb484': { name: 'Pickleball 3', sport: 'Pickleball' },
+  'bb302e36-d5a4-43c0-93ff-af36a645591a': { name: 'Billiards 1', sport: 'Billiards' },
+};
+
 export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOptions) => {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [apiBookings, setApiBookings] = useState<any[]>([]);
   const cacheRef = useRef<any[]>([]);
 
-  const normalizeBooking = useCallback((b: any) => ({
-    id: b.id,
-    date: b.date || b.booking_date || '',
-    time: b.time || b.start_time || '',
-    duration: b.duration || b.duration_hours || 1,
-    court: b.court || b.court_id || '',
-    sport: b.sport || 'Court Booking',
-    status: b.status || 'pending',
-    amount: b.amount || b.total_price || 0,
-    paymentStatus: b.paymentStatus || b.payment_status || 'pending',
-    customerName: b.customerName || b.customer_name || 'Customer',
-    customerPhone: b.customerPhone || b.customer_phone || '',
-    cancellationRequested: b.cancellationRequested || b.cancellation_requested || false,
-    cancellationReason: b.cancellationReason || b.cancellation_reason || '',
-    createdAt: b.createdAt || b.created_at || new Date().toISOString(),
-  }), []);
+  const normalizeBooking = useCallback((b: any) => {
+    const courtIdStr = b.court || b.court_id || '';
+    const courtInfo = COURT_UUID_MAP[courtIdStr] || { name: courtIdStr, sport: 'Court Booking' };
+
+    return {
+      id: b.id,
+      date: b.date || b.booking_date || '',
+      time: b.time || b.start_time || '',
+      duration: b.duration || b.duration_hours || 1,
+      court: courtInfo.name,
+      courtId: courtIdStr,
+      sport: b.sport || courtInfo.sport,
+      status: b.status || 'pending',
+      amount: b.amount || b.total_price || 0,
+      paymentStatus: b.paymentStatus || b.payment_status || 'pending',
+      customerName: b.customerName || b.customer_name || 'Customer',
+      customerPhone: b.customerPhone || b.customer_phone || '',
+      cancellationRequested: b.cancellationRequested || b.cancellation_requested || false,
+      cancellationReason: b.cancellationReason || b.cancellation_reason || '',
+      createdAt: b.createdAt || b.created_at || new Date().toISOString(),
+      refCode: b.refCode || b.qr_code_token || b.id || '',
+      userId: b.user_id || b.userId || '',
+    };
+  }, []);
 
   const { data: realtimeBookings, isConnected, ...realtimeState } = useRealtimeBookingData(
     userId,
@@ -181,23 +209,31 @@ export const useRealtimeCoachingAPI = (
   const [apiSessions, setApiSessions] = useState<any[]>([]);
   const cacheRef = useRef<any[]>([]);
 
-  const normalizeSession = useCallback((s: any) => ({
-    id: s.id,
-    userId: s.userId || s.user_id || '',
-    userName: s.userName || 'User',
-    coachId: s.coachId || s.coach_id || '',
-    coachName: s.coachName || 'Coach',
-    sport: s.sport || 'Sports',
-    requestedDate: s.requestedDate || s.session_date || '',
-    requestedTime: s.requestedTime || s.start_time || '',
-    message: s.message || s.notes || '',
-    durationHours: s.durationHours || s.duration_hours || 1,
-    status: s.status || 'pending',
-    paymentProofUrl: s.paymentProofUrl || s.payment_proof_url,
-    linkedBookingId: s.linkedBookingId || s.linked_booking_id,
-    viewerIsStudent: s.viewerIsStudent,
-    viewerIsCoachForThisSession: s.viewerIsCoachForThisSession,
-  }), []);
+  const normalizeSession = useCallback((s: any) => {
+    // Map DB status to UI status
+    const dbStatus = s.status || 'pending';
+    let uiStatus: 'pending' | 'confirmed' | 'rejected' = 'pending';
+    if (dbStatus === 'approved' || dbStatus === 'scheduled' || dbStatus === 'completed') uiStatus = 'confirmed';
+    else if (dbStatus === 'rejected' || dbStatus === 'cancelled') uiStatus = 'rejected';
+
+    return {
+      id: s.id,
+      userId: s.userId || s.user_id || '',
+      userName: s.userName || 'User',
+      coachId: s.coachId || s.coach_id || '',
+      coachName: s.coachName || 'Coach',
+      sport: s.sport || 'Sports',
+      requestedDate: s.requestedDate || s.session_date || '',
+      requestedTime: s.requestedTime || s.start_time || '',
+      endTime: s.endTime || s.end_time,
+      message: s.message || s.notes || '',
+      adminNotes: s.adminNotes || s.admin_notes,
+      durationHours: s.durationHours ?? (typeof s.duration_hours === 'number' ? s.duration_hours : undefined),
+      status: uiStatus,
+      viewerIsStudent: s.viewerIsStudent,
+      viewerIsCoachForThisSession: s.viewerIsCoachForThisSession,
+    };
+  }, []);
 
   const { data: realtimeSessions, isConnected, ...realtimeState } =
     useRealtimeCoachingSessionData(userId, role, {

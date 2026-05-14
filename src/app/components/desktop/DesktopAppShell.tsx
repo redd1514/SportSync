@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Home, CalendarDays, Users, User, Bell, LogOut, Trophy, Clock, MapPin, Star, Zap,
@@ -22,6 +22,9 @@ import { FacilityMapViewer } from "../shared/FacilityMapViewer";
 import { FloatingAIChat } from "../FloatingAIChat";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
+import { useAnnouncements } from "../../contexts/AnnouncementsContext";
+import { useCoaching } from "../../contexts/CoachingContext";
+import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -108,9 +111,34 @@ function SidebarTooltip({ label, children, danger }: { label: string; children: 
 /* ─── Home view ─── */
 function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
   const { user, bookings } = useUser();
-  const upcomingBookings = bookings.filter(b => ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status));
-  const recentBookings = bookings.slice(0, 4);
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
+
+  const localPendingRequests = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_localPendingRequests') || '[]');
+    } catch {
+      return [];
+    }
+  })();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const parseBookingDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const upcomingBookings = bookings.filter(b => {
+    const isPastDate = parseBookingDate(b.date) < today;
+    const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
+    if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+    if (isPendingReq) return false;
+    return true;
+  });
+
+  const recentBookings = bookings.slice(0, 4);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -249,17 +277,37 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
 
 /* ─── Main shell ─── */
 interface DesktopAppShellProps { onLogout: () => void; }
-
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
-  const { user, logout, isAdmin, isStaff } = useUser();
-  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
+
+  // From Incoming: Announcement and Booking logic
+  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
+  const [bookingPrefill, setBookingPrefill] = useState<{
+    sport: string;
+    date: string;
+    time: string;
+    coachingSessionId?: string;
+    coachingStudentName?: string;
+    coachingStudentId?: string;
+    coachName?: string;
+    coachHourlyRate?: number;
+    durationHours?: number;
+  } | undefined>(undefined);
+
+  // From Incoming: Profile Photo logic
+  const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
+
+  useEffect(() => {
+    setProfilePhoto(loadProfilePhoto(user?.id));
+    return onProfilePhotoUpdated((dataUrl, updatedUserId) => {
+      if (!updatedUserId || updatedUserId === user?.id) setProfilePhoto(dataUrl);
+    });
+  }, [user?.id]);
 
   const handleLogout = async () => {
     await logout();
@@ -304,15 +352,22 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
               className="h-full"
             >
               {sub === "mybookings" && (
-                <div className="h-full overflow-y-auto p-6 custom-scrollbar">
-                  <div className="max-w-2xl mx-auto bg-[#111] rounded-2xl overflow-hidden border border-white/5 shadow-xl" style={{ minHeight: 560 }}>
-                    <UserMyBookings />
-                  </div>
+                <div className="h-full overflow-y-auto custom-scrollbar">
+                  <UserMyBookings />
                 </div>
               )}
               {sub === "map" && (
                 <div className="h-full overflow-hidden">
-                  <FacilityMapViewer mode="customer" compact prefill={bookingPrefill} />
+                  <FacilityMapViewer
+                    mode="customer"
+                    compact
+                    prefill={bookingPrefill}
+                    onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                      setBookingPrefill(undefined);
+                      setActiveTab("coaching");
+                      setActiveSub(prev => ({ ...prev, coaching: "mycoaching" }));
+                    } : undefined}
+                  />
                 </div>
               )}
             </motion.div>
@@ -343,7 +398,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
       case "account":
         return (
           <div className="h-full overflow-y-auto p-6 custom-scrollbar">
-            <div className="max-w-2xl mx-auto bg-[#111] rounded-2xl overflow-hidden border border-white/5 shadow-xl" style={{ minHeight: 560 }}>
+            <div className="max-w-4xl mx-auto bg-[#111] rounded-3xl overflow-hidden border border-white/8 shadow-2xl" style={{ minHeight: 620 }}>
               <MobileProfileScreen onLogout={handleLogout} />
             </div>
           </div>
@@ -359,7 +414,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const pageColor = activeNavItem?.color || "#FF8C00";
 
   /* ─── Sidebar nav item ─── */
-  const SidebarItem = ({ item }: { item: NavItem }) => {
+  const renderSidebarItem = (item: NavItem) => {
     const isActive = activeTab === item.id;
     const currentSubId = activeSub[item.id];
     const hasChildren = !!item.children?.length;
@@ -520,7 +575,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
           {!sidebarCollapsed && (
             <p className="text-gray-700 mb-2 pl-2 font-black" style={{ fontSize: 9, letterSpacing: 1.5 }}>NAVIGATION</p>
           )}
-          {NAV.map(item => <SidebarItem key={item.id} item={item} />)}
+          {NAV.map(item => <div key={item.id}>{renderSidebarItem(item)}</div>)}
         </nav>
 
         <div className="w-full h-px bg-white/[0.04] flex-shrink-0" />
@@ -539,8 +594,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
           ) : (
             <div className="rounded-2xl p-3 border border-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
               <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg,#FF8C00,#e67e00)" }}>
-                  <span className="text-white font-black" style={{ fontSize: 14 }}>{user?.name?.charAt(0).toUpperCase() || "?"}</span>
+                <div className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0">
+                  <PhotoAvatar src={profilePhoto} name={user?.name} size={36} rounded={12} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-black truncate" style={{ fontSize: 12 }}>{user?.name}</p>
@@ -604,6 +659,14 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
             </div>
           )}
 
+          {/* Coach badge */}
+          {myCoachProfile && (
+            <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 border" style={{ background: "rgba(168,85,247,0.06)", borderColor: "rgba(168,85,247,0.15)" }}>
+              <Award size={12} className="text-purple-400" />
+              <span className="text-purple-400 font-black" style={{ fontSize: 12 }}>Coach</span>
+            </div>
+          )}
+
           {/* Notification bell */}
           <div className="relative">
             <button onClick={() => setShowNotifs(s => !s)}
@@ -623,8 +686,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: -8 }}
                   transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  className="absolute right-0 top-full mt-2 w-80 z-50 rounded-2xl overflow-hidden shadow-2xl"
-                  style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)" }}
+                  className="absolute right-0 top-full mt-2 w-80 z-[100] rounded-2xl overflow-hidden shadow-2xl"
+                  style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)", position: 'fixed', top: '60px', right: '16px' }}
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between">
@@ -671,6 +734,25 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                       );
                     })
                   )}
+                  <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {announcements.length === 0 ? (
+                      <div className="py-8 text-center text-gray-500" style={{ fontSize: 13 }}>No notifications</div>
+                    ) : announcements.map(n => (
+                      <button key={n.id} onClick={() => { dismissAnnouncement(n.id); setShowNotifs(false); }}
+                        className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
+                      >
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `rgba(255,140,0,0.15)` }}>
+                          <Bell size={14} style={{ color: '#FF8C00' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
+                          <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{n.message}</p>
+                          <p className="text-gray-700" style={{ fontSize: 10 }}>{new Date(n.createdAt).toLocaleDateString()}</p>
+                        </div>
+                        {!n.dismissed && <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: '#FF8C00' }} />}
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

@@ -5,6 +5,7 @@ import {
   ChevronRight, CalendarDays, Maximize2, Users, Zap, Shield, Clock, MapPin, Star,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useRealtimeBookingAPI } from "../../hooks/useRealtimeAPI";
 import { SPORTS_INFO } from "../sportsData";
 import { getSportColor, SportIcon } from "../SportIcons";
 import {
@@ -21,12 +22,34 @@ function greetingText() {
 }
 
 export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
-  const { user, bookings } = useUser();
+  const { user } = useUser();
+  const { bookings } = useRealtimeBookingAPI(user?.id || '', { autoFetch: true });
   const [hoveredSport, setHoveredSport] = useState<string | null>(null);
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const firstName = user?.name?.split(" ")[0] || "Athlete";
-  const upcoming = bookings.filter(b => ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status)).slice(0, 3);
+  
+  const localPendingRequests = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_localPendingRequests') || '[]');
+    } catch {
+      return [];
+    }
+  })();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const parseBookingDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+  const upcoming = bookings.filter(b => {
+    const isPastDate = parseBookingDate(b.date) < today;
+    const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
+    if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+    if (isPendingReq) return false;
+    return true;
+  }).slice(0, 3);
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar" style={{ background: BG, fontFamily: "'Outfit','Inter',sans-serif", color: TP }}>
