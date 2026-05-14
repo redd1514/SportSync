@@ -73,7 +73,10 @@ export function CoachApplicationForm() {
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
   const myCoach = user?.email
-    ? coaches.find((coach) => coach.email?.toLowerCase() === user.email.toLowerCase())
+    ? coaches.find((coach) =>
+        user.email.toLowerCase() !== "user@jrc.com" &&
+        coach.email?.toLowerCase() === user.email.toLowerCase()
+      )
     : undefined;
   const myApplications = applications.filter((app) => {
     const sameEmail = user?.email && app.userEmail?.toLowerCase() === user.email.toLowerCase();
@@ -81,7 +84,7 @@ export function CoachApplicationForm() {
     return sameEmail || sameId;
   });
   const activeNewApplication = myApplications.find((app) =>
-    (app.applicationType || "new") === "new" && (app.status === "pending" || app.status === "approved")
+    (app.applicationType || "new") === "new" && app.status === "pending"
   );
   const pendingCoachRequest = myApplications.find((app) =>
     app.applicationType !== "new" && app.status === "pending"

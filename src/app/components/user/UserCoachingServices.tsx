@@ -237,7 +237,7 @@ const DUMMY_RATINGS: Record<string, { rating: number; reviews: number; specialti
 
 /* ─── Main Component ──────────────────────────────────────────────── */
 export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) => void }) {
-  const { coaches, addRequest, setActiveRequestId, findCoachByEmail, updateRequestStatus, isLoading: coachesLoading } = useCoaching();
+  const { coaches, requests, addRequest, setActiveRequestId, findCoachByEmail, isLoading: coachesLoading } = useCoaching();
   const { user } = useUser();
   
   /* A user is a coach if they have a coach profile in the database */
@@ -283,8 +283,15 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
     });
   }, [coaches, selectedSport, showAvailableOnly, searchQuery, myCoachProfile]);
 
+  const pendingRequest = useMemo(() => {
+    if (!user?.id) return null;
+    return requests.find((r) => r.userId === user.id && r.status === "pending") || null;
+  }, [requests, user?.id]);
+
+  const hasPendingRequest = !!pendingRequest;
+
   const handleRequestSubmit = async () => {
-    if (!selectedCoach || !selectedDateObj || !time) return;
+    if (!selectedCoach || !selectedDateObj || !time || hasPendingRequest) return;
     try {
       setIsRequesting(true);
       const dateStr = format(selectedDateObj, "yyyy-MM-dd");
@@ -301,6 +308,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
       });
       setActiveRequestId(requestId);
       setShowSuccess(true);
+      window.dispatchEvent(new Event("sportsync:notifications-refresh"));
       
       setTimeout(() => {
         setShowSuccess(false);
@@ -697,19 +705,21 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     setMessage("");
                     setIsRequesting(true);
                   }}
-                  disabled={!selectedCoach.isAvailable || (myCoachProfile?.id === selectedCoach.id)}
+                  disabled={!selectedCoach.isAvailable || (myCoachProfile?.id === selectedCoach.id) || hasPendingRequest}
                   className="w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 transition-all"
                   style={{
                     fontSize: 15,
-                    background: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? `linear-gradient(135deg,${getSportColor(selectedCoach.sport)},${getSportColor(selectedCoach.sport)}cc)` : 'rgba(255,255,255,0.06)',
-                    color: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? 'white' : '#444',
-                    cursor: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? 'pointer' : 'not-allowed',
-                    boxShadow: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? `0 6px 24px ${getSportColor(selectedCoach.sport)}35` : 'none',
+                    background: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id && !hasPendingRequest) ? `linear-gradient(135deg,${getSportColor(selectedCoach.sport)},${getSportColor(selectedCoach.sport)}cc)` : 'rgba(255,255,255,0.06)',
+                    color: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id && !hasPendingRequest) ? 'white' : '#444',
+                    cursor: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id && !hasPendingRequest) ? 'pointer' : 'not-allowed',
+                    boxShadow: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id && !hasPendingRequest) ? `0 6px 24px ${getSportColor(selectedCoach.sport)}35` : 'none',
                   }}
                 >
                   <Zap size={16} />
                   {myCoachProfile?.id === selectedCoach.id 
                     ? 'This is your profile' 
+                    : hasPendingRequest
+                      ? 'Pending request in progress'
                     : selectedCoach.isAvailable 
                       ? 'Request a Session' 
                       : 'Currently Unavailable'}
@@ -872,8 +882,8 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                       <div className="space-y-1.5" style={{ color: "#9CA0AD", fontSize: 12, lineHeight: 1.5 }}>
                         <p>1. Send this session request to the coach.</p>
                         <p>2. The coach accepts or declines based on availability.</p>
-                        <p>3. If accepted, pay manually at the front desk or via the official JRC GCash QR on site.</p>
-                        <p>4. Staff verifies payment, then your coaching ticket is used for check-in.</p>
+                        <p>3. If accepted, your coach reserves and pays for the court.</p>
+                        <p>4. You pay only the coaching fee manually, then use the coaching ticket at check-in.</p>
                       </div>
                     </div>
                   </div>
@@ -883,20 +893,20 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     <button
                       type="button"
                       onClick={handleRequestSubmit}
-                      disabled={!selectedDateObj || !time}
+                      disabled={!selectedDateObj || !time || hasPendingRequest}
                       className="w-full py-3.5 rounded-2xl font-black transition-all flex items-center justify-center gap-2"
                       style={{
                         fontSize: 15,
-                        background: !selectedDateObj || !time
+                        background: !selectedDateObj || !time || hasPendingRequest
                           ? 'rgba(255,255,255,0.06)'
                           : `linear-gradient(135deg,${getSportColor(selectedCoach.sport)},${getSportColor(selectedCoach.sport)}cc)`,
-                        color: !selectedDateObj || !time ? '#444' : 'white',
-                        cursor: !selectedDateObj || !time ? 'not-allowed' : 'pointer',
-                        boxShadow: selectedDateObj && time ? `0 6px 24px ${getSportColor(selectedCoach.sport)}30` : 'none',
+                        color: !selectedDateObj || !time || hasPendingRequest ? '#444' : 'white',
+                        cursor: !selectedDateObj || !time || hasPendingRequest ? 'not-allowed' : 'pointer',
+                        boxShadow: selectedDateObj && time && !hasPendingRequest ? `0 6px 24px ${getSportColor(selectedCoach.sport)}30` : 'none',
                       }}
                     >
                       <Zap size={16} />
-                      Send Coaching Request
+                      {hasPendingRequest ? 'You already have a pending request' : 'Send Coaching Request'}
                     </button>
                     <p className="text-center text-gray-500 mt-2" style={{ fontSize: 11 }}>
                       Payment is manual and only happens after the coach accepts.

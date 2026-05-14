@@ -48,9 +48,29 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         createdAt: String(r.published_at || r.created_at || new Date().toISOString()),
         dismissed: false,
       }));
+      let userNotifications: Announcement[] = [];
+      if (user?.id) {
+        const notifRes = await apiFetch(`/api/notifications/${encodeURIComponent(user.id)}`);
+        const notifData = await notifRes.json().catch(() => []);
+        if (notifRes.ok && Array.isArray(notifData)) {
+          userNotifications = notifData.map((r: any) => {
+            const data = r.data && typeof r.data === 'object' ? r.data : {};
+            return {
+              id: `notif:${String(r.id)}`,
+              title: String(data.title || 'Notification'),
+              message: String(data.message || ''),
+              type: (String(data.type || 'update') as Announcement['type']),
+              createdAt: String(r.created_at || new Date().toISOString()),
+              dismissed: Boolean(r.read_at),
+            };
+          });
+        }
+      }
       setAnnouncements((prev) => {
         const dismissed = new Set(prev.filter((p) => p.dismissed).map((p) => p.id));
-        return mapped.map((m) => ({ ...m, dismissed: dismissed.has(m.id) }));
+        return [...userNotifications, ...mapped]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map((m) => ({ ...m, dismissed: m.dismissed || dismissed.has(m.id) }));
       });
     } catch (e: any) {
       setError(e?.message || 'Could not load announcements');
@@ -70,12 +90,15 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     const onVis = () => {
       if (document.visibilityState === 'visible') void refresh();
     };
+    const onNotificationsRefresh = () => void refresh();
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('sportsync:notifications-refresh', onNotificationsRefresh);
     return () => {
       window.clearInterval(t);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('sportsync:notifications-refresh', onNotificationsRefresh);
     };
-  }, []);
+  }, [user?.id]);
 
   const addAnnouncement = async (a: Omit<Announcement, 'id' | 'createdAt' | 'dismissed'>) => {
     setError(null);
@@ -113,6 +136,13 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   };
 
   const dismissAnnouncement = (id: string) => {
+    if (id.startsWith('notif:')) {
+      void apiFetch(`/api/notifications/${encodeURIComponent(id.slice(6))}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read_at: new Date().toISOString() }),
+      });
+    }
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
   };
 

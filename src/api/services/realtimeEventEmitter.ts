@@ -3,6 +3,7 @@
  * Broadcasts events to connected clients via Supabase Realtime
  */
 
+import { randomUUID } from 'crypto';
 import { supabase } from '../services/supabaseClient.ts';
 
 export interface RealtimeEventPayload {
@@ -110,15 +111,29 @@ class RealtimeEventEmitter {
     eventType: string,
     data: Record<string, any>
   ): Promise<void> {
+    const notification = {
+      id: randomUUID(),
+      recipient_id: userId,
+      event_type: eventType,
+      data,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    };
     try {
-      await supabase.from('notifications').insert({
-        recipient_id: userId,
-        event_type: eventType,
-        data,
-        created_at: new Date().toISOString(),
-      });
+      await supabase.from('notifications').insert(notification);
     } catch (error) {
       console.error(`[RealtimeEventEmitter] Failed to notify user ${userId}:`, error);
+    }
+    try {
+      const key = `notifications:${userId}`;
+      const { data: existing } = await supabase.from('app_kv_store').select('value').eq('key', key).maybeSingle();
+      const current = Array.isArray(existing?.value) ? existing.value : [];
+      await supabase.from('app_kv_store').upsert(
+        { key, value: [notification, ...current].slice(0, 100), updated_at: new Date().toISOString() },
+        { onConflict: 'key' },
+      );
+    } catch (error) {
+      console.error(`[RealtimeEventEmitter] Failed KV notification fallback for ${userId}:`, error);
     }
   }
 }

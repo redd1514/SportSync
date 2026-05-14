@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { getLocalDateString } from '../../utils/date';
+import { apiFetch } from '../../utils/authenticatedFetch';
 import { genRefCode } from '../../../shared/ticketRef';
 import { downloadTicketQrPng } from '../../../shared/qrDownload';
 import { useFacilityMap, getSportMapColor, LiveStatus, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
@@ -364,35 +365,41 @@ interface BookingModalProps {
   }) => void | Promise<void>;
   initialDate?: string;
   initialTime?: string;
+  coachingMode?: boolean;
+  coachName?: string;
+  studentName?: string;
+  onDone?: () => void;
 }
 
-function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfirm, initialDate, initialTime }: BookingModalProps) {
+function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfirm, initialDate, initialTime, coachingMode = false, coachName, studentName, onDone }: BookingModalProps) {
   const { addonsBySport } = useAddons();
   const { calcCourtPrice } = useUser();
   const now = new Date();
-  const accentColor = mode === 'staff' ? '#0047AB' : '#FF8C00';
+  const accentColor = coachingMode ? '#2563EB' : mode === 'staff' ? '#0047AB' : '#FF8C00';
   const todayStr = getLocalDateString(now);
 
   /* Steps
      customer: Details(0) → Review(1) → Confirm(2) → Done(3)
      staff:    Walk-in(0) → Details(1) → Review(2) → Done(3)
   */
-  const steps = mode === 'staff'
+  const steps = coachingMode
+    ? ['Court Slot', 'Review', 'Pay Court', 'Done']
+    : mode === 'staff'
     ? ['Walk-in Info', 'Details', 'Review', 'Done']
     : ['Details', 'Review', 'Confirm', 'Done'];
   const totalSteps = steps.length;
   const [step, setStep] = useState(0);
 
-  const detailsStep  = mode === 'staff' ? 1 : 0;
-  const reviewStep   = mode === 'staff' ? 2 : 1;
-  const paymentStep  = mode === 'customer' ? 2 : -1; // customer only
+  const detailsStep  = mode === 'staff' && !coachingMode ? 1 : 0;
+  const reviewStep   = mode === 'staff' && !coachingMode ? 2 : 1;
+  const paymentStep  = mode === 'customer' || coachingMode ? 2 : -1;
   const doneStep     = totalSteps - 1;
 
   const isDone      = step === doneStep;
   const isDetails   = step === detailsStep;
   const isReview    = step === reviewStep;
-  const isConfirm   = mode === 'customer' && step === paymentStep;
-  const isWalkIn    = mode === 'staff' && step === 0;
+  const isConfirm   = (mode === 'customer' || coachingMode) && step === paymentStep;
+  const isWalkIn    = mode === 'staff' && !coachingMode && step === 0;
 
   /* Form state */
   const [date, setDate]             = useState(initialDate || todayStr);
@@ -415,7 +422,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
 
   const disabledBefore = date === todayStr ? now.getHours() : 6;
   const basePrice      = time ? calcCourtPrice(sport, date, time) : 0;
-  const sportAddons: AddOn[] = addonsBySport[sport] || [];
+  const sportAddons: AddOn[] = coachingMode ? [] : addonsBySport[sport] || [];
 
   const addonTotal = useMemo(() =>
     Array.from(selectedAddons).reduce((sum, id) => {
@@ -453,10 +460,10 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
     }).join(' | ');
     await onConfirm({
       court: courtName, sport, date, time, duration,
-      addOns: [addOnLabels, mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
-      paymentMethod: mode === 'staff' ? 'cash' : 'pay_at_facility',
+      addOns: [addOnLabels, coachingMode ? 'Coach court reservation' : mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
+      paymentMethod: mode === 'staff' || coachingMode ? 'cash' : 'pay_at_facility',
       refCode: refCode.current,
-      customerName: mode === 'staff' ? customerName : undefined,
+      customerName: coachingMode ? (coachName || 'Coach') : mode === 'staff' ? customerName : undefined,
       customerPhone: mode === 'staff' ? customerPhone : undefined,
       amount: total,
       addonIds: Array.from(selectedAddons),
@@ -592,9 +599,11 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               </motion.div>
               <div>
                 <p className="text-white font-black" style={{ fontSize: 20 }}>
-                  {mode === 'staff' ? 'Walk-In Confirmed!' : 'Booking Reserved!'}
+                  {coachingMode ? 'Coach Court Reserved!' : mode === 'staff' ? 'Walk-In Confirmed!' : 'Booking Reserved!'}
                 </p>
-                {mode === 'customer' && (
+                {coachingMode ? (
+                  <p className="text-blue-300 mt-2 font-black" style={{ fontSize: 13 }}>This court QR is for the coach's court payment. The student pays the coaching fee separately.</p>
+                ) : mode === 'customer' && (
                   <p className="text-orange-400 mt-2 font-black" style={{ fontSize: 13 }}>Please proceed to the facility to pay in person and check in.</p>
                 )}
                 <p className="text-gray-400 mt-1" style={{ fontSize: 13 }}>{courtName} · {dateInfo.label}</p>
@@ -603,7 +612,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                 </p>
               </div>
               <div className="bg-white rounded-3xl p-5 flex flex-col items-center gap-3 w-full">
-                <p className="text-gray-600 font-black" style={{ fontSize: 10, letterSpacing: 1.5 }}>SHOW AT FRONT DESK TO CHECK IN</p>
+                <p className="text-gray-600 font-black" style={{ fontSize: 10, letterSpacing: 1.5 }}>{coachingMode ? 'COACH COURT PAYMENT QR' : 'SHOW AT FRONT DESK TO CHECK IN'}</p>
                 <div style={{ background: 'white', padding: 4, borderRadius: 12 }}>
                   <QRCodeSVG value={refCode.current} size={160} level="H" includeMargin={false} />
                 </div>
@@ -641,7 +650,10 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   <span className="text-white font-black" style={{ fontSize: 12 }}>BOOKING RECEIPT</span>
                 </div>
                 <div className="px-4 py-3 space-y-2">
-                  {mode === 'staff' && customerName && (
+                  {coachingMode && (
+                    <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>For student</span><span className="text-white font-black" style={{ fontSize: 12 }}>{studentName || 'Student'}</span></div>
+                  )}
+                  {mode === 'staff' && !coachingMode && customerName && (
                     <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Customer</span><span className="text-white font-black" style={{ fontSize: 12 }}>{customerName}</span></div>
                   )}
                   <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Court</span><span className="text-white font-black" style={{ fontSize: 12 }}>{courtName}</span></div>
@@ -661,18 +673,18 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                     );
                   })}
                   <div className="border-t border-white/8 pt-2 flex justify-between">
-                    <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL PAID</span>
+                    <span className="text-white font-black" style={{ fontSize: 13 }}>{coachingMode ? 'COURT DUE FROM COACH' : 'TOTAL PAID'}</span>
                     <span className="font-black" style={{ fontSize: 18, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500" style={{ fontSize: 11 }}>Payment</span>
-                    <span className="font-black" style={{ fontSize: 11, color: mode === 'staff' ? '#60a5fa' : '#FF8C00' }}>{mode === 'staff' ? 'Cash (Walk-in)' : 'Pay at Facility'}</span>
+                    <span className="font-black" style={{ fontSize: 11, color: coachingMode ? '#60a5fa' : mode === 'staff' ? '#60a5fa' : '#FF8C00' }}>{coachingMode ? 'Coach pays court' : mode === 'staff' ? 'Cash (Walk-in)' : 'Pay at Facility'}</span>
                   </div>
                 </div>
               </div>
-              <button onClick={onClose} className="w-full py-3.5 rounded-2xl text-white font-black transition-all"
+              <button onClick={() => { onClose(); onDone?.(); }} className="w-full py-3.5 rounded-2xl text-white font-black transition-all"
                 style={{ fontSize: 15, background: `linear-gradient(135deg,${accentColor},${accentColor}cc)` }}>
-                Done — Close
+                {coachingMode ? 'Done - Back to My Coaching' : 'Done - Close'}
               </button>
             </motion.div>
           )}
@@ -791,7 +803,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                     </div>
                     <div className="text-right">
                       <p className="font-black" style={{ fontSize: 26, color: accentColor, lineHeight: 1 }}>{'\u20B1'}{total.toLocaleString()}</p>
-                      <p className="text-gray-500" style={{ fontSize: 10 }}>total</p>
+                    <p className="text-gray-500" style={{ fontSize: 10 }}>{coachingMode ? 'court fee' : 'total'}</p>
                     </div>
                   </div>
                   <div className="mx-4 mb-4 p-3 rounded-xl" style={{ background: 'rgba(0,0,0,0.3)' }}>
@@ -820,7 +832,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                 {priceBreakdownPanel}
 
                 {/* Add-ons */}
-                {sportAddons.length > 0 && (
+                {!coachingMode && sportAddons.length > 0 && (
                   <div>
                     <p className="text-gray-400 font-black mb-3" style={{ fontSize: 11, letterSpacing: 0.5 }}>OPTIONAL ADD-ONS</p>
                     <div className="space-y-2">
@@ -855,7 +867,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                 )}
 
                 {/* Email (customer only) */}
-                {mode === 'customer' && (
+                {mode === 'customer' && !coachingMode && (
                   <div>
                     <label className="text-gray-400 block mb-1.5" style={{ fontSize: 11, fontWeight: 700 }}>EMAIL FOR CONFIRMATION (optional)</label>
                     <div className="relative">
@@ -999,12 +1011,23 @@ function MapTimeSelector({
 interface FacilityMapViewerProps {
   mode: 'customer' | 'staff';
   compact?: boolean;
-  prefill?: { sport: string; date: string; time: string };
+  prefill?: {
+    sport: string;
+    date: string;
+    time: string;
+    coachingSessionId?: string;
+    coachingStudentName?: string;
+    coachingStudentId?: string;
+    coachName?: string;
+    coachHourlyRate?: number;
+    durationHours?: number;
+  };
   selectedMapId?: string | null;
   onMapChange?: (mapId: string | null) => void;
+  onExitCoachingReservation?: () => void;
 }
 
-export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange }: FacilityMapViewerProps) {
+export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange, onExitCoachingReservation }: FacilityMapViewerProps) {
   const { maps, getCourtLiveStatus, isLoading: mapsLoading } = useFacilityMap();
   const { createDeskBooking } = useBookingAPI();
   const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi } = useUser();
@@ -1037,17 +1060,19 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
   const [selectedTime, setSelectedTime] = useState(prefill?.time || `${String(now.getHours()).padStart(2,'0')}:00`);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const selectedHour = parseInt(selectedTime.split(':')[0]) || 7;
-  const accentMap = mode === 'staff' ? '#0047AB' : '#FF8C00';
+  const isCoachReservation = !!prefill?.coachingSessionId;
+  const accentMap = isCoachReservation ? '#2563EB' : mode === 'staff' ? '#0047AB' : '#FF8C00';
 
   const [hoveredId,    setHoveredId]    = useState<string | null>(null);
   const [bookingCourt, setBookingCourt] = useState<{ name: string; sport: string } | null>(null);
   const [successFlash, setSuccessFlash] = useState<string | null>(null);
+  const [showCoachExitModal, setShowCoachExitModal] = useState(false);
 
   const processedPrefill = useRef<string | null>(null);
 
   useEffect(() => {
     if (prefill && publishedMaps.length > 0) {
-      const sig = `${prefill.sport}-${prefill.date}-${prefill.time}`;
+      const sig = `${prefill.sport}-${prefill.date}-${prefill.time}-${prefill.coachingSessionId || ''}`;
       if (processedPrefill.current !== sig) {
         processedPrefill.current = sig;
         if (prefill.date) setSelectedDate(prefill.date);
@@ -1145,14 +1170,22 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
     return map;
   }, [publishedLayout, getCourtLiveStatus, selectedHour, selectedDate, bookings, activeMap?.id]);
 
-  const stats = useMemo(() => ({
-    available:   Object.values(courtStatuses).filter(s => s === 'available').length,
-    occupied:    Object.values(courtStatuses).filter(s => s === 'occupied').length,
-    maintenance: Object.values(courtStatuses).filter(s => s === 'maintenance').length,
-  }), [courtStatuses]);
+  const stats = useMemo(() => {
+    const relevantIds = isCoachReservation
+      ? publishedLayout.filter((b) => b.sport === prefill?.sport).map((b) => b.id)
+      : publishedLayout.map((b) => b.id);
+    const statuses = relevantIds.map((id) => courtStatuses[id]).filter(Boolean);
+    return {
+      available: statuses.filter(s => s === 'available').length,
+      occupied: statuses.filter(s => s === 'occupied').length,
+      maintenance: statuses.filter(s => s === 'maintenance').length,
+    };
+  }, [courtStatuses, isCoachReservation, prefill?.sport, publishedLayout]);
 
   const hoveredBlock  = publishedLayout.find(b => b.id === hoveredId) ?? null;
-  const hoveredStatus = hoveredId ? courtStatuses[hoveredId] : null;
+  const hoveredStatus = hoveredId
+    ? (isCoachReservation && hoveredBlock?.sport !== prefill?.sport ? 'maintenance' : courtStatuses[hoveredId])
+    : null;
 
   const tooltipPos = useMemo(() => {
     if (!hoveredBlock || !containerRef.current) return null;
@@ -1198,10 +1231,10 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
       start_time: details.time,
       duration_hours: details.duration,
       total_price: details.amount,
-      customer_name: details.customerName || user?.name || 'Customer',
+      customer_name: details.customerName || prefill?.coachingStudentName || user?.name || 'Customer',
       customer_phone: details.customerPhone,
       payment_method: details.paymentMethod === 'gcash' ? 'gcash' : 'cash',
-      source: mode === 'staff' ? 'map_staff' : 'map_customer',
+      source: prefill?.coachingSessionId ? 'map_coaching_acceptance' : mode === 'staff' ? 'map_staff' : 'map_customer',
       ref_code: details.refCode,
       add_ons: details.addOns,
       staff_id: staffId,
@@ -1210,6 +1243,35 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
     try {
       const out = await createDeskBooking(payload);
       addBooking(out.booking as unknown as Booking);
+      if (prefill?.coachingSessionId) {
+        try {
+          const coachFee = Math.max(0, Number(prefill.coachHourlyRate || 0)) * Math.max(1, Number(prefill.durationHours || details.duration || 1));
+          const courtAmount = Math.max(0, Number(details.amount || 0));
+          const totalDue = coachFee;
+          const acceptanceDetails = {
+            linkedBookingId: out.booking?.id,
+            court: details.court,
+            courtAmount,
+            coachFee,
+            totalDue,
+            courtPaidBy: 'coach',
+            coachCourtQr: details.refCode,
+            acceptedBy: user?.name || prefill.coachName || 'Coach',
+          };
+          await apiFetch(`/api/coaching-sessions/${encodeURIComponent(prefill.coachingSessionId)}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: 'confirmed',
+              admin_notes: `COACHING_ACCEPTANCE:${JSON.stringify(acceptanceDetails)}`,
+            }),
+          });
+          window.dispatchEvent(new Event('sportsync:coaching-refresh'));
+          window.dispatchEvent(new Event('sportsync:notifications-refresh'));
+        } catch (linkErr) {
+          console.error('[FacilityMapViewer] coaching session link failed', linkErr);
+        }
+      }
       await refreshBookingsFromApi();
     } catch (err) {
       console.error('[FacilityMapViewer] desk booking failed, using local copy', err);
@@ -1232,7 +1294,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
         facilityMapId: activeMap?.id,
       });
     }
-    setSuccessFlash(`${details.court} booked!`);
+    setSuccessFlash(prefill?.coachingSessionId ? `${details.court} reserved and coaching accepted!` : `${details.court} booked!`);
     setTimeout(() => setSuccessFlash(null), 4000);
   };
 
@@ -1316,7 +1378,12 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
             </div>
           ))}
         </div>
-        {mode === 'staff' ? (
+        {isCoachReservation ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#2563EB]/15 border border-[#2563EB]/30">
+            <SportIcon sport={prefill?.sport || 'Sports'} size={10} color="#93c5fd" strokeWidth={2.4} />
+            <span className="font-black text-[#93c5fd]" style={{ fontSize: 10 }}>COACH RESERVATION{prefill?.sport ? ` · ${prefill.sport}` : ''}</span>
+          </div>
+        ) : mode === 'staff' ? (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0047AB]/20 border border-[#0047AB]/30">
             <motion.div animate={{ scale: [1, 1.4, 1] }} transition={{ duration: 1.5, repeat: Infinity }} className="w-1.5 h-1.5 rounded-full bg-red-500" />
             <span className="font-black text-[#60a5fa]" style={{ fontSize: 10 }}>LIVE OPS</span>
@@ -1329,7 +1396,36 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
         )}
       </div>
 
-      {/* Date + Time — two pill buttons, never overflow on any screen size */}
+      {isCoachReservation && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="px-3 py-2 border-b border-[#2563EB]/20 flex-shrink-0"
+          style={{ background: 'rgba(37,99,235,0.08)' }}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(37,99,235,0.18)' }}>
+              <Shield size={14} className="text-[#93c5fd]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-white font-black truncate" style={{ fontSize: 12 }}>Booking as coach for {prefill?.coachingStudentName || 'student'}</p>
+              <p className="text-[#93c5fd] truncate" style={{ fontSize: 10 }}>Only {prefill?.sport || 'matching sport'} courts are available in this view.</p>
+            </div>
+            {onExitCoachingReservation && (
+              <button
+                type="button"
+                onClick={() => setShowCoachExitModal(true)}
+                className="px-3 py-2 rounded-xl font-black text-[#93c5fd] flex-shrink-0 hover:bg-white/8 transition-all"
+                style={{ fontSize: 11, border: '1px solid rgba(147,197,253,0.25)' }}
+              >
+                Exit
+              </button>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Date + Time - two pill buttons, never overflow on any screen size */}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#0D0D0D] border-b border-white/5 flex-shrink-0">
         {/* Date pill — opens bottom-sheet calendar */}
         <button onClick={() => setShowDatePicker(true)}
@@ -1416,7 +1512,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
               {hoveredStatus === 'available' && (
                 <div className="flex items-center gap-1.5 mt-2">
                   <ArrowRight size={10} style={{ color: '#22c55e' }} />
-                  <p className="text-green-400 font-black" style={{ fontSize: 10 }}>{mode === 'customer' ? 'Tap to book this court' : 'Tap to add walk-in'}</p>
+                  <p className="text-green-400 font-black" style={{ fontSize: 10 }}>{isCoachReservation ? 'Tap to reserve for coaching' : mode === 'customer' ? 'Tap to book this court' : 'Tap to add walk-in'}</p>
                 </div>
               )}
               <p className="text-gray-600 mt-1" style={{ fontSize: 9 }}>{SPORTS_INFO.find(s => s.name === hoveredBlock.sport)?.priceLabel || 'Custom rate'}</p>
@@ -1442,10 +1538,11 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
               <rect x="2" y="2" width={canvasW-4} height={canvasH-4} fill="none" stroke="#2a2a2a" strokeWidth="2" rx="4" strokeDasharray="8 4" />
 
               {publishedLayout.map(b => {
-                const liveStatus = courtStatuses[b.id] || 'available';
-                const courtColors = getCourtColors(liveStatus, b.sport);
+                const sportLocked = isCoachReservation && b.sport !== prefill?.sport;
+                const liveStatus = sportLocked ? 'maintenance' : courtStatuses[b.id] || 'available';
+                const courtColors = sportLocked ? { fill: '#374151', stroke: '#4b5563', label: 'Unavailable' } : getCourtColors(liveStatus, b.sport);
                 const isHovered   = hoveredId === b.id;
-                const isClickable = liveStatus === 'available';
+                const isClickable = liveStatus === 'available' && !sportLocked;
                 return (
                   <g key={b.id}
                     style={{ cursor: isClickable ? 'pointer' : liveStatus === 'maintenance' ? 'not-allowed' : 'default' }}
@@ -1477,7 +1574,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
                         textAnchor="middle" dominantBaseline="middle"
                         fill="white" fontSize={b.width>150?9:7} opacity="0.6"
                         pointerEvents="none" style={{ userSelect: 'none' }}>
-                        {liveStatus === 'maintenance' ? 'MAINT.' : liveStatus === 'occupied' ? 'OCCUPIED' : 'AVAIL.'}
+                        {sportLocked ? 'SPORT LOCKED' : liveStatus === 'maintenance' ? 'MAINT.' : liveStatus === 'occupied' ? 'OCCUPIED' : 'AVAIL.'}
                       </text>
                     )}
                     {mode === 'staff' && liveStatus === 'occupied' && (
@@ -1506,9 +1603,9 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
         <span className="text-gray-700 font-black" style={{ fontSize: 9 }}>Court colors = sport type</span>
         <div className="w-px h-3 bg-white/8 flex-shrink-0" />
         {[
-          { color: '#22c55e', label: mode === 'customer' ? 'Available – tap to book' : 'Available' },
+          { color: '#22c55e', label: isCoachReservation ? 'Matching sport available' : mode === 'customer' ? 'Available - tap to book' : 'Available' },
           { color: '#dc2626', label: 'Occupied' },
-          { color: '#4b5563', label: 'Maintenance' },
+          { color: '#4b5563', label: isCoachReservation ? 'Other sports unavailable' : 'Maintenance' },
         ].map(l => (
           <div key={l.label} className="flex items-center gap-1.5">
             <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: l.color }} />
@@ -1546,6 +1643,51 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
 
       {/* Booking Modal */}
       <AnimatePresence>
+        {showCoachExitModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[80] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setShowCoachExitModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border border-white/10 p-5"
+              style={{ background: '#181818' }}
+            >
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(37,99,235,0.16)' }}>
+                <Shield size={22} className="text-[#93c5fd]" />
+              </div>
+              <p className="text-white font-black" style={{ fontSize: 18 }}>Exit coach reservation?</p>
+              <p className="text-gray-400 mt-2" style={{ fontSize: 13, lineHeight: 1.55 }}>
+                This will leave the sport-locked court view and return you to My Coaching. Your pending request will still be waiting there.
+              </p>
+              <div className="grid grid-cols-2 gap-2 mt-5">
+                <button
+                  onClick={() => setShowCoachExitModal(false)}
+                  className="py-3 rounded-2xl text-gray-300 font-black"
+                  style={{ background: 'rgba(255,255,255,0.07)', fontSize: 13 }}
+                >
+                  Stay
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCoachExitModal(false);
+                    onExitCoachingReservation?.();
+                  }}
+                  className="py-3 rounded-2xl text-white font-black"
+                  style={{ background: 'linear-gradient(135deg,#2563EB,#1d4ed8)', fontSize: 13 }}
+                >
+                  Exit
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
         {bookingCourt && (
           <BookingModal
             courtName={bookingCourt.name}
@@ -1556,6 +1698,10 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
             onConfirm={handleConfirmBooking}
             initialDate={selectedDate}
             initialTime={selectedTime}
+            coachingMode={isCoachReservation}
+            coachName={prefill?.coachName || user?.name}
+            studentName={prefill?.coachingStudentName}
+            onDone={isCoachReservation ? onExitCoachingReservation : undefined}
           />
         )}
       </AnimatePresence>

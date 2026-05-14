@@ -277,7 +277,17 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
-  const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
+  const [bookingPrefill, setBookingPrefill] = useState<{
+    sport: string;
+    date: string;
+    time: string;
+    coachingSessionId?: string;
+    coachingStudentName?: string;
+    coachingStudentId?: string;
+    coachName?: string;
+    coachHourlyRate?: number;
+    durationHours?: number;
+  } | undefined>(undefined);
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
 
@@ -337,7 +347,16 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
               )}
               {sub === "map" && (
                 <div className="h-full overflow-hidden">
-                  <FacilityMapViewer mode="customer" compact prefill={bookingPrefill} />
+                  <FacilityMapViewer
+                    mode="customer"
+                    compact
+                    prefill={bookingPrefill}
+                    onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                      setBookingPrefill(undefined);
+                      setActiveTab("coaching");
+                      setActiveSub(prev => ({ ...prev, coaching: "mycoaching" }));
+                    } : undefined}
+                  />
                 </div>
               )}
             </motion.div>
@@ -368,7 +387,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
       case "account":
         return (
           <div className="h-full overflow-y-auto p-6 custom-scrollbar">
-            <div className="max-w-2xl mx-auto bg-[#111] rounded-2xl overflow-hidden border border-white/5 shadow-xl" style={{ minHeight: 560 }}>
+            <div className="max-w-4xl mx-auto bg-[#111] rounded-3xl overflow-hidden border border-white/8 shadow-2xl" style={{ minHeight: 620 }}>
               <MobileProfileScreen onLogout={handleLogout} />
             </div>
           </div>

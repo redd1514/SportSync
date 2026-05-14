@@ -206,7 +206,9 @@ usersRouter.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { data, error } = await supabase.from('users').update(body).eq('id', id).select('*').single();
+    const user = await findUserRow(id);
+    const targetId = user?.id || id;
+    const { data, error } = await supabase.from('users').update(body).eq('id', targetId).select('*').single();
     if (error) throw error;
     return c.json(data);
   } catch (error: any) {

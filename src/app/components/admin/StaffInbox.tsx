@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { useStaffAPI } from '../../hooks/useStaffAPI';
 import { useAnnouncements } from '../../contexts/AnnouncementsContext';
-import { useUser } from '../../contexts/UserContext';
 
 const SURF = '#1E1E1F';
 const BORDER = 'rgba(255,255,255,0.06)';
@@ -214,8 +213,7 @@ export function StaffInbox() {
     rejectCoachingPayment,
   } = useStaffAPI();
   const { addAnnouncement, announcements, refresh: refreshAnnouncements, error: announceError, isLoading: announceLoading, clearAnnouncements } = useAnnouncements();
-  const { user } = useUser();
-  
+
   const [sub, setSub] = useState<InboxSubTab>('cancellations');
   const [requests, setRequests] = useState<any>({ cancellations: [], reschedules: [], coaching: [] });
   const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '', type: 'promotion' as const });
@@ -356,16 +354,11 @@ export function StaffInbox() {
   const pendingCoaching = visibleCoaching.length;
 
   const tabs = useMemo(() => {
-    const base: { id: InboxSubTab; label: string; icon: any; badge: number; color: string; desc: string }[] = [
-      { id: 'cancellations', label: 'Change Requests', icon: AlertTriangle, badge: pendingCancellations, color: '#fbbf24', desc: 'Cancellations and reschedules needing approval.' },
-      { id: 'announcements', label: 'Announcements', icon: Megaphone, badge: 0, color: '#f97316', desc: 'Send updates that appear in user notifications.' },
+    return [
+      { id: 'cancellations' as InboxSubTab, label: 'Change Requests', icon: AlertTriangle, badge: pendingCancellations, color: '#fbbf24', desc: 'Cancellations and reschedules needing approval.' },
+      { id: 'coaching' as InboxSubTab, label: 'Coaching Payments', icon: GraduationCap, badge: pendingCoaching, color: '#60a5fa', desc: 'Accepted coaching tickets waiting for payment verification.' },
     ];
-    const allowCoaching = user?.role === 'admin' || user?.role === 'coach';
-    if (allowCoaching) {
-      base.splice(1, 0, { id: 'coaching', label: 'Coaching', icon: GraduationCap, badge: pendingCoaching, color: '#60a5fa', desc: 'Coach-side requests & payment checks.' });
-    }
-    return base;
-  }, [pendingCancellations, pendingCoaching, user?.role]);
+  }, [pendingCancellations, pendingCoaching]);
 
   const changeRows: ChangeRequestRow[] = useMemo(() => {
     const cancels = (visibleCancellations || []).map((r: any) => ({ ...r, requestType: 'cancellation' as const }));
@@ -416,7 +409,7 @@ export function StaffInbox() {
       <div>
         <h2 className="text-white font-black" style={{ fontSize: 24 }}>Front Desk Inbox</h2>
         <p className="text-gray-500" style={{ fontSize: 13 }}>
-          Action items for staff. Review requests and publish updates for all users.
+          Action items for staff. Review booking changes and verify coaching payments.
         </p>
       </div>
 

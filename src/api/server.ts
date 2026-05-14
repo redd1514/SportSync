@@ -15,6 +15,7 @@ import appDataRouter from './routes/appData.ts';
 import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
 import { coachApplicationService } from './services/coachApplicationService.ts';
 import announcementsRouter from './routes/announcements.ts';
+import notificationsRouter from './routes/notifications.ts';
 import authRouter from './routes/auth.ts';
 import { attachOrRequireAuth, requireAppRoles } from './middleware/authGate.ts';
 
@@ -162,6 +163,7 @@ staffMount.route('/', staffRouter);
 app.route('/api/staff', staffMount);
 
 app.route('/api/announcements', announcementsRouter);
+app.route('/api/notifications', notificationsRouter);
 app.route('/api/facilities', facilitiesRouter);
 
 // 404 handler

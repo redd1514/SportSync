@@ -110,7 +110,17 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
   const [bookingSub,  setBookingSub]  = useState<BookingSub>("map");
   const [coachSub,    setCoachSub]    = useState<CoachSub>("browse");
   const [aiOpen,      setAiOpen]      = useState(false);
-  const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
+  const [bookingPrefill, setBookingPrefill] = useState<{
+    sport: string;
+    date: string;
+    time: string;
+    coachingSessionId?: string;
+    coachingStudentName?: string;
+    coachingStudentId?: string;
+    coachName?: string;
+    coachHourlyRate?: number;
+    durationHours?: number;
+  } | undefined>(undefined);
   const { isAdmin, isStaff, logout }  = useUser();
 
   const handleLogout = async () => {
@@ -163,7 +173,18 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
               <AnimatePresence mode="wait">
                 <motion.div key={bookingSub} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}
                   transition={{ duration: 0.18 }} className="h-full">
-                  {bookingSub === "map"        ? <FacilityMapViewer mode="customer" compact prefill={bookingPrefill} /> : <div className="h-full overflow-y-auto"><UserMyBookings onNavigate={navigate} /></div>}
+                  {bookingSub === "map"        ? (
+                    <FacilityMapViewer
+                      mode="customer"
+                      compact
+                      prefill={bookingPrefill}
+                      onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                        setBookingPrefill(undefined);
+                        setMainTab("coaching");
+                        setCoachSub("mycoaching");
+                      } : undefined}
+                    />
+                  ) : <div className="h-full overflow-y-auto"><UserMyBookings onNavigate={navigate} /></div>}
                 </motion.div>
               </AnimatePresence>
             </div>

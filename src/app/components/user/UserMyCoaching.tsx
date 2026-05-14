@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowRight, Calendar, CheckCircle, Clock, GraduationCap, QrCode, Shield,
   Star, Users, X, XCircle, AlertCircle, MessageSquare, ClipboardCheck,
+  MapPin, CreditCard, Search,
 } from "lucide-react";
 import { format } from "date-fns";
 import { QRCodeSVG } from "qrcode.react";
@@ -55,6 +56,10 @@ function isManualPaymentVerified(req: CoachingRequest) {
   return /PAYMENT_VERIFIED|Manual coaching payment verified/i.test(req.adminNotes || "");
 }
 
+function amountLabel(value?: number) {
+  return `₱${Math.max(0, Number(value || 0)).toLocaleString()}`;
+}
+
 function StatusBadge({ status }: { status: CoachingRequest["status"] }) {
   const map = {
     pending: { label: "Awaiting coach", color: "#eab308", bg: "rgba(234,179,8,0.13)", icon: Clock },
@@ -103,6 +108,7 @@ function SessionCard({
   const name = mode === "coach" ? req.userName : req.coachName;
   const subtitle = mode === "coach" ? `Requested ${req.sport} coaching` : req.sport;
   const paymentVerified = isManualPaymentVerified(req);
+  const showCourtDetails = !!req.courtName || !!req.totalAmount || !!req.coachFee;
 
   return (
     <motion.div
@@ -141,6 +147,12 @@ function SessionCard({
                 </div>
               </div>
             </div>
+            <div className="mt-2 rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+              <div className="flex items-center justify-between gap-3" style={{ color: TS, fontSize: 12 }}>
+                <span>{mode === "coach" ? "Coaching fee student will pay" : "Coaching fee"}</span>
+                <span className="font-black text-white">{amountLabel(req.totalAmount || req.coachFee)}</span>
+              </div>
+            </div>
 
             {req.message && (
               <div className="mt-3 rounded-xl p-3 border flex gap-2" style={{ background: "rgba(255,255,255,0.035)", borderColor: BORDER }}>
@@ -153,14 +165,14 @@ function SessionCard({
               {mode === "coach" && req.status === "pending" && (
                 <>
                 <div className="rounded-xl p-3 mb-3" style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.22)" }}>
-                  <p className="font-black" style={{ color: "#93c5fd", fontSize: 12 }}>Payment note for coach</p>
-                  <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>Accept only if you can teach this slot. The student will receive manual payment instructions after you accept, and front desk/admin will handle payment verification.</p>
+                  <p className="font-black" style={{ color: "#93c5fd", fontSize: 12 }}>Reserve a court to accept</p>
+                  <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>Choose an available {req.sport} court from the facility map. You pay the court fee reservation, and the student pays the coaching fee only.</p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <button onClick={() => onDecision(req, "confirmed")}
+                  <button onClick={() => onBookCourt(req)}
                     className="flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
                     style={{ background: "linear-gradient(135deg,#22c55e,#16a34a)", fontSize: 13 }}>
-                    <CheckCircle size={15} /> Accept Session
+                    <MapPin size={15} /> Reserve Court & Accept
                   </button>
                   <button onClick={() => onDecision(req, "rejected")}
                     className="sm:w-40 py-3 rounded-xl font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
@@ -178,19 +190,30 @@ function SessionCard({
                   <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>
                     {paymentVerified
                       ? "Front desk has verified your manual payment. Show the coaching ticket at check-in."
-                      : "Pay manually via JRC front desk or the official GCash QR shown on site. Staff/admin verifies payment, then use this coaching ticket at check-in."}
+                      : "Your coach has secured the court. Pay only the coaching fee through JRC staff or the official GCash QR, then show the ticket at check-in."}
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2">
+                {showCourtDetails && (
+                  <div className="grid sm:grid-cols-2 gap-2 mb-3">
+                    <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+                      <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
+                        <MapPin size={13} />
+                        <span>{req.courtName || "Court reserved by coach"}</span>
+                      </div>
+                    </div>
+                    <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+                      <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
+                        <CreditCard size={13} />
+                        <span>Coaching fee: {amountLabel(req.totalAmount || req.coachFee)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex">
                   <button onClick={() => onTicket(req)}
-                    className="flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+                    className="w-full py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
                     style={{ background: "linear-gradient(135deg,#22c55e,#16a34a)", fontSize: 13 }}>
                     <QrCode size={15} /> View Coaching Ticket
-                  </button>
-                  <button onClick={() => onBookCourt(req)}
-                    className="flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
-                    style={{ background: "linear-gradient(135deg,#3b82f6,#2563eb)", fontSize: 13 }}>
-                    <Calendar size={15} /> Book Matching Court
                   </button>
                 </div>
                 </>
@@ -202,7 +225,7 @@ function SessionCard({
                   <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>
                     {paymentVerified
                       ? "Front desk has verified the student's manual payment, so this coaching session is cleared to proceed."
-                      : "The student has been instructed to pay manually through JRC staff/GCash QR. Coordinate only after staff confirms payment if needed."}
+                      : `Court: ${req.courtName || "reserved"}. You handle the court reservation payment; the student pays the coaching fee only.`}
                   </p>
                 </div>
               )}
@@ -326,6 +349,24 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
               <p className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(req.requestedTime)}</p>
             </div>
           </div>
+          <div className="rounded-2xl p-3" style={{ background: SURF }}>
+            <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COURT</p>
+            <p className="text-white font-black" style={{ fontSize: 12 }}>{req.courtName || "Reserved by coach"}</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-2xl p-3" style={{ background: SURF }}>
+              <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COACH FEE</p>
+              <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.coachFee)}</p>
+            </div>
+            <div className="rounded-2xl p-3" style={{ background: SURF }}>
+              <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COURT BY COACH</p>
+              <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.courtAmount)}</p>
+            </div>
+            <div className="rounded-2xl p-3" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
+              <p style={{ color: "#86efac", fontSize: 10, fontWeight: 800 }}>STUDENT DUE</p>
+              <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.totalAmount || req.coachFee)}</p>
+            </div>
+          </div>
           <div className="rounded-3xl bg-white p-4 flex flex-col items-center">
             <QRCodeSVG value={JSON.stringify({ type: "coaching", reqId: req.id, coach: req.coachName, date: req.requestedDate })} size={178} level="H" />
             <p className="mt-3 text-gray-500 font-black" style={{ fontSize: 10 }}>{paymentVerified ? "PAYMENT VERIFIED BY FRONT DESK" : "SHOW AFTER MANUAL PAYMENT"}</p>
@@ -336,7 +377,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
             <p style={{ color: "#cbd5e1", fontSize: 11, lineHeight: 1.5 }}>
               {paymentVerified
                 ? "Front desk has marked this coaching session as manually paid. Show this ticket when you arrive."
-                : "Pay at the front desk or use the official JRC GCash QR on site. Staff will verify before check-in."}
+                : "Pay the coaching fee at the front desk or use the official JRC GCash QR on site. Staff will verify before check-in."}
             </p>
           </div>
         </div>
@@ -347,13 +388,16 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
 
 export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
   const { user } = useUser();
-  const { requests, coaches, updateRequestStatus, isLoading } = useCoaching();
+  const { requests, coaches, updateRequestStatus, findCoachByEmail, isLoading } = useCoaching();
   const [activeTab, setActiveTab] = useState<"student" | "coach">("student");
   const [ticketReq, setTicketReq] = useState<CoachingRequest | null>(null);
   const [decision, setDecision] = useState<{ req: CoachingRequest; action: "confirmed" | "rejected" } | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | CoachingRequest["status"]>("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const coachDefaultTabApplied = useRef(false);
 
-  const myCoachProfile = user?.email ? coaches.find((c) => c.email?.toLowerCase() === user.email?.toLowerCase()) : undefined;
+  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
 
   const studentSessions = useMemo(() => requests.filter((r) =>
     r.viewerIsStudent === true ||
@@ -385,13 +429,30 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
   }
 
   const currentList = activeTab === "coach" ? coachSessions : studentSessions;
+  const visibleList = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return currentList
+      .filter((r) => statusFilter === "all" || r.status === statusFilter)
+      .filter((r) => {
+        if (!q) return true;
+        return [r.userName, r.coachName, r.sport, r.requestedDate, r.requestedTime, r.message]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) => {
+        const av = new Date(`${a.requestedDate}T${a.requestedTime || "00:00"}`).getTime();
+        const bv = new Date(`${b.requestedDate}T${b.requestedTime || "00:00"}`).getTime();
+        return sortOrder === "newest" ? bv - av : av - bv;
+      });
+  }, [currentList, query, sortOrder, statusFilter]);
   const pendingCount = coachSessions.filter((r) => r.status === "pending").length;
   const confirmedCount = [...studentSessions, ...coachSessions].filter((r) => r.status === "confirmed").length;
 
   return (
     <div className="h-full overflow-y-auto pb-24 md:pb-8" style={{ background: BG }}>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
-        <div className="grid lg:grid-cols-[1fr_320px] gap-5">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] gap-5 items-start">
           <div className="rounded-3xl border p-5 md:p-6" style={{ background: SURF, borderColor: BORDER }}>
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <div className="w-13 h-13 rounded-2xl flex items-center justify-center" style={{ background: `${ORANGE}18`, border: `1px solid ${ORANGE}35` }}>
@@ -409,11 +470,11 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
             </div>
           </div>
 
-          <div className="rounded-3xl border p-5" style={{ background: myCoachProfile ? `${BLUE}10` : SURF, borderColor: myCoachProfile ? `${BLUE}35` : BORDER }}>
+          <div className="rounded-3xl border p-4 flex items-center min-h-[96px]" style={{ background: myCoachProfile ? `${BLUE}10` : SURF, borderColor: myCoachProfile ? `${BLUE}35` : BORDER }}>
             {myCoachProfile ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: `${BLUE}20` }}><Shield size={20} color={BLUE} /></div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-black" style={{ color: BLUE, fontSize: 13 }}>Coach profile active</p>
                   <p className="truncate" style={{ color: TS, fontSize: 12 }}>{myCoachProfile.sport} · ₱{myCoachProfile.hourlyRate?.toLocaleString()}/hr</p>
                 </div>
@@ -456,42 +517,98 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
           </div>
         )}
 
-        <div className="grid xl:grid-cols-[1fr_330px] gap-5 items-start">
+        <div className="grid xl:grid-cols-[minmax(0,1fr)_300px] gap-5 items-start">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-white font-black" style={{ fontSize: 17 }}>{activeTab === "coach" ? "Coach Inbox" : "My Sessions"}</h3>
-              <p style={{ color: TS, fontSize: 12 }}>{currentList.length} item{currentList.length === 1 ? "" : "s"}</p>
+              <p style={{ color: TS, fontSize: 12 }}>{visibleList.length} item{visibleList.length === 1 ? "" : "s"}</p>
+            </div>
+            <div className="grid md:grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+              <label className="rounded-xl border flex items-center gap-2 px-3 py-2" style={{ background: SURF2, borderColor: BORDER }}>
+                <Search size={14} color={TS} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={activeTab === "coach" ? "Search student, sport, note..." : "Search coach, sport, date..."}
+                  className="bg-transparent outline-none text-white flex-1 min-w-0"
+                  style={{ fontSize: 12 }}
+                />
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+                className="rounded-xl px-3 py-2 text-white font-black outline-none"
+                style={{ background: SURF2, border: `1px solid ${BORDER}`, fontSize: 12 }}
+              >
+                <option value="all">All status</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="rejected">Declined</option>
+              </select>
+              <select
+                value={sortOrder}
+                onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}
+                className="rounded-xl px-3 py-2 text-white font-black outline-none"
+                style={{ background: SURF2, border: `1px solid ${BORDER}`, fontSize: 12 }}
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
             </div>
             {currentList.length === 0 ? (
               <EmptyState isCoach={activeTab === "coach"} onBrowse={() => onNavigate("coaches")} />
+            ) : visibleList.length === 0 ? (
+              <div className="rounded-3xl border p-8 text-center" style={{ background: SURF, borderColor: BORDER }}>
+                <p className="text-white font-black" style={{ fontSize: 15 }}>No matching coaching items</p>
+                <p style={{ color: TS, fontSize: 12 }}>Try a different search, status, or sort option.</p>
+              </div>
             ) : (
               <div className="grid gap-3">
-                {currentList.map((req) => (
-                  <SessionCard
-                    key={req.id}
-                    req={req}
-                    mode={activeTab === "coach" ? "coach" : "student"}
-                    onTicket={setTicketReq}
-                    onBookCourt={(r) => onNavigate("book_court", { sport: r.sport, date: r.requestedDate, time: r.requestedTime })}
-                    onDecision={(r, action) => setDecision({ req: r, action })}
-                  />
-                ))}
+                {visibleList.map((req) => {
+                  const coachForReq = coaches.find((coach) => String(coach.id) === String(req.coachId));
+                  const computedCoachFee = Math.max(0, Number(req.coachFee ?? (coachForReq?.hourlyRate || myCoachProfile?.hourlyRate || 0) * (req.durationHours || 1)));
+                  const enrichedReq = {
+                    ...req,
+                    coachFee: computedCoachFee,
+                    totalAmount: req.totalAmount ?? computedCoachFee,
+                  };
+                  return (
+                    <SessionCard
+                      key={req.id}
+                      req={enrichedReq}
+                      mode={activeTab === "coach" ? "coach" : "student"}
+                      onTicket={setTicketReq}
+                      onBookCourt={(r) => onNavigate("book_court", {
+                        sport: r.sport,
+                        date: r.requestedDate,
+                        time: r.requestedTime,
+                        coachingSessionId: r.id,
+                        coachingStudentName: r.userName,
+                        coachingStudentId: r.userId,
+                        coachName: r.coachName,
+                        coachHourlyRate: coachForReq?.hourlyRate || myCoachProfile?.hourlyRate || (computedCoachFee / Math.max(1, r.durationHours || 1)),
+                        durationHours: r.durationHours || 1,
+                      })}
+                      onDecision={(r, action) => setDecision({ req: r, action })}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>
 
-          <aside className="rounded-3xl border p-5 space-y-4" style={{ background: SURF, borderColor: BORDER }}>
+          <aside className="rounded-2xl border p-4 space-y-3 xl:sticky xl:top-4" style={{ background: SURF, borderColor: BORDER }}>
             <div>
               <p className="text-white font-black" style={{ fontSize: 15 }}>Session Guide</p>
-              <p style={{ color: TS, fontSize: 12, lineHeight: 1.55 }}>Coaching is request-first. The coach accepts or declines, then the student pays manually through JRC staff or the official GCash QR before the session proceeds.</p>
+              <p style={{ color: TS, fontSize: 12, lineHeight: 1.55 }}>Coaching is request-first. The coach reserves and pays for the court while accepting. The student pays only the coaching fee through JRC staff or the official GCash QR.</p>
             </div>
             <div className="space-y-2">
               {[
                 ["Pending", "Waiting for coach action", "#eab308"],
-                ["Confirmed", "Manual payment instructions available", GREEN],
+                ["Confirmed", "Court reserved and coaching fee ticket available", GREEN],
                 ["Declined", "Session will not proceed", RED],
               ].map(([label, desc, color]) => (
-                <div key={label} className="rounded-2xl p-3" style={{ background: SURF2 }}>
+                <div key={label} className="rounded-xl p-3" style={{ background: SURF2 }}>
                   <p className="font-black" style={{ color, fontSize: 12 }}>{label}</p>
                   <p style={{ color: TS, fontSize: 11 }}>{desc}</p>
                 </div>

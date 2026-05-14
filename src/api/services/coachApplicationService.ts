@@ -140,7 +140,7 @@ export const coachApplicationService = {
         let query = supabase
           .from('coach_applications')
           .select('id, certifications, status')
-          .in('status', ['pending', 'approved']);
+          .eq('status', 'pending');
         if (applicant_user_id) query = query.eq('applicant_user_id', applicant_user_id);
         else query = query.ilike('user_email', email);
         const { data: existing, error: existingErr } = await query.limit(20);

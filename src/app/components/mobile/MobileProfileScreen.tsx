@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from "motion/react";
 import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
-  HelpCircle, MapPin, Star, CheckCircle, Clock, XCircle, Settings,
+  HelpCircle, Star, CheckCircle, Clock, XCircle,
   X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download, Camera,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useCoaching } from "../../contexts/CoachingContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
@@ -358,7 +359,8 @@ function QRTicketDialog({ booking, onClose }: {
 }
 
 export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
-  const { user, bookings, logout, updateBooking, addCancellationRequest } = useUser();
+  const { user, bookings, logout, updateBooking, addCancellationRequest, updateUser } = useUser();
+  const { findCoachByEmail } = useCoaching();
   const { getUserProfile, getUserLoyaltyPoints, updateUserProfile } = useUserAPI();
   const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -372,9 +374,16 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const [profilePhotoSource, setProfilePhotoSource] = useState("");
   const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [isEditingAccount, setIsEditingAccount] = useState(false);
+  const [accountName, setAccountName] = useState(user?.name || "");
+  const [accountPhone, setAccountPhone] = useState(user?.phone || "");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAdmin = user?.email === "admin@jrc.com";
+  const coachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
+  const roleLabel = coachProfile ? "COACH" : isAdmin ? "ADMIN" : "USER";
+  const roleColor = coachProfile ? "#2563EB" : isAdmin ? "#FFD700" : "#22c55e";
 
   // Fetch profile data from API on mount
   const loadProfileData = async () => {
@@ -408,6 +417,8 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
   useEffect(() => {
     setProfilePhoto(loadProfilePhoto(user?.id));
+    setAccountName(user?.name || "");
+    setAccountPhone(user?.phone || "");
   }, [user?.id]);
 
   const userBookings = bookings;
@@ -476,6 +487,25 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     }
   };
 
+  const handleSaveAccount = async () => {
+    if (!user?.id) return;
+    const nextName = accountName.trim() || user.name;
+    const nextPhone = accountPhone.trim();
+    setIsSavingAccount(true);
+    try {
+      await updateUserProfile(user.id, { full_name: nextName, phone: nextPhone });
+      updateUser(user.id, { name: nextName, phone: nextPhone });
+      toast.success("Account info updated");
+      setIsEditingAccount(false);
+      setActiveModal(null);
+    } catch (error) {
+      console.error(error);
+      toast.error("Could not update account info");
+    } finally {
+      setIsSavingAccount(false);
+    }
+  };
+
   if (!user) return null;
 
   return (
@@ -485,12 +515,15 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         <div className="absolute inset-0 bg-gradient-to-b from-[#FF8C00]/20 to-transparent" />
         <div className="relative px-5 pt-6 pb-5">
           <div className="flex items-start justify-between mb-5">
-            <h2 className="text-white" style={{ fontSize: 22, fontWeight: 900 }}>Profile</h2>
+            <div>
+              <h2 className="text-white" style={{ fontSize: 22, fontWeight: 900 }}>Account & Activity</h2>
+              <p className="text-gray-500" style={{ fontSize: 12 }}>Profile, bookings, rewards, and support</p>
+            </div>
             <button
               onClick={() => setActiveModal("settings")}
               className="w-10 h-10 rounded-xl bg-[#1E1E1E] border border-white/10 flex items-center justify-center"
             >
-              <Settings size={17} className="text-gray-400" />
+              <User size={17} className="text-gray-400" />
             </button>
           </div>
 
@@ -516,22 +549,22 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                 </div>
               )}
             </button>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
-                <h3 className="text-white font-black" style={{ fontSize: 18 }}>{user.name}</h3>
-                {isAdmin && (
-                  <span
-                    className="rounded-full px-2 py-0.5"
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      backgroundColor: "#FFD70020",
-                      color: "#FFD700",
-                    }}
-                  >
-                    ADMIN
-                  </span>
-                )}
+                <h3 className="text-white font-black truncate" style={{ fontSize: 18 }}>{user.name}</h3>
+                <motion.span
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="rounded-full px-2 py-0.5 flex-shrink-0"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    backgroundColor: `${roleColor}20`,
+                    color: roleColor,
+                  }}
+                >
+                  {roleLabel}
+                </motion.span>
               </div>
               <p className="text-gray-400" style={{ fontSize: 13 }}>{user.email}</p>
               <p className="text-gray-500" style={{ fontSize: 12, marginTop: 2 }}>
@@ -549,15 +582,18 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             { icon: CalendarDays, label: "Bookings", value: userBookings.length, color: "#FF8C00" },
             { icon: Trophy, label: "Points", value: user.loyaltyPoints, color: "#FFD700" },
             { icon: Star, label: "Sports", value: user.favoriteSports.length, color: "#0047AB" },
-          ].map((stat) => (
-            <div
+          ].map((stat, index) => (
+            <motion.div
               key={stat.label}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
               className="bg-[#1A1A1A] rounded-2xl p-3.5 border border-white/5 flex flex-col items-center gap-1"
             >
               <stat.icon size={19} style={{ color: stat.color }} />
               <span className="text-white font-black" style={{ fontSize: 22 }}>{stat.value}</span>
               <span className="text-gray-500" style={{ fontSize: 11 }}>{stat.label}</span>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -690,7 +726,20 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
       {/* Contact Info */}
       <div className="px-5 mb-5">
-        <h3 className="text-white mb-3" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditingAccount(false);
+              setActiveModal("settings");
+            }}
+            className="px-3 py-1.5 rounded-xl text-[#FF8C00] font-black"
+            style={{ fontSize: 12, background: "rgba(255,140,0,0.1)", border: "1px solid rgba(255,140,0,0.22)" }}
+          >
+            Edit
+          </button>
+        </div>
         <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-white/5 space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center flex-shrink-0">
@@ -715,16 +764,31 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
       {/* Account Menu */}
       <div className="px-5 mb-5">
-        <h3 className="text-white mb-3" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
+          <button
+            type="button"
+            onClick={() => {
+              setIsEditingAccount(false);
+              setActiveModal("settings");
+            }}
+            className="px-3 py-1.5 rounded-xl text-gray-300 font-black"
+            style={{ fontSize: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            Account Info
+          </button>
+        </div>
         <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
           {[
             { icon: Bell, label: "Notifications", color: "#0047AB", key: "notifications" },
-            { icon: MapPin, label: "Saved Locations", color: "#22c55e", key: "locations" },
             { icon: HelpCircle, label: "Help & Support", color: "#a855f7", key: "help" },
             { icon: Shield, label: "Privacy Policy", color: "#06b6d4", key: "privacy" },
-          ].map((item) => (
-            <button
+          ].map((item, index) => (
+            <motion.button
               key={item.label}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.04 }}
               onClick={() => setActiveModal(item.key)}
               className="w-full flex items-center gap-3 px-4 py-4 hover:bg-white/3 transition-all active:bg-white/5"
             >
@@ -738,7 +802,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                 {item.label}
               </span>
               <ChevronRight size={15} className="text-gray-600" />
-            </button>
+            </motion.button>
           ))}
         </div>
       </div>
@@ -804,23 +868,76 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
       {/* Settings Modal */}
       <AnimatePresence>
         {activeModal === "settings" && (
-          <SettingsModal title="Account Settings" onClose={() => setActiveModal(null)}>
-            <div className="space-y-3">
-              <div>
-                <label className="text-gray-500 block mb-1" style={{ fontSize: 12, fontWeight: 700 }}>Display Name</label>
-                <div className="bg-[#252525] rounded-xl px-4 py-3 border border-white/10">
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>{user.name}</p>
+          <SettingsModal title="Account Info" onClose={() => { setIsEditingAccount(false); setActiveModal(null); }}>
+            <div className="space-y-4">
+              <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: `${roleColor}10`, border: `1px solid ${roleColor}25` }}>
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: `${roleColor}18` }}>
+                  {coachProfile ? <Trophy size={18} style={{ color: roleColor }} /> : <User size={18} style={{ color: roleColor }} />}
+                </div>
+                <div>
+                  <p className="text-white font-black" style={{ fontSize: 14 }}>{roleLabel === "COACH" ? "Coach account" : "User account"}</p>
+                  <p className="text-gray-500" style={{ fontSize: 12 }}>{coachProfile ? `${coachProfile.sport} coach profile active` : "Standard JRC member access"}</p>
                 </div>
               </div>
               <div>
-                <label className="text-gray-500 block mb-1" style={{ fontSize: 12, fontWeight: 700 }}>Email</label>
-                <div className="bg-[#252525] rounded-xl px-4 py-3 border border-white/10">
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>{user.email}</p>
-                </div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Display Name</label>
+                <input
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
+                  disabled={!isEditingAccount}
+                  className="w-full bg-[#252525] rounded-xl px-4 py-3 border border-white/10 text-white font-black outline-none focus:border-[#FF8C00]/50 disabled:opacity-80"
+                  style={{ fontSize: 14 }}
+                />
               </div>
-              <p className="text-gray-500 text-center pt-2" style={{ fontSize: 12 }}>
-                Contact support to update your profile details.
-              </p>
+              <div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Phone</label>
+                <input
+                  value={accountPhone}
+                  onChange={(event) => setAccountPhone(event.target.value)}
+                  disabled={!isEditingAccount}
+                  className="w-full bg-[#252525] rounded-xl px-4 py-3 border border-white/10 text-white font-black outline-none focus:border-[#FF8C00]/50 disabled:opacity-80"
+                  style={{ fontSize: 14 }}
+                  placeholder="09XX XXX XXXX"
+                />
+              </div>
+              <div>
+                <label className="text-gray-500 block mb-1.5" style={{ fontSize: 12, fontWeight: 800 }}>Email</label>
+                <div className="bg-[#202020] rounded-xl px-4 py-3 border border-white/8">
+                  <p className="text-gray-300 font-black" style={{ fontSize: 14 }}>{user.email}</p>
+                </div>
+                <p className="text-gray-500 mt-1.5" style={{ fontSize: 11 }}>Email cannot be changed here. Please contact front desk support for email updates.</p>
+              </div>
+              {isEditingAccount ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setAccountName(user.name || "");
+                      setAccountPhone(user.phone || "");
+                      setIsEditingAccount(false);
+                    }}
+                    className="py-3.5 rounded-2xl text-gray-300 font-black"
+                    style={{ background: "rgba(255,255,255,0.07)", fontSize: 14 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveAccount}
+                    disabled={isSavingAccount}
+                    className="py-3.5 rounded-2xl text-white font-black disabled:opacity-60"
+                    style={{ background: "linear-gradient(135deg,#FF8C00,#EA580C)", fontSize: 14 }}
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsEditingAccount(true)}
+                  className="w-full py-3.5 rounded-2xl text-white font-black"
+                  style={{ background: "linear-gradient(135deg,#FF8C00,#EA580C)", fontSize: 14 }}
+                >
+                  Edit Account Info
+                </button>
+              )}
             </div>
           </SettingsModal>
         )}
@@ -880,23 +997,6 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             </div>
           </SettingsModal>
         )}
-        {activeModal === "locations" && (
-          <SettingsModal title="Saved Locations" onClose={() => setActiveModal(null)}>
-            <div className="space-y-3">
-              <div className="bg-[#252525] rounded-xl p-4 border border-[#FF8C00]/20 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center">
-                  <MapPin size={16} className="text-[#FF8C00]" />
-                </div>
-                <div>
-                  <p className="text-white font-black" style={{ fontSize: 14 }}>JRC Ballpark Complex</p>
-                  <p className="text-gray-500" style={{ fontSize: 12 }}>106 McArthur Hwy, Valenzuela City</p>
-                </div>
-                <CheckCircle size={16} className="text-green-400 ml-auto" />
-              </div>
-              <p className="text-gray-500 text-center" style={{ fontSize: 12 }}>Your default facility is set.</p>
-            </div>
-          </SettingsModal>
-        )}
       </AnimatePresence>
 
       {/* Profile Photo Cropper */}
@@ -920,7 +1020,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isSavingPhoto && (
+        {(isSavingPhoto || isSavingAccount) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -935,7 +1035,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                   animate={{ rotate: 360 }}
                   transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
                 />
-                <p className="text-white font-black" style={{ fontSize: 14 }}>Saving profile picture...</p>
+                <p className="text-white font-black" style={{ fontSize: 14 }}>{isSavingAccount ? "Saving account info..." : "Saving profile picture..."}</p>
               </div>
             </div>
           </motion.div>
@@ -980,16 +1080,16 @@ function SettingsModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[55] flex items-end"
+      className="absolute inset-0 bg-black/70 backdrop-blur-sm z-[55] flex items-end sm:items-center justify-center sm:p-4"
       onClick={onClose}
     >
       <motion.div
-        initial={{ y: 300 }}
-        animate={{ y: 0 }}
-        exit={{ y: 300 }}
+        initial={{ y: 300, opacity: 0.8, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 300, opacity: 0.8, scale: 0.98 }}
         transition={{ type: 'spring', stiffness: 320, damping: 32 }}
         onClick={e => e.stopPropagation()}
-        className="w-full rounded-t-3xl p-6 border-t border-white/10"
+        className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 border-t sm:border border-white/10"
         style={{ background: '#1A1A1A', maxHeight: '90vh', overflowY: 'auto' }}
       >
         <div className="flex items-center justify-between mb-4">

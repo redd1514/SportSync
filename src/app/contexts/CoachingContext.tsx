@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { apiFetch } from "../utils/authenticatedFetch";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
+import { useUser } from "./UserContext";
 
 const COACHING_REQUESTS_STORAGE_KEY = "sportsync_coaching_requests";
 const COACHING_REQUESTS_KV_KEY = "coaching_requests";
@@ -17,17 +18,40 @@ function readLegacyStoredRequests(): CoachingRequest[] {
   }
 }
 
+function parseAcceptanceDetails(adminNotes?: string): Partial<CoachingRequest> {
+  if (!adminNotes) return {};
+  const match = adminNotes.match(/COACHING_ACCEPTANCE:(\{.*\})/s);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      linkedBookingId: typeof parsed.linkedBookingId === "string" ? parsed.linkedBookingId : undefined,
+      courtName: typeof parsed.court === "string" ? parsed.court : undefined,
+      courtAmount: typeof parsed.courtAmount === "number" ? parsed.courtAmount : undefined,
+      coachFee: typeof parsed.coachFee === "number" ? parsed.coachFee : undefined,
+      totalAmount: typeof parsed.totalDue === "number" ? parsed.totalDue : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape.
  * DB statuses: pending | approved | rejected | cancelled
  * UI statuses: pending | confirmed | rejected
  */
 export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>): CoachingRequest {
   const notes = typeof row.notes === "string" ? row.notes : "";
-  const adminNotes = typeof row.admin_notes === "string" ? row.admin_notes : undefined;
+  const adminNotes =
+    typeof row.admin_notes === "string"
+      ? row.admin_notes
+      : typeof row.adminNotes === "string"
+        ? row.adminNotes
+        : undefined;
 
   const dbStatus = String(row.status || "pending");
   let status: CoachingRequest["status"] = "pending";
-  if (dbStatus === "approved" || dbStatus === "scheduled" || dbStatus === "completed") {
+  if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled" || dbStatus === "completed") {
     status = "confirmed";
   } else if (dbStatus === "rejected" || dbStatus === "cancelled") {
     status = "rejected";
@@ -56,6 +80,7 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     message: typeof row.message === "string" ? row.message : (notes || ""),
     adminNotes,
     durationHours,
+    ...parseAcceptanceDetails(adminNotes),
     status,
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
     viewerIsCoachForThisSession: row.viewerIsCoachForThisSession as boolean | undefined,
@@ -104,6 +129,11 @@ export interface CoachingRequest {
   message: string;
   adminNotes?: string;
   durationHours?: number;
+  linkedBookingId?: string;
+  courtName?: string;
+  courtAmount?: number;
+  coachFee?: number;
+  totalAmount?: number;
   /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined */
   status: "pending" | "confirmed" | "rejected";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
@@ -122,6 +152,7 @@ interface CoachingContextType {
   updateCoach: (id: string, data: Partial<Coach>) => Promise<void>;
   deleteCoach: (id: string) => Promise<void>;
   refreshCoaches: () => Promise<void>;
+  refreshRequests: () => Promise<void>;
   findCoachByEmail: (email: string) => Coach | undefined;
   isLoading: boolean;
   error: string | null;
@@ -130,6 +161,7 @@ interface CoachingContextType {
 const CoachingContext = createContext<CoachingContextType | undefined>(undefined);
 
 export function CoachingProvider({ children }: { children: ReactNode }) {
+  const { user } = useUser();
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [requests, setRequests] = useState<CoachingRequest[]>([]);
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
@@ -163,12 +195,30 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
     refreshCoaches();
   }, [refreshCoaches]);
 
+  const refreshRequests = useCallback(async () => {
+    if (!user?.id) return;
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/users/${encodeURIComponent(user.id)}/coaching-sessions`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load coaching sessions');
+      setRequests(Array.isArray(data) ? (data as Record<string, unknown>[]).map((row) => mapSessionApiRowToCoachingRequest(row)) : []);
+    } catch (e: unknown) {
+      const legacy = readLegacyStoredRequests();
+      if (legacy.length > 0) setRequests(legacy);
+      const msg = e instanceof Error ? e.message : "Failed to load coaching sessions";
+      setError(msg);
+    } finally {
+      setRequestsBootstrapped(true);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         // Try to fetch from database API first
-        const res = await apiFetch(`/api/coaching-sessions`);
+        const res = await apiFetch(user?.id ? `/api/users/${encodeURIComponent(user.id)}/coaching-sessions` : `/api/coaching-sessions`);
         if (!res.ok) throw new Error('Failed to fetch');
         const data = await res.json();
         
@@ -194,7 +244,16 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onRefresh = () => {
+      void refreshRequests();
+    };
+    window.addEventListener("sportsync:coaching-refresh", onRefresh);
+    return () => window.removeEventListener("sportsync:coaching-refresh", onRefresh);
+  }, [refreshRequests]);
 
   // Note: KV store sync removed - coaching sessions now persisted in database
   // useEffect(() => {
@@ -261,6 +320,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       };
 
       setRequests((prev) => [newReq, ...prev]);
+      window.dispatchEvent(new Event('sportsync:notifications-refresh'));
       return newReq.id;
     } catch (error) {
       console.error('Error creating coaching session:', error);
@@ -291,10 +351,12 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
                 ...r,
                 status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"],
                 adminNotes: adminNotes ?? r.adminNotes,
+                ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
               }
             : r
         )
       );
+      window.dispatchEvent(new Event('sportsync:notifications-refresh'));
     } catch (error) {
       console.error('Error updating request status:', error);
       throw error;
@@ -355,7 +417,11 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
     await refreshCoaches();
   };
 
-  const findCoachByEmail = (email: string) => coaches.find((c) => c.email === email);
+  const findCoachByEmail = (email: string) => {
+    const normalized = email.trim().toLowerCase();
+    if (normalized === "user@jrc.com") return undefined;
+    return coaches.find((c) => c.email?.trim().toLowerCase() === normalized);
+  };
 
   return (
     <CoachingContext.Provider
@@ -368,6 +434,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
         updateCoach,
         deleteCoach,
         refreshCoaches,
+        refreshRequests,
         activeRequestId,
         setActiveRequestId,
         findCoachByEmail,

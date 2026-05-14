@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
 import { listStaffOperationsRecent } from '../services/deskBookingService.ts';
+import { RealtimeEventEmitter } from '../services/realtimeEventEmitter.ts';
 
 const staffRouter = new Hono();
 
@@ -11,22 +12,32 @@ function isUuid(value: string): boolean {
 async function sendUserNotification(bookingId: string, staffId: string, title: string, desc: string, type: 'update' | 'alert' = 'update') {
   try {
     const { data: b } = await supabase.from('bookings').select('user_id').eq('id', bookingId).maybeSingle();
-    let userName = 'User';
-    if (b?.user_id) {
-      const { data: u } = await supabase.from('users').select('full_name, email').eq('id', b.user_id).maybeSingle();
-      userName = u?.full_name || u?.email || 'User';
-    }
-    await supabase.from('announcements').insert({
-      title: `${title} - ${userName}`,
-      description: desc,
-      announcement_type: type,
-      created_by: isUuid(staffId) ? staffId : null,
-      is_published: true,
-      published_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    if (!b?.user_id) return;
+    await RealtimeEventEmitter.notifyUser(String(b.user_id), 'front_desk_update', {
+      title,
+      message: desc,
+      type,
+      bookingId,
+      staffId: isUuid(staffId) ? staffId : null,
     });
   } catch (e) {
     console.error('[sendUserNotification] error:', e);
+  }
+}
+
+async function sendCoachingNotification(sessionId: string, title: string, desc: string, type: 'update' | 'alert' = 'update') {
+  try {
+    const { data: s } = await supabase.from('coaching_sessions').select('user_id, coach_id').eq('id', sessionId).maybeSingle();
+    if (s?.user_id) {
+      await RealtimeEventEmitter.notifyUser(String(s.user_id), 'coaching_front_desk_update', {
+        title,
+        message: desc,
+        type,
+        sessionId,
+      });
+    }
+  } catch (e) {
+    console.error('[sendCoachingNotification] error:', e);
   }
 }
 
@@ -136,7 +147,42 @@ staffRouter.get('/requests/pending', async (c) => {
       else cancellations.push(base);
     }
 
-    return c.json({ cancellations, reschedules, coaching: [] });
+    const { data: coachingRows } = await supabase
+      .from('coaching_sessions')
+      .select('id, user_id, coach_id, session_date, start_time, end_time, status, admin_notes, notes')
+      .eq('status', 'approved')
+      .limit(300);
+
+    const coachingUserIds = [...new Set((coachingRows || []).map((r: any) => r.user_id).filter(Boolean))];
+    const coachingCoachIds = [...new Set((coachingRows || []).map((r: any) => r.coach_id).filter(Boolean))];
+    const coachingUsers: Record<string, any> = {};
+    const coachingCoaches: Record<string, any> = {};
+    if (coachingUserIds.length) {
+      const { data: users } = await supabase.from('users').select('id, full_name, email').in('id', coachingUserIds);
+      for (const u of users || []) coachingUsers[u.id] = u;
+    }
+    if (coachingCoachIds.length) {
+      const { data: coaches } = await supabase.from('coaches').select('id, name, sport').in('id', coachingCoachIds);
+      for (const coach of coaches || []) coachingCoaches[coach.id] = coach;
+    }
+    const coaching = (coachingRows || [])
+      .filter((row: any) => !/PAYMENT_VERIFIED|Manual coaching payment verified/i.test(String(row.admin_notes || row.notes || '')))
+      .map((row: any) => {
+        const coach = coachingCoaches[row.coach_id];
+        const student = coachingUsers[row.user_id];
+        return {
+          id: row.id,
+          userName: student?.full_name || student?.email || 'Student',
+          coachName: coach?.name || 'Coach',
+          sport: coach?.sport || 'Sports',
+          requestedDate: row.session_date,
+          requestedTime: row.start_time,
+          status: 'confirmed',
+          isReal: true,
+        };
+      });
+
+    return c.json({ cancellations, reschedules, coaching });
   } catch (e: any) {
     console.error('[staff/requests/pending]', e?.message);
     return c.json({ cancellations: [], reschedules: [], coaching: [] }, 200);
@@ -350,6 +396,70 @@ staffRouter.put('/requests/:id/reschedule/reject', async (c) => {
     return c.json({ success: true, id });
   } catch (e: any) {
     return c.json({ error: e?.message || 'Reject failed' }, 400);
+  }
+});
+
+staffRouter.put('/requests/:id/coaching/verify', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { data: session, error: fetchErr } = await supabase
+      .from('coaching_sessions')
+      .select('id, status, admin_notes')
+      .eq('id', id)
+      .maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!session) return c.json({ error: 'Coaching session not found' }, 404);
+    if (session.status !== 'approved') return c.json({ error: 'Coach has not accepted this request yet.' }, 400);
+
+    const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nManual coaching payment verified at the front desk or official GCash QR before session check-in.`.trim();
+    const { error } = await supabase
+      .from('coaching_sessions')
+      .update({ admin_notes: note, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+
+    await sendCoachingNotification(
+      id,
+      'Coaching payment verified',
+      'Front desk verified your manual coaching payment. Your coaching ticket is cleared for check-in.',
+    );
+
+    return c.json({ success: true, id });
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Coaching verification failed' }, 400);
+  }
+});
+
+staffRouter.put('/requests/:id/coaching/reject', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const reason = String((body as any).reason || '').trim();
+    const { data: session, error: fetchErr } = await supabase
+      .from('coaching_sessions')
+      .select('id, status, admin_notes')
+      .eq('id', id)
+      .maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!session) return c.json({ error: 'Coaching session not found' }, 404);
+
+    const note = `${session.admin_notes || ''}\nPAYMENT_REVIEW_REJECTED:${reason || 'Not specified'}`.trim();
+    const { error } = await supabase
+      .from('coaching_sessions')
+      .update({ admin_notes: note, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+
+    await sendCoachingNotification(
+      id,
+      'Coaching payment needs review',
+      `Front desk could not verify the coaching payment. Reason: ${reason || 'Not specified'}`,
+      'alert',
+    );
+
+    return c.json({ success: true, id });
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Coaching rejection failed' }, 400);
   }
 });
 
