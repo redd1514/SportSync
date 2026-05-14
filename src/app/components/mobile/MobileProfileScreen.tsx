@@ -11,6 +11,8 @@ import { useUserAPI } from "../../hooks/useUserAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
 import { downloadTicketQrPng } from "../../../shared/qrDownload";
+import { toast } from "sonner";
+import { AvatarCreator, AvatarDisplay, loadAvatarConfig, type AvatarConfig } from "../user/AvatarCreator";
 
 interface MobileProfileScreenProps {
   onLogout: () => void;
@@ -231,68 +233,127 @@ function RescheduleDialog({ booking, onClose, onConfirm }: {
   );
 }
 
-/* ── QR Ticket Viewer ── */
+/* ── QR Ticket Viewer (Styled) ── */
 function QRTicketDialog({ booking, onClose }: {
-  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number };
+  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number; status?: string };
   onClose: () => void;
 }) {
-  const [downloadBusy, setDownloadBusy] = useState(false);
-  const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
-  const endH = parseInt(booking.time) + (booking.duration || 1);
   const qrValue = (booking.refCode || booking.id || '').toString();
-  const fileBase = (booking.refCode || booking.id || 'ticket').toString().replace(/\s+/g, '_');
+  const displayToken = qrValue.startsWith('JRC-') ? qrValue : `JRC-${qrValue.slice(0, 6).toUpperCase()}`;
+  const color = getSportColor(booking.sport);
+  const ticketId = 'jrc-ticket-canvas-mobile';
+
+  const downloadTicket = async () => {
+    const ticketEl = document.getElementById(ticketId);
+    if (!ticketEl) return;
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(ticketEl, { scale: 3, backgroundColor: null, useCORS: true });
+      const a = document.createElement('a');
+      a.download = `${displayToken}-JRC-Ticket.png`;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+      toast.success('Ticket downloaded!');
+    } catch {
+      // fallback
+      const svg = ticketEl.querySelector('svg');
+      if (!svg) return;
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const a = document.createElement('a');
+      a.download = `${displayToken}-Ticket.svg`;
+      a.href = 'data:image/svg+xml;base64,' + btoa(svgData);
+      a.click();
+      toast.success('QR downloaded!');
+    }
+  };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}>
-      <motion.div initial={{ scale: 0.88, y: 24 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.88, y: 24 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-xs rounded-3xl overflow-hidden"
-        style={{ background: '#1A1A1A', border: '1px solid rgba(255,255,255,0.1)' }}>
-        <div className="p-5 flex flex-col items-center gap-4">
-          <div className="flex items-center justify-between w-full">
-            <p className="text-white font-black" style={{ fontSize: 16 }}>Your QR Ticket</p>
-            <button onClick={onClose} className="w-8 h-8 rounded-xl bg-white/8 flex items-center justify-center"><X size={14} className="text-gray-400" /></button>
+    <div
+      className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex flex-col items-center gap-4 w-full max-w-xs"
+      >
+        <div
+          id={ticketId}
+          className="w-full rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)]"
+          style={{ background: '#111' }}
+        >
+          <div className="px-6 pt-6 pb-4" style={{ background: `linear-gradient(135deg, ${color}22, ${color}08)`, borderBottom: `1px solid ${color}30` }}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${color}20`, border: `1px solid ${color}40` }}>
+                <SportIcon sport={booking.sport} size={20} color={color} strokeWidth={2.5} />
+              </div>
+              <div>
+                <p className="text-white font-black" style={{ fontSize: 18 }}>{booking.sport || 'Court Booking'}</p>
+                <p className="text-gray-400 font-medium" style={{ fontSize: 12 }}>{booking.court} · JRC Facility</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
+              <span className="font-black uppercase" style={{ fontSize: 9, letterSpacing: 1, color }}>{booking.status?.toUpperCase() || 'RESERVED'}</span>
+            </div>
           </div>
-          <div className="bg-white rounded-2xl p-4 flex flex-col items-center gap-2 w-full">
-            <QRCodeSVG value={qrValue} size={160} level="H" />
-            <button
-              type="button"
-              disabled={downloadBusy || !qrValue}
-              onClick={async () => {
-                setDownloadBusy(true);
-                try {
-                  await downloadTicketQrPng({
-                    value: qrValue,
-                    fileBaseName: fileBase,
-                    displayCode: booking.refCode || qrValue,
-                  });
-                } catch (e) {
-                  console.error(e);
-                } finally {
-                  setDownloadBusy(false);
-                }
-              }}
-              className="w-full py-2.5 rounded-xl font-black text-gray-800 bg-gray-100 border border-gray-200 flex items-center justify-center gap-2 disabled:opacity-45"
-              style={{ fontSize: 12 }}
-            >
-              <Download size={14} />
-              {downloadBusy ? 'Preparing…' : 'Download QR image'}
-            </button>
+
+          <div className="px-6 py-4 space-y-3 border-b border-white/5">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Date</span>
+              <span className="text-white font-black" style={{ fontSize: 13 }}>
+                {booking.date ? new Date(booking.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Time</span>
+              <span className="text-white font-black" style={{ fontSize: 13 }}>
+                {booking.time ? (() => { const [h] = booking.time.split(':').map(Number); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; })() : '—'} · {booking.duration || 1}hr
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Amount</span>
+              <span className="font-black" style={{ fontSize: 13, color: '#FF8C00' }}>₱{(booking.amount || 0).toLocaleString()}</span>
+            </div>
           </div>
-          <p className="font-black text-white tracking-widest" style={{ fontSize: 16 }}>{booking.refCode || 'NO CODE'}</p>
-          <p className="text-gray-400 text-center" style={{ fontSize: 12 }}>Show this at the front desk to check in</p>
-          <div className="w-full bg-[#111] rounded-xl p-3 space-y-1.5 border border-white/5">
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Sport</span><span className="text-white font-black" style={{ fontSize: 12 }}>{booking.sport}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Court</span><span className="text-white font-black" style={{ fontSize: 12 }}>{booking.court}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Date</span><span className="text-white font-black" style={{ fontSize: 12 }}>{new Date(booking.date + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500" style={{ fontSize: 12 }}>Time</span><span className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(booking.time)} – {fmt12(String(endH))}</span></div>
-            <div className="flex justify-between border-t border-white/8 pt-1.5"><span className="text-gray-500" style={{ fontSize: 12 }}>Amount</span><span className="text-[#FF8C00] font-black" style={{ fontSize: 14 }}>₱{booking.amount.toLocaleString()}</span></div>
+
+          <div className="relative flex items-center px-0 py-0">
+            <div className="w-6 h-6 rounded-full bg-black/95 -ml-3 flex-shrink-0" />
+            <div className="flex-1 border-t-2 border-dashed border-white/10" />
+            <div className="w-6 h-6 rounded-full bg-black/95 -mr-3 flex-shrink-0" />
+          </div>
+
+          <div className="px-6 pt-4 pb-6 flex flex-col items-center">
+            <div className="p-3 bg-white rounded-2xl shadow-lg mb-3">
+              <QRCodeSVG value={qrValue} size={140} />
+            </div>
+            <p className="text-gray-500 font-bold uppercase mb-1" style={{ fontSize: 9, letterSpacing: 1 }}>Show at front desk</p>
+            <p className="text-white font-black" style={{ fontSize: 15, letterSpacing: 1 }}>{displayToken}</p>
+          </div>
+
+          <div className="px-6 py-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            <p className="text-gray-700 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 1.5 }}>JRC Sports Complex · Valenzuela City</p>
           </div>
         </div>
+
+        <div className="flex gap-3 w-full">
+          <button
+            onClick={downloadTicket}
+            className="flex-1 bg-white text-black py-3.5 rounded-2xl font-black text-sm hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
+          >
+            Download Ticket
+          </button>
+          <button
+            onClick={onClose}
+            className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-white hover:bg-white/20 transition-colors flex-shrink-0"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </motion.div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -308,6 +369,8 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [profileData, setProfileData] = useState<any>(null);
   const [loyaltyData, setLoyaltyData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(() => loadAvatarConfig());
+  const [showAvatarCreator, setShowAvatarCreator] = useState(false);
 
   const isAdmin = user?.email === "admin@jrc.com";
 
@@ -337,15 +400,46 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     fetchProfileOnMount();
   }, [user?.id]);
 
-  const userBookings = bookings.filter(b => 
-    b.customerName === user?.name || (b as any).userId === user?.id
-  );
+  const userBookings = bookings;
 
-  const filteredBookings = userBookings.filter((b) =>
-    activeTab === "upcoming"
-      ? ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status)
-      : (b.status === "completed" || b.status === "cancelled")
-  );
+  const localPendingRequests = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_localPendingRequests') || '[]');
+    } catch {
+      return [];
+    }
+  })();
+
+  const [hiddenCompletedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_hiddenCompletedIds') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const parseBookingDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const filteredBookings = userBookings.filter((b) => {
+    const isPastDate = parseBookingDate(b.date) < today;
+    const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
+    
+    if (activeTab === "upcoming") {
+      if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      if (isPendingReq) return false;
+      return true;
+    } else {
+      if (hiddenCompletedIds.includes(b.id)) return false;
+      return isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
+    }
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -372,11 +466,12 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
           {/* User card */}
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#FF8C00] to-[#e67e00] flex items-center justify-center shadow-lg shadow-orange-500/30">
-                <span className="text-white font-black" style={{ fontSize: 26 }}>
-                  {user.name.charAt(0).toUpperCase()}
-                </span>
+            <div className="relative cursor-pointer" onClick={() => setShowAvatarCreator(true)}>
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-orange-500/20 border-2 border-white/10 hover:border-[#FF8C00]/60 transition-colors">
+                <AvatarDisplay config={avatarConfig} size={64} />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#FF8C00] flex items-center justify-center">
+                <Settings size={10} className="text-white" />
               </div>
               {isAdmin && (
                 <div className="absolute -top-1.5 -right-1.5 bg-[#FFD700] rounded-full p-1">
@@ -479,7 +574,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         </div>
 
         {/* Booking list */}
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1 pb-10">
           {filteredBookings.length === 0 ? (
             <div className="text-center py-8 text-gray-500" style={{ fontSize: 14 }}>
               No {activeTab} bookings yet
@@ -764,6 +859,20 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
               <p className="text-gray-500 text-center" style={{ fontSize: 12 }}>Your default facility is set.</p>
             </div>
           </SettingsModal>
+        )}
+      </AnimatePresence>
+
+      {/* Avatar Creator Modal */}
+      <AnimatePresence>
+        {showAvatarCreator && (
+          <AvatarCreator
+            initialConfig={avatarConfig}
+            onClose={() => setShowAvatarCreator(false)}
+            onSave={(cfg) => {
+              setAvatarConfig(cfg);
+              setShowAvatarCreator(false);
+            }}
+          />
         )}
       </AnimatePresence>
 

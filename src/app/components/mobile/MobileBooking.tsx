@@ -10,7 +10,8 @@ import {
   Clock, User, CreditCard, CalendarDays, Info, AlertTriangle,
   ArrowRight, Check, X, Building2
 } from "lucide-react";
-import { projectId, publicAnonKey } from "../../utils/supabase/info";
+const SUPABASE_URL = (import.meta as any).env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useAddons } from "../../contexts/AddonsContext";
@@ -40,7 +41,7 @@ const END_TIME_LABELS = [
   ...TIME_SLOTS.slice(1), "12:00 MN",
 ];
 
-const SERVER_URL = `https://${projectId}.supabase.co/functions/v1/make-server-5628f883`;
+const SERVER_URL = `${SUPABASE_URL?.replace(/\/$/, "")}/functions/v1/make-server-5628f883`;
 
 const generateDemoBookings = (dateStr: string, sport: string): string[] => {
   let hash = 0;
@@ -407,7 +408,7 @@ export function MobileBooking() {
         try {
           const response = await fetch(
             `${SERVER_URL}/bookings?date=${dateStr}&sport=${selectedSport.name}`,
-            { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+            { headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
           );
           if (response.ok) {
             const data = await response.json();

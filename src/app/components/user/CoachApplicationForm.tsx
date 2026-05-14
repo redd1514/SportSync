@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { GraduationCap, CheckCircle, X, Send, Award, Clock, DollarSign, Users, ChevronRight } from "lucide-react";
+import { GraduationCap, CheckCircle, Send, Award, Clock, DollarSign, Users, ChevronRight, Camera, RefreshCw } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
 import { apiFetch } from "../../utils/authenticatedFetch";
@@ -53,6 +53,7 @@ export function CoachApplicationForm() {
   const [requestedRate, setRequestedRate] = useState("800");
   const [certifications, setCertifications] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState("");
 
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
@@ -72,6 +73,7 @@ export function CoachApplicationForm() {
           availability,
           requestedRate: parseInt(requestedRate, 10) || 800,
           certifications,
+          photo_url: photoUrl || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -132,10 +134,14 @@ export function CoachApplicationForm() {
               </div>
             </div>
           </div>
-          <button onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); }}
-            style={{ color: ACCENT_BLUE, fontSize: 13, fontWeight: 700 }}>
-            Submit another application
-          </button>
+          <motion.button
+            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); setPhotoUrl(""); }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black transition-all"
+            style={{ fontSize: 14, background: `${ACCENT_BLUE}18`, border: `1px solid ${ACCENT_BLUE}40`, color: "#60a5fa" }}
+          >
+            <RefreshCw size={15} /> Submit Another Application
+          </motion.button>
         </motion.div>
       </div>
     );
@@ -328,6 +334,30 @@ export function CoachApplicationForm() {
                     <textarea rows={4} value={bio} onChange={e => setBio(e.target.value)}
                       placeholder="e.g. I'm a competitive basketball coach with 5 years experience training youth and adult teams. My sessions focus on..."
                       className={INPUT} style={{ ...inputStyle, marginTop: 6, resize: "none" }} />
+                  </div>
+                  <div>
+                    <label style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>PROFILE PHOTO URL (REQUIRED)</label>
+                    <div className="mt-2 flex items-center gap-3">
+                      <div className="w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 border" style={{ borderColor: photoUrl ? ACCENT_BLUE : BORDER, background: SURFACE2 }}>
+                        {photoUrl ? (
+                          <img src={photoUrl} alt="Preview" className="w-full h-full object-cover" onError={() => setPhotoUrl("") } />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Camera size={18} style={{ color: TEXT_SECONDARY }} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          value={photoUrl}
+                          onChange={e => setPhotoUrl(e.target.value)}
+                          placeholder="https://example.com/your-photo.jpg"
+                          className={INPUT}
+                          style={{ ...inputStyle, marginTop: 0 }}
+                        />
+                        <p style={{ color: TEXT_SECONDARY, fontSize: 10, marginTop: 4 }}>Paste a direct image URL. This will appear on your coach profile card.</p>
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label style={{ color: TEXT_SECONDARY, fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>CERTIFICATIONS (Optional)</label>

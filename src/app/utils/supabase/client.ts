@@ -1,8 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from './info';
 
-// We rebuild the URL here using the ID you copied
-const supabaseUrl = `https://${projectId}.supabase.co`;
+const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY as string;
 
-// Export the ready-to-use Supabase client
-export const supabase = createClient(supabaseUrl, publicAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

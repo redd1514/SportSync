@@ -43,6 +43,7 @@ export function mapBookingRowToAdmin(row: {
   created_at?: string | null;
   updated_at?: string | null;
   courts?: { name?: string; sports?: { name?: string } | null } | null;
+  user_id?: string | null;
 }): {
   id: string;
   refCode: string;
@@ -61,6 +62,7 @@ export function mapBookingRowToAdmin(row: {
   checkInTime?: string;
   createdAt: string;
   facilityMapId?: string;
+  userId?: string;
 } {
   const meta = parseBookingNotes(row.notes ?? undefined);
   const courtName = row.courts?.name ?? 'Court';
@@ -104,6 +106,7 @@ export function mapBookingRowToAdmin(row: {
     checkInTime: checkedIn ? row.updated_at || row.created_at : undefined,
     createdAt: row.created_at ?? new Date().toISOString(),
     facilityMapId: typeof meta.facilityMapId === 'string' && meta.facilityMapId ? meta.facilityMapId : undefined,
+    userId: row.user_id || undefined,
   };
 }
 
@@ -127,5 +130,6 @@ export function deskAdminRowToClientBooking(a: ReturnType<typeof mapBookingRowTo
     checkInStatus: a.checkInStatus,
     checkInTime: a.checkInTime,
     facilityMapId: a.facilityMapId,
+    userId: a.userId,
   };
 }

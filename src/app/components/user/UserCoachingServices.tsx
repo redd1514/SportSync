@@ -12,7 +12,6 @@ import { useCoaching, Coach, CoachingRequest } from "../../contexts/CoachingCont
 import { useUser } from "../../contexts/UserContext";
 import { getSportColor, SportIcon } from "../SportIcons";
 import { SectionLoader } from "../shared/LoadingScreen";
-import { CoachingPaymentModal } from "../CoachingPaymentModal";
 
 const DAY_MAP: Record<string, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
@@ -264,9 +263,6 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
   /* Filtered coaches */
   const filteredCoaches = useMemo(() => {
     return coaches.filter(coach => {
-      // Exclude their own coach profile
-      if (myCoachProfile && coach.id === myCoachProfile.id) return false;
-      
       if (selectedSport !== "All" && coach.sport !== selectedSport) return false;
       if (showAvailableOnly && !coach.isAvailable) return false;
       if (searchQuery.trim()) {
@@ -282,6 +278,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
   const handleRequestSubmit = async () => {
     if (!selectedCoach || !selectedDateObj || !time) return;
     try {
+      setIsRequesting(true);
       const dateStr = format(selectedDateObj, "yyyy-MM-dd");
       const requestId = await addRequest({
         userId: user?.id || "u1",
@@ -295,24 +292,18 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
         durationHours,
       });
       setActiveRequestId(requestId);
-      const newReq: CoachingRequest = {
-        id: requestId,
-        userId: user?.id || "u1",
-        userName: user?.name || "Current User",
-        coachId: selectedCoach.id,
-        coachName: selectedCoach.name,
-        sport: selectedCoach.sport,
-        requestedDate: dateStr,
-        requestedTime: time,
-        message,
-        durationHours,
-        status: "pending",
-        requestedAt: new Date().toISOString()
-      };
-      setCreatedRequest(newReq);
+      setShowSuccess(true);
+      
+      setTimeout(() => {
+        setShowSuccess(false);
+        setIsRequesting(false);
+        setSelectedCoach(null);
+        onNavigate("my-coaching");
+      }, 2000);
     } catch (error) {
       console.error('Error submitting request:', error);
       alert(error instanceof Error ? error.message : 'Failed to submit coaching request');
+      setIsRequesting(false);
     }
   };
 
@@ -695,18 +686,22 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     setMessage("");
                     setIsRequesting(true);
                   }}
-                  disabled={!selectedCoach.isAvailable}
+                  disabled={!selectedCoach.isAvailable || (myCoachProfile?.id === selectedCoach.id)}
                   className="w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 transition-all"
                   style={{
                     fontSize: 15,
-                    background: selectedCoach.isAvailable ? `linear-gradient(135deg,${getSportColor(selectedCoach.sport)},${getSportColor(selectedCoach.sport)}cc)` : 'rgba(255,255,255,0.06)',
-                    color: selectedCoach.isAvailable ? 'white' : '#444',
-                    cursor: selectedCoach.isAvailable ? 'pointer' : 'not-allowed',
-                    boxShadow: selectedCoach.isAvailable ? `0 6px 24px ${getSportColor(selectedCoach.sport)}35` : 'none',
+                    background: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? `linear-gradient(135deg,${getSportColor(selectedCoach.sport)},${getSportColor(selectedCoach.sport)}cc)` : 'rgba(255,255,255,0.06)',
+                    color: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? 'white' : '#444',
+                    cursor: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? 'pointer' : 'not-allowed',
+                    boxShadow: (selectedCoach.isAvailable && myCoachProfile?.id !== selectedCoach.id) ? `0 6px 24px ${getSportColor(selectedCoach.sport)}35` : 'none',
                   }}
                 >
                   <Zap size={16} />
-                  {selectedCoach.isAvailable ? 'Request a Session' : 'Currently Unavailable'}
+                  {myCoachProfile?.id === selectedCoach.id 
+                    ? 'This is your profile' 
+                    : selectedCoach.isAvailable 
+                      ? 'Request a Session' 
+                      : 'Currently Unavailable'}
                 </button>
               </div>
             </motion.div>
@@ -890,35 +885,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
         )}
       </AnimatePresence>
 
-      {/* Payment Modal */}
-      {createdRequest && selectedCoach && (
-        <CoachingPaymentModal
-          isOpen={!!createdRequest}
-          onClose={() => {
-            setCreatedRequest(null);
-            setIsRequesting(false);
-            setSelectedCoach(null);
-            onNavigate("book");
-          }}
-          requestDetails={createdRequest}
-          coachingFee={selectedCoach.hourlyRate}
-          onPaymentComplete={async (proofUrl) => {
-            try {
-              await updateRequestStatus(createdRequest.id, 'confirmed', undefined, proofUrl);
-            } catch (error) {
-              console.error('Error updating request status:', error);
-            }
-            setCreatedRequest(null);
-            setShowSuccess(true);
-            setTimeout(() => {
-              setShowSuccess(false);
-              setIsRequesting(false);
-              setSelectedCoach(null);
-              onNavigate("book");
-            }, 2000);
-          }}
-        />
-      )}
+
     </div>
   );
 }

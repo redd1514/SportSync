@@ -21,6 +21,9 @@ import { FacilityMapViewer } from "../shared/FacilityMapViewer";
 import { FloatingAIChat } from "../FloatingAIChat";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
+import { useAnnouncements } from "../../contexts/AnnouncementsContext";
+import { useCoaching } from "../../contexts/CoachingContext";
+import { AvatarDisplay, loadAvatarConfig } from "../user/AvatarCreator";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -70,12 +73,6 @@ const QUICK_STATS = [
   { icon: Zap,    label: "Available", value: "9 / 12 courts",    color: "#22c55e" },
 ];
 
-const DESKTOP_NOTIFS = [
-  { id: "1", icon: CalendarDays, color: "#FF8C00", title: "Upcoming Booking",  message: "Basketball Court A — Mar 5 at 2:00 PM",     time: "2h ago",  unread: true,  tab: "booking" as Tab },
-  { id: "2", icon: Gift,         color: "#FFD700", title: "Loyalty Reward",    message: "You earned 1 point from your last booking",  time: "1d ago",  unread: true,  tab: "account" as Tab },
-  { id: "3", icon: CheckCircle,  color: "#22c55e", title: "Booking Confirmed", message: "Badminton Court B — Feb 15 completed",        time: "2d ago",  unread: false, tab: "account" as Tab },
-  { id: "4", icon: AlertCircle,  color: "#0047AB", title: "Court Update",      message: "Volleyball Court B now available",            time: "3d ago",  unread: false, tab: "booking" as Tab },
-];
 
 /* ─── Tooltip wrapper (for collapsed sidebar) ─── */
 function SidebarTooltip({ label, children, danger }: { label: string; children: React.ReactNode; danger?: boolean }) {
@@ -103,9 +100,34 @@ function SidebarTooltip({ label, children, danger }: { label: string; children: 
 /* ─── Home view ─── */
 function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
   const { user, bookings } = useUser();
-  const upcomingBookings = bookings.filter(b => ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status));
-  const recentBookings = bookings.slice(0, 4);
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
+
+  const localPendingRequests = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('jrc_localPendingRequests') || '[]');
+    } catch {
+      return [];
+    }
+  })();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const parseBookingDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const upcomingBookings = bookings.filter(b => {
+    const isPastDate = parseBookingDate(b.date) < today;
+    const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
+    if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+    if (isPendingReq) return false;
+    return true;
+  });
+
+  const recentBookings = bookings.slice(0, 4);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -247,14 +269,16 @@ interface DesktopAppShellProps { onLogout: () => void; }
 
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const { user, logout, isAdmin, isStaff } = useUser();
+  const { findCoachByEmail } = useCoaching();
+  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : null;
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [notifs, setNotifs] = useState(DESKTOP_NOTIFS);
+  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
   const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
-  const unread = notifs.filter(n => n.unread).length;
+  const unread = undismissedCount;
 
   const handleLogout = async () => {
     await logout();
@@ -299,10 +323,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
               className="h-full"
             >
               {sub === "mybookings" && (
-                <div className="h-full overflow-y-auto p-6 custom-scrollbar">
-                  <div className="max-w-2xl mx-auto bg-[#111] rounded-2xl overflow-hidden border border-white/5 shadow-xl" style={{ minHeight: 560 }}>
-                    <UserMyBookings />
-                  </div>
+                <div className="h-full overflow-y-auto custom-scrollbar">
+                  <UserMyBookings />
                 </div>
               )}
               {sub === "map" && (
@@ -354,7 +376,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const pageColor = activeNavItem?.color || "#FF8C00";
 
   /* ─── Sidebar nav item ─── */
-  const SidebarItem = ({ item }: { item: NavItem }) => {
+  const renderSidebarItem = (item: NavItem) => {
     const isActive = activeTab === item.id;
     const currentSubId = activeSub[item.id];
     const hasChildren = !!item.children?.length;
@@ -515,7 +537,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
           {!sidebarCollapsed && (
             <p className="text-gray-700 mb-2 pl-2 font-black" style={{ fontSize: 9, letterSpacing: 1.5 }}>NAVIGATION</p>
           )}
-          {NAV.map(item => <SidebarItem key={item.id} item={item} />)}
+          {NAV.map(item => <div key={item.id}>{renderSidebarItem(item)}</div>)}
         </nav>
 
         <div className="w-full h-px bg-white/[0.04] flex-shrink-0" />
@@ -534,8 +556,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
           ) : (
             <div className="rounded-2xl p-3 border border-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
               <div className="flex items-center gap-2.5 mb-2">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "linear-gradient(135deg,#FF8C00,#e67e00)" }}>
-                  <span className="text-white font-black" style={{ fontSize: 14 }}>{user?.name?.charAt(0).toUpperCase() || "?"}</span>
+                <div className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0">
+                  <AvatarDisplay config={loadAvatarConfig()} size={36} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-black truncate" style={{ fontSize: 12 }}>{user?.name}</p>
@@ -599,6 +621,14 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
             </div>
           )}
 
+          {/* Coach badge */}
+          {myCoachProfile && (
+            <div className="flex items-center gap-1.5 rounded-full px-3 py-1.5 border" style={{ background: "rgba(168,85,247,0.06)", borderColor: "rgba(168,85,247,0.15)" }}>
+              <Award size={12} className="text-purple-400" />
+              <span className="text-purple-400 font-black" style={{ fontSize: 12 }}>Coach</span>
+            </div>
+          )}
+
           {/* Notification bell */}
           <div className="relative">
             <button onClick={() => setShowNotifs(s => !s)}
@@ -618,8 +648,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: -8 }}
                   transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  className="absolute right-0 top-full mt-2 w-80 z-50 rounded-2xl overflow-hidden shadow-2xl"
-                  style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)" }}
+                  className="absolute right-0 top-full mt-2 w-80 z-[100] rounded-2xl overflow-hidden shadow-2xl"
+                  style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)", position: 'fixed', top: '60px', right: '16px' }}
                   onClick={e => e.stopPropagation()}
                 >
                   <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between">
@@ -628,21 +658,25 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                       <X size={14} />
                     </button>
                   </div>
-                  {notifs.map(n => (
-                    <button key={n.id} onClick={() => { setNotifs(p => p.map(x => x.id === n.id ? { ...x, unread: false } : x)); navigate(n.tab); setShowNotifs(false); }}
-                      className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
-                    >
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `${n.color}15` }}>
-                        <n.icon size={14} style={{ color: n.color }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
-                        <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{n.message}</p>
-                        <p className="text-gray-700" style={{ fontSize: 10 }}>{n.time}</p>
-                      </div>
-                      {n.unread && <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: n.color }} />}
-                    </button>
-                  ))}
+                  <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {announcements.length === 0 ? (
+                      <div className="py-8 text-center text-gray-500" style={{ fontSize: 13 }}>No notifications</div>
+                    ) : announcements.map(n => (
+                      <button key={n.id} onClick={() => { dismissAnnouncement(n.id); setShowNotifs(false); }}
+                        className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
+                      >
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `rgba(255,140,0,0.15)` }}>
+                          <Bell size={14} style={{ color: '#FF8C00' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
+                          <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{n.message}</p>
+                          <p className="text-gray-700" style={{ fontSize: 10 }}>{new Date(n.createdAt).toLocaleDateString()}</p>
+                        </div>
+                        {!n.dismissed && <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: '#FF8C00' }} />}
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

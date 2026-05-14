@@ -8,6 +8,28 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+async function sendUserNotification(bookingId: string, staffId: string, title: string, desc: string, type: 'update' | 'alert' = 'update') {
+  try {
+    const { data: b } = await supabase.from('bookings').select('user_id').eq('id', bookingId).maybeSingle();
+    let userName = 'User';
+    if (b?.user_id) {
+      const { data: u } = await supabase.from('users').select('full_name, email').eq('id', b.user_id).maybeSingle();
+      userName = u?.full_name || u?.email || 'User';
+    }
+    await supabase.from('announcements').insert({
+      title: `${title} - ${userName}`,
+      description: desc,
+      announcement_type: type,
+      created_by: isUuid(staffId) ? staffId : null,
+      is_published: true,
+      published_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('[sendUserNotification] error:', e);
+  }
+}
+
 /** KPIs for Live Operations + raw staff_operations rows for Activity tab */
 staffRouter.get('/operations', async (c) => {
   const date = c.req.query('date') || new Date().toISOString().split('T')[0];
@@ -156,6 +178,7 @@ staffRouter.put('/requests/:id/cancel/approve', async (c) => {
           notes: null,
         });
       }
+      await sendUserNotification(br.booking_id, staffId, 'Cancellation Approved', 'Your booking cancellation request has been approved by the staff.');
     }
 
     return c.json({ success: true, id });
@@ -197,6 +220,7 @@ staffRouter.put('/requests/:id/cancel/reject', async (c) => {
         action: 'cancel_request_rejected',
         notes: reason || null,
       });
+      await sendUserNotification(br.booking_id, staffId, 'Cancellation Declined', `Your cancellation request was declined. Reason: ${reason || 'Not specified'}`, 'alert');
     }
 
     return c.json({ success: true, id });
@@ -278,6 +302,7 @@ staffRouter.put('/requests/:id/reschedule/approve', async (c) => {
           notes: null,
         });
       }
+      await sendUserNotification(br.booking_id, staffId, 'Reschedule Approved', `Your booking has been successfully rescheduled to ${br.requested_new_date} at ${br.requested_new_start_time}.`);
     }
 
     return c.json({ success: true, id });
@@ -319,6 +344,7 @@ staffRouter.put('/requests/:id/reschedule/reject', async (c) => {
         action: 'reschedule_request_rejected',
         notes: reason || null,
       });
+      await sendUserNotification(br.booking_id, staffId, 'Reschedule Declined', `Your reschedule request was declined. Reason: ${reason || 'Not specified'}`, 'alert');
     }
 
     return c.json({ success: true, id });

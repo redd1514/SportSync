@@ -679,6 +679,9 @@ export function FacilityMapBuilder() {
   /* ── Custom sport palette input ── */
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customSportInput, setCustomSportInput] = useState('');
+  
+  /* ── Clipboard ── */
+  const clipboardRef = useRef<CourtBlock | null>(null);
 
   /* ── editor state ── */
   const [blocks,     setBlocks]     = useState<CourtBlock[]>([]);
@@ -827,6 +830,20 @@ export function FacilityMapBuilder() {
         setHistIdx(i=>{ const ni=Math.min(history.length-1,i+1); setBlocks(history[ni]??blocks); return ni; });
       }
       if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); handlePublish(); }
+      if((e.ctrlKey||e.metaKey)&&e.key==='c'&&selectedId&&e.target===document.body){
+        e.preventDefault();
+        const b = blocks.find(x=>x.id===selectedId);
+        if(b) clipboardRef.current = b;
+      }
+      if((e.ctrlKey||e.metaKey)&&e.key==='v'&&clipboardRef.current&&e.target===document.body){
+        e.preventDefault();
+        const src = clipboardRef.current;
+        const dup:CourtBlock={...src,id:`${src.id}-cp-${Date.now()}`,x:src.x+GRID,y:src.y+GRID,name:`${src.name} (Copy)`};
+        mutate(prev=>[...prev,dup], true);
+        setSelectedId(dup.id);
+        setCtxMenu(null);
+        clipboardRef.current = dup; // subsequent pastes will offset further
+      }
       if((e.key==='Delete'||e.key==='Backspace')&&selectedId&&e.target===document.body){
         e.preventDefault(); requestDelete(selectedId);
       }
@@ -1221,6 +1238,7 @@ export function FacilityMapBuilder() {
                     ['Scroll','Zoom in/out'],
                     ['Space + Drag','Pan canvas'],
                     ['Ctrl+Z / Ctrl+Y','Undo / Redo'],
+                    ['Ctrl+C / Ctrl+V','Copy / Paste'],
                     ['Ctrl+S','Publish map'],
                     ['F','Fit to screen'],
                     ['Arrow Keys','Move court 1px'],

@@ -17,20 +17,31 @@ function readLegacyStoredRequests(): CoachingRequest[] {
   }
 }
 
-/** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape. */
+/** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape.
+ * DB statuses: pending | approved | rejected | cancelled
+ * UI statuses: pending | confirmed | rejected
+ */
 export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>): CoachingRequest {
   const notes = typeof row.notes === "string" ? row.notes : "";
-  const linkedMatch = notes.match(/linked_booking:([^\s]+)/);
-  const proofFromNotes = notes
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => /^https?:\/\//i.test(line));
+  const adminNotes = typeof row.admin_notes === "string" ? row.admin_notes : undefined;
 
   const dbStatus = String(row.status || "pending");
   let status: CoachingRequest["status"] = "pending";
-  if (dbStatus === "approved" || dbStatus === "scheduled" || dbStatus === "completed") status = "confirmed";
-  else if (dbStatus === "rejected" || dbStatus === "cancelled") status = "rejected";
-  else if (dbStatus === "pending") status = "pending";
+  if (dbStatus === "approved" || dbStatus === "scheduled" || dbStatus === "completed") {
+    status = "confirmed";
+  } else if (dbStatus === "rejected" || dbStatus === "cancelled") {
+    status = "rejected";
+  }
+
+  // Compute duration from start/end if duration_hours not set
+  let durationHours: number | undefined;
+  if (typeof row.duration_hours === "number") {
+    durationHours = row.duration_hours;
+  } else if (row.start_time && row.end_time) {
+    const [sh, sm] = String(row.start_time).split(":").map(Number);
+    const [eh, em] = String(row.end_time).split(":").map(Number);
+    durationHours = Math.round(((eh * 60 + em) - (sh * 60 + sm)) / 60);
+  }
 
   return {
     id: String(row.id ?? ""),
@@ -41,11 +52,11 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     sport: typeof row.sport === "string" ? row.sport : "Sports",
     requestedDate: String(row.session_date ?? row.requestedDate ?? ""),
     requestedTime: String(row.start_time ?? row.requestedTime ?? ""),
-    message: typeof row.message === "string" ? row.message : notes,
-    durationHours: typeof row.duration_hours === "number" ? row.duration_hours : undefined,
+    endTime: row.end_time ? String(row.end_time) : undefined,
+    message: typeof row.message === "string" ? row.message : (notes || ""),
+    adminNotes,
+    durationHours,
     status,
-    paymentProofUrl: (row.payment_proof_url as string | undefined) || proofFromNotes,
-    linkedBookingId: (row.linked_booking_id as string | undefined) || linkedMatch?.[1],
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
     viewerIsCoachForThisSession: row.viewerIsCoachForThisSession as boolean | undefined,
   };
@@ -89,11 +100,12 @@ export interface CoachingRequest {
   sport: string;
   requestedDate: string;
   requestedTime: string;
+  endTime?: string;
   message: string;
+  adminNotes?: string;
   durationHours?: number;
-  status: "pending" | "pending_verification" | "confirmed" | "rejected";
-  paymentProofUrl?: string;
-  linkedBookingId?: string;
+  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined */
+  status: "pending" | "confirmed" | "rejected";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
   viewerIsStudent?: boolean;
   viewerIsCoachForThisSession?: boolean;
@@ -104,8 +116,8 @@ interface CoachingContextType {
   requests: CoachingRequest[];
   activeRequestId: string | null;
   setActiveRequestId: (id: string | null) => void;
-  addRequest: (req: Omit<CoachingRequest, "id" | "status">) => string;
-  updateRequestStatus: (id: string, status: "pending" | "pending_verification" | "confirmed" | "rejected" | string, linkedBookingId?: string, paymentProofUrl?: string) => void;
+  addRequest: (req: Omit<CoachingRequest, "id" | "status">) => Promise<string>;
+  updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled", adminNotes?: string) => Promise<void>;
   addCoach: (coach: Omit<Coach, "id">) => Promise<void>;
   updateCoach: (id: string, data: Partial<Coach>) => Promise<void>;
   deleteCoach: (id: string) => Promise<void>;
@@ -193,21 +205,30 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
   //   return () => window.clearTimeout(t);
   // }, [requests, requestsBootstrapped]);
 
-  const addRequest = async (req: Omit<CoachingRequest, "id" | "status">) => {
+  const addRequest = async (req: Omit<CoachingRequest, "id" | "status">): Promise<string> => {
     try {
-      // Parse start time and calculate end time
-      const timeStr = req.requestedTime; // "2:00 PM" format
-      const [time, ampm] = timeStr.split(" ");
-      let [h, m] = time.split(":").map(Number);
-      if (ampm === "PM" && h < 12) h += 12;
-      if (ampm === "AM" && h === 12) h = 0;
-      
-      const startHour = h.toString().padStart(2, "0");
-      const startMin = m.toString().padStart(2, "0");
-      const endHour = (h + (req.durationHours || 1)).toString().padStart(2, "0");
-      const endMin = m.toString().padStart(2, "0");
-      
-      // Save to database via API
+      // Parse start time — supports both "14:00:00" (24h) and "2:00 PM" (12h) formats
+      let startHour = 9, startMin = 0;
+      const timeStr = req.requestedTime || "09:00";
+      if (timeStr.includes("AM") || timeStr.includes("PM")) {
+        const [time, ampm] = timeStr.split(" ");
+        let [h, m] = time.split(":").map(Number);
+        if (ampm === "PM" && h < 12) h += 12;
+        if (ampm === "AM" && h === 12) h = 0;
+        startHour = h; startMin = m || 0;
+      } else {
+        const parts = timeStr.split(":").map(Number);
+        startHour = parts[0] || 9; startMin = parts[1] || 0;
+      }
+
+      const dur = req.durationHours || 1;
+      const endHour = Math.min(startHour + Math.floor(dur), 23);
+      const endMin = startMin + Math.round((dur % 1) * 60);
+
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const startTime = `${pad(startHour)}:${pad(startMin)}:00`;
+      const endTime = `${pad(endHour)}:${pad(endMin > 59 ? endMin - 60 : endMin)}:00`;
+
       const res = await apiFetch(`/api/coaching-sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,16 +236,15 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           coach_id: req.coachId,
           user_id: req.userId,
           session_date: req.requestedDate,
-          start_time: `${startHour}:${startMin}:00`,
-          end_time: `${endHour}:${endMin}:00`,
+          start_time: startTime,
+          end_time: endTime,
           status: 'pending',
         }),
       });
-      
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create coaching session');
-      
-      // Create local request object from database response
+
       const newReq: CoachingRequest = {
         id: (data as { id?: string }).id || `r${Date.now()}`,
         userId: req.userId,
@@ -234,11 +254,12 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
         sport: req.sport,
         requestedDate: req.requestedDate,
         requestedTime: req.requestedTime,
+        endTime: endTime,
         message: req.message || '',
-        durationHours: req.durationHours || 1,
+        durationHours: dur,
         status: 'pending',
       };
-      
+
       setRequests((prev) => [newReq, ...prev]);
       return newReq.id;
     } catch (error) {
@@ -249,36 +270,23 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 
   const updateRequestStatus = async (
     id: string,
-    status: "pending" | "pending_verification" | "confirmed" | "rejected" | string,
-    linkedBookingId?: string,
-    paymentProofUrl?: string
-  ) => {
+    status: "pending" | "confirmed" | "rejected" | "cancelled",
+    adminNotes?: string,
+  ): Promise<void> => {
     try {
-      // Update in database via API
       const res = await apiFetch(`/api/coaching-sessions/${encodeURIComponent(id)}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          status,
-          linked_booking_id: linkedBookingId,
-          payment_proof_url: paymentProofUrl,
-        }),
+        body: JSON.stringify({ status, admin_notes: adminNotes }),
       });
-      
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to update session status');
-      
-      // Update local state
+
+      // Optimistically update local state
       setRequests((prev) =>
         prev.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                status: status as CoachingRequest["status"],
-                ...(linkedBookingId && { linkedBookingId }),
-                ...(paymentProofUrl && { paymentProofUrl }),
-              }
-            : r
+          r.id === id ? { ...r, status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"] } : r
         )
       );
     } catch (error) {

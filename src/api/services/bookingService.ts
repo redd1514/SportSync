@@ -245,7 +245,21 @@ export const bookingService = {
       }
       console.log('[BookingService] Found bookings:', data?.length);
       if (data && data.length > 0) {
-        return data as BookingResponse[];
+        const bookingIds = data.map((b: any) => b.id);
+        const { data: requests } = await supabase
+          .from('booking_requests')
+          .select('booking_id')
+          .in('booking_id', bookingIds)
+          .eq('status', 'pending');
+          
+        const mapped = data.map((b: any) => {
+           const hasPendingReq = requests?.some(r => r.booking_id === b.id);
+           return {
+             ...b,
+             cancellation_requested: hasPendingReq || false
+           };
+        });
+        return mapped as BookingResponse[];
       }
       if (USE_MOCK_BOOKINGS) {
         throw new Error('Using mock bookings');

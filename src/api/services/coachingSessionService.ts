@@ -240,25 +240,22 @@ export const coachingSessionService = {
 
   async updateSessionStatus(
     id: string,
-    status: 'pending' | 'pending_verification' | 'confirmed' | 'rejected' | 'cancelled' | 'approved' | 'scheduled' | 'completed',
-    paymentProofUrl?: string,
-    linkedBookingId?: string
+    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved',
+    adminNotes?: string,
   ): Promise<CoachingSessionRow> {
+    // Map UI status → DB status
+    // DB only knows: pending | approved | rejected | cancelled
     const dbStatus =
-      status === 'confirmed'
+      status === 'confirmed' || status === 'approved'
         ? 'approved'
-        : status === 'pending_verification'
-          ? 'pending'
-          : status === 'cancelled'
-            ? 'cancelled'
-            : status === 'rejected'
-              ? 'rejected'
-              : status === 'approved' || status === 'scheduled' || status === 'completed' || status === 'pending'
-                ? status
-                : 'pending';
+        : status === 'cancelled'
+          ? 'cancelled'
+          : status === 'rejected'
+            ? 'rejected'
+            : 'pending';
+
     const update: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
-    const n = notesFromProofAndLinked(paymentProofUrl, linkedBookingId);
-    if (n) update.notes = n;
+    if (adminNotes !== undefined) update.admin_notes = adminNotes;
     
     const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase

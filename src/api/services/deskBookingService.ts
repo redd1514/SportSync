@@ -8,6 +8,7 @@ import {
 
 const BOOKING_SELECT = `
       id,
+      user_id,
       booking_date,
       start_time,
       end_time,

@@ -85,8 +85,7 @@ coachingSessionsRouter.put('/:id/status', async (c) => {
     const session = await coachingSessionService.updateSessionStatus(
       id,
       body.status,
-      body.payment_proof_url || body.paymentProofUrl,
-      body.linked_booking_id || body.linkedBookingId
+      body.admin_notes ?? body.adminNotes,
     );
     return c.json(session);
   } catch (error: any) {

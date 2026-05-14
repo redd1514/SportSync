@@ -296,78 +296,81 @@ export function AdminCoachingManagement() {
         ))}
       </div>
 
-      {/* ── REQUESTS TAB ── */}
+      {/* ── SESSIONS OVERVIEW TAB (read-only — coaches manage accept/decline) ── */}
       {activeTab === "requests" && (
-        <div className="bg-[#1E1E1F] rounded-2xl border border-white/5 overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/5">
-            <p className="text-gray-400 font-black" style={{ fontSize: 12 }}>{requests.length} total requests</p>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+            style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)" }}>
+            <GraduationCap size={16} className="text-blue-400 flex-shrink-0" />
+            <p className="text-blue-400 font-black" style={{ fontSize: 12 }}>
+              Coaches accept or decline session requests from their "My Coaching" dashboard. This view is for monitoring only.
+            </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[700px]">
-              <thead className="bg-[#131314]">
-                <tr>{['User', 'Coach & Sport', 'Schedule', 'Message', 'Status', 'Actions'].map(h => (
-                  <th key={h} className="px-5 py-3 text-gray-600 font-black uppercase" style={{ fontSize: 10 }}>{h}</th>
-                ))}</tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {requests.length === 0 ? (
-                  <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-600" style={{ fontSize: 13 }}>No coaching requests yet.</td></tr>
-                ) : requests.map(req => (
-                  <tr key={req.id} className="hover:bg-white/2 transition-colors">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-[#252525] flex items-center justify-center flex-shrink-0">
-                          <User size={13} className="text-gray-500" />
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Pending",   value: requests.filter(r => r.status === 'pending').length,   color: "#eab308" },
+              { label: "Confirmed", value: requests.filter(r => r.status === 'confirmed').length, color: "#22c55e" },
+              { label: "Total",     value: requests.length,                                        color: "#2563eb" },
+            ].map(stat => (
+              <div key={stat.label} className="rounded-2xl p-4 text-center"
+                style={{ background: "#1E1E1F", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <p className="font-black" style={{ fontSize: 28, color: stat.color }}>{stat.value}</p>
+                <p style={{ color: "#666", fontSize: 11, fontWeight: 700 }}>{stat.label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="bg-[#1E1E1F] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5">
+              <p className="text-gray-600 font-black" style={{ fontSize: 11 }}>ALL SESSIONS</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left min-w-[600px]">
+                <thead className="bg-[#131314]">
+                  <tr>{['Student', 'Coach & Sport', 'Date', 'Time', 'Status'].map(h => (
+                    <th key={h} className="px-5 py-3 text-gray-600 font-black uppercase" style={{ fontSize: 10 }}>{h}</th>
+                  ))}</tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {requests.length === 0 ? (
+                    <tr><td colSpan={5} className="px-5 py-10 text-center text-gray-600" style={{ fontSize: 13 }}>No coaching sessions yet.</td></tr>
+                  ) : requests.map(req => (
+                    <tr key={req.id} className="hover:bg-white/2 transition-colors">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-[#252525] flex items-center justify-center flex-shrink-0">
+                            <User size={13} className="text-gray-500" />
+                          </div>
+                          <span className="text-white font-black" style={{ fontSize: 13 }}>{req.userName}</span>
                         </div>
-                        <span className="text-white font-black" style={{ fontSize: 13 }}>{req.userName}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="text-white font-black" style={{ fontSize: 13 }}>{req.coachName}</p>
-                      <p className="font-black" style={{ fontSize: 11, color: getSportColor(req.sport) }}>{req.sport}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5 text-gray-300" style={{ fontSize: 12 }}>
-                        <Calendar size={11} className="text-gray-500" />
-                        {req.requestedDate}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-gray-500 mt-0.5" style={{ fontSize: 11 }}>
-                        <Clock size={10} className="text-gray-600" />
-                        {req.requestedTime}
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="text-gray-500 truncate max-w-[180px]" style={{ fontSize: 12 }}>{req.message || '—'}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`px-2.5 py-1 rounded-lg font-black ${
-                        req.status === 'pending' ? 'bg-gray-500/10 text-gray-400' :
-                        req.status === 'confirmed' ? 'bg-green-500/10 text-green-400' :
-                        'bg-red-500/10 text-red-400'
-                      }`} style={{ fontSize: 10 }}>
-                        {req.status.toUpperCase().replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5 justify-end">
-                        {req.status === 'pending' && (
-                          <button onClick={() => setConfirmAction({ req, action: 'rejected' })}
-                            className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors" title="Reject">
-                            <XCircle size={15} />
-                          </button>
-                        )}
-                        {req.status === 'confirmed' && !req.linkedBookingId && (
-                          <button className="px-3 py-1.5 rounded-lg bg-[#2563EB]/15 text-blue-400 font-black hover:bg-[#2563EB]/25 transition-colors flex items-center gap-1"
-                            style={{ fontSize: 11 }}>
-                            <LinkIcon size={11} /> Link Booking
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                      <td className="px-5 py-4">
+                        <p className="text-white font-black" style={{ fontSize: 13 }}>{req.coachName}</p>
+                        <p className="font-black" style={{ fontSize: 11, color: getSportColor(req.sport) }}>{req.sport}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-1.5 text-gray-300" style={{ fontSize: 12 }}>
+                          <Calendar size={11} className="text-gray-500" />{req.requestedDate}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-1.5 text-gray-500" style={{ fontSize: 12 }}>
+                          <Clock size={10} className="text-gray-600" />{req.requestedTime}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`px-2.5 py-1 rounded-lg font-black ${
+                          req.status === 'pending'   ? 'bg-yellow-500/10 text-yellow-400' :
+                          req.status === 'confirmed' ? 'bg-green-500/10 text-green-400' :
+                          'bg-red-500/10 text-red-400'
+                        }`} style={{ fontSize: 10 }}>
+                          {req.status === 'pending' ? 'AWAITING COACH' : req.status === 'confirmed' ? 'CONFIRMED' : 'DECLINED'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
