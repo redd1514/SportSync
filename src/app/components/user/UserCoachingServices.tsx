@@ -121,11 +121,19 @@ function CalendarPicker({
 
 /* ─── Time Slots ──────────────────────────────────────────────────── */
 const parseTime = (t: string) => {
-  const [time, ampm] = t.split(" ");
-  let [h, m] = time.split(":").map(Number);
-  if (ampm === "PM" && h < 12) h += 12;
-  if (ampm === "AM" && h === 12) h = 0;
-  return { h, m };
+  const raw = String(t || "").trim();
+  const match12 = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (match12) {
+    let h = parseInt(match12[1], 10);
+    const m = parseInt(match12[2] || "0", 10);
+    const ampm = match12[3].toUpperCase();
+    if (ampm === "PM" && h < 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+    return { h, m };
+  }
+  const match24 = raw.match(/^(\d{1,2})(?::(\d{2}))?/);
+  if (match24) return { h: parseInt(match24[1], 10), m: parseInt(match24[2] || "0", 10) };
+  return { h: 9, m: 0 };
 };
 
 const generateTimeSlots = (timeRange: string) => {
@@ -455,19 +463,22 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     style={{ transition: 'box-shadow 0.2s' }}
                   >
                     {/* Image banner */}
-                    <div className="relative h-32 overflow-hidden">
+                    <div className="relative h-32 overflow-hidden bg-[#1E1E1F]">
                       {coach.image ? (
-                        <img
-                          src={coach.image}
-                          alt={coach.name}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
+                        <div className="absolute -inset-px overflow-hidden">
+                          <img
+                            src={coach.image}
+                            alt={coach.name}
+                            className="block w-full h-full object-cover"
+                            style={{ backfaceVisibility: "hidden", transformOrigin: "center" }}
+                          />
+                        </div>
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center" style={{ background: `${color}15` }}>
+                        <div className="absolute -inset-px flex items-center justify-center" style={{ background: `${color}15` }}>
                           <SportIcon sport={coach.sport} size={40} color={color} />
                         </div>
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#1E1E1F] via-[#1E1E1F]/20 to-transparent" />
+                      <div className="absolute -inset-px bg-gradient-to-t from-[#1E1E1F] via-[#1E1E1F]/20 to-transparent" />
 
                       {/* Available badge */}
                       <div className={`absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full backdrop-blur-sm ${
@@ -742,7 +753,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     <p className="text-gray-400 mt-2" style={{ fontSize: 14 }}>
                       Your session request has been sent to{" "}
                       <span className="text-white font-black">{selectedCoach.name}</span>.
-                      <br />Please wait for approval.
+                      <br />Your coach will review it first. If accepted, My Coaching will show the manual payment instructions and ticket.
                     </p>
                   </div>
                 </div>
@@ -855,6 +866,16 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                         }}
                       />
                     </div>
+
+                    <div className="rounded-2xl p-4 border" style={{ background: "rgba(37,99,235,0.08)", borderColor: "rgba(37,99,235,0.24)" }}>
+                      <p className="text-blue-300 font-black mb-2" style={{ fontSize: 12 }}>How coaching payment works</p>
+                      <div className="space-y-1.5" style={{ color: "#9CA0AD", fontSize: 12, lineHeight: 1.5 }}>
+                        <p>1. Send this session request to the coach.</p>
+                        <p>2. The coach accepts or declines based on availability.</p>
+                        <p>3. If accepted, pay manually at the front desk or via the official JRC GCash QR on site.</p>
+                        <p>4. Staff verifies payment, then your coaching ticket is used for check-in.</p>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Footer */}
@@ -875,8 +896,11 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                       }}
                     >
                       <Zap size={16} />
-                      Proceed to Payment
+                      Send Coaching Request
                     </button>
+                    <p className="text-center text-gray-500 mt-2" style={{ fontSize: 11 }}>
+                      Payment is manual and only happens after the coach accepts.
+                    </p>
                   </div>
                 </>
               )}

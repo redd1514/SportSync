@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
   HelpCircle, MapPin, Star, CheckCircle, Clock, XCircle, Settings,
-  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download,
+  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download, Camera,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
@@ -12,7 +12,7 @@ import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
 import { downloadTicketQrPng } from "../../../shared/qrDownload";
 import { toast } from "sonner";
-import { AvatarCreator, AvatarDisplay, loadAvatarConfig, type AvatarConfig } from "../user/AvatarCreator";
+import { PhotoAvatar, PhotoCropperModal, loadProfilePhoto, saveProfilePhoto } from "../shared/ProfilePhotoPicker";
 
 interface MobileProfileScreenProps {
   onLogout: () => void;
@@ -369,8 +369,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [profileData, setProfileData] = useState<any>(null);
   const [loyaltyData, setLoyaltyData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
-  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(() => loadAvatarConfig());
-  const [showAvatarCreator, setShowAvatarCreator] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
+  const [profilePhotoSource, setProfilePhotoSource] = useState("");
+  const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAdmin = user?.email === "admin@jrc.com";
 
@@ -381,6 +383,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     try {
       const profile = await getUserProfile(user.id);
       setProfileData(profile);
+      if (profile?.profile_picture_url && !loadProfilePhoto(user.id)) {
+        saveProfilePhoto(user.id, profile.profile_picture_url);
+        setProfilePhoto(profile.profile_picture_url);
+      }
       const loyalty = await getUserLoyaltyPoints(user.id);
       setLoyaltyData(loyalty);
     } catch (error) {
@@ -398,6 +404,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
   useEffect(() => {
     fetchProfileOnMount();
+  }, [user?.id]);
+
+  useEffect(() => {
+    setProfilePhoto(loadProfilePhoto(user?.id));
   }, [user?.id]);
 
   const userBookings = bookings;
@@ -446,6 +456,26 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     onLogout();
   };
 
+  const handlePhotoFile = (file?: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => setProfilePhotoSource(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveProfilePhoto = async (dataUrl: string) => {
+    setIsSavingPhoto(true);
+    saveProfilePhoto(user?.id, dataUrl);
+    setProfilePhoto(dataUrl);
+    try {
+      await updateUserProfile(user?.id || "", { profile_picture_url: dataUrl });
+    } catch {
+      /* The local preview is still saved for demo/offline accounts. */
+    } finally {
+      setIsSavingPhoto(false);
+    }
+  };
+
   if (!user) return null;
 
   return (
@@ -466,19 +496,26 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
           {/* User card */}
           <div className="flex items-center gap-4">
-            <div className="relative cursor-pointer" onClick={() => setShowAvatarCreator(true)}>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => handlePhotoFile(event.target.files?.[0])}
+            />
+            <button type="button" className="relative cursor-pointer" onClick={() => photoInputRef.current?.click()}>
               <div className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg shadow-orange-500/20 border-2 border-white/10 hover:border-[#FF8C00]/60 transition-colors">
-                <AvatarDisplay config={avatarConfig} size={64} />
+                <PhotoAvatar src={profilePhoto} name={user.name} size={64} rounded={16} />
               </div>
               <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#FF8C00] flex items-center justify-center">
-                <Settings size={10} className="text-white" />
+                <Camera size={10} className="text-white" />
               </div>
               {isAdmin && (
                 <div className="absolute -top-1.5 -right-1.5 bg-[#FFD700] rounded-full p-1">
                   <Shield size={10} className="text-black" />
                 </div>
               )}
-            </div>
+            </button>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-0.5">
                 <h3 className="text-white font-black" style={{ fontSize: 18 }}>{user.name}</h3>
@@ -862,17 +899,46 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         )}
       </AnimatePresence>
 
-      {/* Avatar Creator Modal */}
+      {/* Profile Photo Cropper */}
       <AnimatePresence>
-        {showAvatarCreator && (
-          <AvatarCreator
-            initialConfig={avatarConfig}
-            onClose={() => setShowAvatarCreator(false)}
-            onSave={(cfg) => {
-              setAvatarConfig(cfg);
-              setShowAvatarCreator(false);
+        {profilePhotoSource && (
+          <PhotoCropperModal
+            source={profilePhotoSource}
+            title="Profile Picture"
+            accentColor="#FF8C00"
+            saveLabel="Save Profile Picture"
+            onClose={() => {
+              setProfilePhotoSource("");
+              if (photoInputRef.current) photoInputRef.current.value = "";
+            }}
+            onSave={async (dataUrl) => {
+              await handleSaveProfilePhoto(dataUrl);
+              if (photoInputRef.current) photoInputRef.current.value = "";
             }}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isSavingPhoto && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1001] bg-black/80 backdrop-blur-sm flex items-center justify-center"
+          >
+            <div className="rounded-3xl px-8 py-7 border border-white/10 bg-[#181819] shadow-2xl">
+              <div className="flex items-center gap-3">
+                <motion.div
+                  className="w-6 h-6 rounded-full border-2"
+                  style={{ borderColor: "rgba(255,140,0,0.25)", borderTopColor: "#FF8C00" }}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                />
+                <p className="text-white font-black" style={{ fontSize: 14 }}>Saving profile picture...</p>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 

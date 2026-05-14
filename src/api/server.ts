@@ -136,6 +136,9 @@ app.post('/api/coach-applications', async (c) => {
       availability: Array.isArray(body.availability) ? body.availability : [],
       requestedRate: Number(body.requestedRate ?? body.requested_rate) || 0,
       certifications: String(body.certifications || ''),
+      photoUrl: body.photoUrl || body.photo_url || null,
+      applicationType: body.applicationType || body.application_type || 'new',
+      requestDetails: body.requestDetails || body.request_details || '',
     });
     return c.json(created, 201);
   } catch (error: any) {

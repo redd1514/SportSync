@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { getSportColor } from "../SportIcons";
 import type { CoachApplication } from "../user/CoachApplicationForm";
 import { apiFetch } from "../../utils/authenticatedFetch";
+import { ProfilePhotoPicker, PhotoAvatar } from "../shared/ProfilePhotoPicker";
 
 type Tab = "coaches" | "requests" | "applications";
 
@@ -26,6 +27,9 @@ function mapApiToCoachApplication(row: Record<string, unknown>): CoachApplicatio
     availability: Array.isArray(row.availability) ? (row.availability as string[]) : [],
     requestedRate: Number(row.requestedRate) || 0,
     certifications: String(row.certifications ?? ""),
+    photoUrl: String(row.photoUrl ?? row.photo_url ?? ""),
+    applicationType: (row.applicationType as CoachApplication["applicationType"]) || "new",
+    requestDetails: String(row.requestDetails ?? ""),
     status: (row.status as CoachApplication["status"]) || "pending",
     submittedAt: String(row.submittedAt ?? new Date().toISOString()),
   };
@@ -153,6 +157,8 @@ export function AdminCoachingManagement() {
                   availability: app.availability,
                   requestedRate: app.requestedRate,
                   certifications: app.certifications,
+                  photoUrl: app.photoUrl,
+                  photo_url: app.photoUrl,
                 }),
               });
               const created = await resM.json().catch(() => ({}));
@@ -195,12 +201,13 @@ export function AdminCoachingManagement() {
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("17:00");
   const [isAvail, setIsAvail] = useState(true);
+  const [image, setImage] = useState("");
   const [dateMode, setDateMode] = useState<'specific' | 'recurring'>('recurring');
 
   const resetForm = () => {
     setName(""); setSport("Basketball"); setRate(""); setDesc("");
     setDays([]); setRecurringDays([]); setStartTime("08:00"); setEndTime("17:00");
-    setIsAvail(true); setDateMode('recurring');
+    setIsAvail(true); setImage(""); setDateMode('recurring');
   };
 
   const openAddModal = () => { resetForm(); setEditingCoach(null); setShowCoachModal(true); };
@@ -210,6 +217,7 @@ export function AdminCoachingManagement() {
     setRate(String(coach.hourlyRate ?? '')); setDesc(coach.description ?? '');
     setDays(Array.isArray(coach.availableDays) ? coach.availableDays : []);
     setIsAvail(coach.isAvailable !== false);
+    setImage(coach.image || "");
     setDateMode('specific');
     const range = coach.timeRange || '08:00 AM - 05:00 PM';
     const [start, end] = range.split(' - ');
@@ -248,7 +256,7 @@ export function AdminCoachingManagement() {
       }
       availableDays = result;
     }
-    const data = { name, sport, hourlyRate: parseInt(rate) || 0, description: desc, availableDays, timeRange, isAvailable: isAvail };
+    const data = { name, sport, hourlyRate: parseInt(rate) || 0, description: desc, availableDays, timeRange, isAvailable: isAvail, image };
     try {
       if (editingCoach) await updateCoach(editingCoach.id, data);
       else await addCoach(data);
@@ -365,6 +373,14 @@ export function AdminCoachingManagement() {
                         }`} style={{ fontSize: 10 }}>
                           {req.status === 'pending' ? 'AWAITING COACH' : req.status === 'confirmed' ? 'CONFIRMED' : 'DECLINED'}
                         </span>
+                        {req.status === 'confirmed' && (
+                          <p className="mt-1 font-black" style={{
+                            fontSize: 10,
+                            color: /PAYMENT_VERIFIED|Manual coaching payment verified/i.test(req.adminNotes || '') ? '#86efac' : '#93c5fd',
+                          }}>
+                            {/PAYMENT_VERIFIED|Manual coaching payment verified/i.test(req.adminNotes || '') ? 'PAYMENT VERIFIED' : 'AWAITING MANUAL PAYMENT'}
+                          </p>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -512,12 +528,12 @@ export function AdminCoachingManagement() {
                     <div className="p-5">
                       <div className="flex items-start justify-between gap-4 mb-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `${sportColor}18`, border: `1px solid ${sportColor}30` }}>
-                            <span style={{ color: sportColor, fontSize: 13, fontWeight: 900 }}>{app.sport.slice(0,2).toUpperCase()}</span>
-                          </div>
+                          <PhotoAvatar src={app.photoUrl} name={app.userName} size={44} rounded={16} />
                           <div>
                             <p className="text-white font-black" style={{ fontSize: 15 }}>{app.userName}</p>
-                            <p className="text-gray-500" style={{ fontSize: 12 }}>{app.userEmail} · {app.sport}</p>
+                            <p className="text-gray-500" style={{ fontSize: 12 }}>
+                              {app.userEmail} · {app.applicationType === "change_request" ? "Profile change request" : app.applicationType === "removal_request" ? "Removal request" : app.sport}
+                            </p>
                           </div>
                         </div>
                         <span className="px-2.5 py-1 rounded-full font-black flex-shrink-0" style={{
@@ -531,10 +547,10 @@ export function AdminCoachingManagement() {
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                         {[
+                          { label: "Type",          value: app.applicationType === "change_request" ? "Change Request" : app.applicationType === "removal_request" ? "Removal Request" : "New Coach" },
                           { label: "Sport",         value: app.sport },
                           { label: "Experience",    value: app.experience || "Not specified" },
                           { label: "Desired Rate",  value: `₱${app.requestedRate?.toLocaleString()}/hr` },
-                          { label: "Availability",  value: `${app.availability?.length || 0} days/wk` },
                         ].map(item => (
                           <div key={item.label} className="rounded-xl px-3 py-2" style={{ background: "#1E1E1F" }}>
                             <p className="text-gray-600" style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5 }}>{item.label.toUpperCase()}</p>
@@ -543,15 +559,17 @@ export function AdminCoachingManagement() {
                         ))}
                       </div>
                       <div className="rounded-xl px-4 py-3 mb-4" style={{ background: "#1E1E1F" }}>
-                        <p className="text-gray-600 font-black mb-1" style={{ fontSize: 10, letterSpacing: 0.5 }}>BIO</p>
-                        <p className="text-gray-300" style={{ fontSize: 13, lineHeight: 1.6 }}>{app.bio}</p>
+                        <p className="text-gray-600 font-black mb-1" style={{ fontSize: 10, letterSpacing: 0.5 }}>
+                          {app.applicationType === "new" || !app.applicationType ? "BIO" : "REQUEST DETAILS"}
+                        </p>
+                        <p className="text-gray-300" style={{ fontSize: 13, lineHeight: 1.6 }}>{app.requestDetails || app.bio}</p>
                       </div>
                       {app.status === "pending" && (
                         <div className="flex gap-2">
                           <button onClick={() => setAppConfirm({ app, action: 'approved' })}
                             className="flex-1 py-2.5 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all hover:brightness-110"
                             style={{ fontSize: 13, background: "linear-gradient(135deg,#22c55e,#16a34a)" }}>
-                            <CheckCircle size={14} /> Approve & Create Coach
+                            <CheckCircle size={14} /> {app.applicationType === "new" || !app.applicationType ? "Approve & Create Coach" : "Mark Reviewed"}
                           </button>
                           <button onClick={() => setAppConfirm({ app, action: 'rejected' })}
                             className="flex-1 py-2.5 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all hover:brightness-110"
@@ -619,6 +637,19 @@ export function AdminCoachingManagement() {
                   {/* Basic Info */}
                   <div className="space-y-4">
                     <p className="text-gray-600 font-black" style={{ fontSize: 10, letterSpacing: 1 }}>BASIC INFO</p>
+                    <div>
+                      <label className="block text-gray-500 mb-1.5 font-black" style={{ fontSize: 10, letterSpacing: 0.5 }}>COACH PHOTO</label>
+                      <div className="rounded-2xl border border-white/10 p-3 bg-[#131314]">
+                        <ProfilePhotoPicker
+                          value={image}
+                          name={name || "Coach"}
+                          onChange={setImage}
+                          title="Coach Photo"
+                          accentColor="#F97316"
+                          buttonLabel={image ? "Change Coach Photo" : "Choose Coach Photo"}
+                        />
+                      </div>
+                    </div>
                     <div>
                       <label className="block text-gray-500 mb-1.5 font-black" style={{ fontSize: 10, letterSpacing: 0.5 }}>COACH NAME</label>
                       <input required value={name} onChange={e => setName(e.target.value)} placeholder="Full name"
@@ -768,8 +799,10 @@ export function AdminCoachingManagement() {
               <p className="text-gray-400 text-center mb-2" style={{ fontSize: 13 }}>{appConfirm.app.userName}</p>
               <p className="text-gray-500 text-center mb-6" style={{ fontSize: 12, lineHeight: 1.5 }}>
                 {appConfirm.action === 'approved'
-                  ? `A coach profile will be created for ${appConfirm.app.userName} under ${appConfirm.app.sport}. They will appear in the Coach Directory.`
-                  : `${appConfirm.app.userName}'s application for ${appConfirm.app.sport} coaching will be declined.`}
+                  ? (appConfirm.app.applicationType === "new" || !appConfirm.app.applicationType
+                    ? `A coach profile will be created for ${appConfirm.app.userName} under ${appConfirm.app.sport}. They will appear in the Coach Directory.`
+                    : `This ${appConfirm.app.applicationType === "removal_request" ? "removal" : "profile change"} request will be marked reviewed. Apply the requested coach profile changes from the Coach Directory if needed.`)
+                  : `${appConfirm.app.userName}'s ${appConfirm.app.applicationType === "new" || !appConfirm.app.applicationType ? `application for ${appConfirm.app.sport} coaching` : "coach profile request"} will be declined.`}
               </p>
               <div className="flex gap-2.5">
                 <button onClick={() => setAppConfirm(null)}
@@ -777,7 +810,7 @@ export function AdminCoachingManagement() {
                   style={{ fontSize: 13 }}>Cancel</button>
                 <button type="button" onClick={async () => {
                   try {
-                    if (appConfirm.action === 'approved') {
+                    if (appConfirm.action === 'approved' && (appConfirm.app.applicationType === "new" || !appConfirm.app.applicationType)) {
                       await addCoach({
                         name: appConfirm.app.userName,
                         email: appConfirm.app.userEmail,
@@ -787,6 +820,7 @@ export function AdminCoachingManagement() {
                         availableDays: appConfirm.app.availability || [],
                         timeRange: '08:00 AM - 06:00 PM',
                         isAvailable: true,
+                        image: appConfirm.app.photoUrl,
                       });
                     }
                     const patchRes = await apiFetch(

@@ -286,7 +286,13 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       // Optimistically update local state
       setRequests((prev) =>
         prev.map((r) =>
-          r.id === id ? { ...r, status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"] } : r
+          r.id === id
+            ? {
+                ...r,
+                status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"],
+                adminNotes: adminNotes ?? r.adminNotes,
+              }
+            : r
         )
       );
     } catch (error) {

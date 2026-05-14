@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Home, CalendarDays, Users, User, Bell, LogOut, Trophy, Clock, MapPin, Star, Zap,
@@ -23,7 +23,7 @@ import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
 import { useAnnouncements } from "../../contexts/AnnouncementsContext";
 import { useCoaching } from "../../contexts/CoachingContext";
-import { AvatarDisplay, loadAvatarConfig } from "../user/AvatarCreator";
+import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -278,7 +278,15 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const [showNotifs, setShowNotifs] = useState(false);
   const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
   const [bookingPrefill, setBookingPrefill] = useState<{ sport: string; date: string; time: string } | undefined>(undefined);
+  const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
+
+  useEffect(() => {
+    setProfilePhoto(loadProfilePhoto(user?.id));
+    return onProfilePhotoUpdated((dataUrl, updatedUserId) => {
+      if (!updatedUserId || updatedUserId === user?.id) setProfilePhoto(dataUrl);
+    });
+  }, [user?.id]);
 
   const handleLogout = async () => {
     await logout();
@@ -557,7 +565,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
             <div className="rounded-2xl p-3 border border-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
               <div className="flex items-center gap-2.5 mb-2">
                 <div className="w-9 h-9 rounded-xl overflow-hidden flex-shrink-0">
-                  <AvatarDisplay config={loadAvatarConfig()} size={36} />
+                  <PhotoAvatar src={profilePhoto} name={user?.name} size={36} rounded={12} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-white font-black truncate" style={{ fontSize: 12 }}>{user?.name}</p>
