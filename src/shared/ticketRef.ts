@@ -44,3 +44,33 @@ export function normalizeTicketScanInput(raw: string): string {
 export function isUuidString(s: string): boolean {
   return UUID_RE.test(s.trim());
 }
+
+/** Value encoded in QR and accepted by front-desk scan (must match display when possible). */
+export function resolveBookingTicketToken(
+  refCode?: string | null,
+  bookingId?: string | null,
+): { scanValue: string; displayCode: string } {
+  const raw = String(refCode || '').trim();
+  const id = String(bookingId || '').trim();
+
+  if (/^JRC-[A-Z0-9]{4,}$/i.test(raw)) {
+    const code = raw.toUpperCase();
+    return { scanValue: code, displayCode: code };
+  }
+
+  if (isUuidString(raw)) {
+    return { scanValue: raw.toLowerCase(), displayCode: `JRC-${raw.replace(/-/g, '').slice(0, 6).toUpperCase()}` };
+  }
+
+  if (raw) {
+    const code = raw.toUpperCase().startsWith('JRC-') ? raw.toUpperCase() : `JRC-${raw.replace(/^JRC-?/i, '').toUpperCase()}`;
+    return { scanValue: code, displayCode: code };
+  }
+
+  if (isUuidString(id)) {
+    return { scanValue: id.toLowerCase(), displayCode: `JRC-${id.replace(/-/g, '').slice(0, 6).toUpperCase()}` };
+  }
+
+  const fallback = id || 'JRC-UNKNOWN';
+  return { scanValue: fallback, displayCode: fallback };
+}

@@ -466,6 +466,7 @@ adminRouter.get('/loyalty-program', async (c) => {
       name: 'Sports Sync Rewards',
       pointsPerCompletedBooking: 1,
       redeemThreshold: 10,
+      courtDiscountPercent: 25,
       bonusMultiplier: 1,
     });
   } catch (error: any) {

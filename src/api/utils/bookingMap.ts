@@ -82,7 +82,10 @@ export function mapBookingRowToAdmin(row: {
     (row.start_time ?? '00:00:00').slice(0, 8),
     (row.end_time ?? '00:00:00').slice(0, 8)
   );
-  const refCode = row.qr_code_token || meta.refCode || row.id.slice(0, 8).toUpperCase();
+  const refCode =
+    row.qr_code_token ||
+    meta.refCode ||
+    `JRC-${row.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
   const checkedIn = row.status === 'checked_in';
   const checkedOut = row.status === 'completed';
   const uiStatus:

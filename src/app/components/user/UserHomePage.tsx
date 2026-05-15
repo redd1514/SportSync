@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowRight, Trophy, GraduationCap, Sparkles, Play, Award, CheckCircle,
@@ -14,6 +14,15 @@ import {
   SPORT_RATES, MARQUEE_ITEMS,
   FloatingOrbs, TickerBar, SportRateModal, Lightbox,
 } from "./UserHomeComponents";
+import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
+import { LoyaltyCelebrationModal } from "../shared/loyalty/LoyaltyCelebrationModal";
+import { HeroSportsBackdrop } from "../shared/loyalty/HeroSportsBackdrop";
+import { useLoyaltyMilestone } from "../../hooks/useLoyaltyMilestone";
+import {
+  LOYALTY_DISCOUNT_PERCENT,
+  loyaltyPointsToNextReward,
+  loyaltyRewardsAvailable,
+} from "../../constants/loyalty";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 
@@ -24,24 +33,61 @@ function greetingText() {
 
 export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
   const { user, updateUser } = useUser();
-  const { resetLoyaltyPoints } = useUserAPI();
+  const { resetLoyaltyPoints, addTestLoyaltyPoint } = useUserAPI();
   const { bookings } = useRealtimeBookingAPI(user?.id || '', { autoFetch: true });
   const [hoveredSport, setHoveredSport] = useState<string | null>(null);
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [displayPoints, setDisplayPoints] = useState(user?.loyaltyPoints || 0);
+  const [loyaltyBusy, setLoyaltyBusy] = useState(false);
   const firstName = user?.name?.split(" ")[0] || "Athlete";
   const loyaltyPoints = user?.loyaltyPoints || 0;
-  const rewardProgress = loyaltyPoints % 10;
-  const rewardsAvailable = Math.floor(loyaltyPoints / 10);
-  const pointsToNext = rewardProgress === 0 && loyaltyPoints > 0 ? 0 : 10 - rewardProgress;
+  const rewardsAvailable = loyaltyRewardsAvailable(loyaltyPoints);
+  const pointsToNext = loyaltyPointsToNextReward(loyaltyPoints);
+  const { celebrationOpen, closeCelebration, rewardsUnlocked } = useLoyaltyMilestone(user?.id, loyaltyPoints);
+
+  useEffect(() => {
+    if (loyaltyPoints >= displayPoints) {
+      setDisplayPoints(loyaltyPoints);
+    }
+  }, [loyaltyPoints, displayPoints]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        void addTestPoint();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [user?.id, loyaltyBusy, loyaltyPoints]);
+
+  const addTestPoint = async () => {
+    if (!user || loyaltyBusy) return;
+    setLoyaltyBusy(true);
+    try {
+      const res = await addTestLoyaltyPoint(user.id);
+      const next = Number(res?.points ?? loyaltyPoints + 1);
+      updateUser(user.id, { loyaltyPoints: next });
+    } catch {
+      updateUser(user.id, { loyaltyPoints: loyaltyPoints + 1 });
+    } finally {
+      setLoyaltyBusy(false);
+    }
+  };
+
   const resetMyPoints = async () => {
-    if (!user) return;
+    if (!user || loyaltyBusy) return;
+    setLoyaltyBusy(true);
+    setDisplayPoints(0);
     try {
       await resetLoyaltyPoints(user.id);
     } catch {
       /* demo/local fallback */
     }
     updateUser(user.id, { loyaltyPoints: 0 });
+    setLoyaltyBusy(false);
   };
   
   const localPendingRequests = (() => {
@@ -71,6 +117,7 @@ export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: stri
 
       {/* ── HERO ── */}
       <section className="relative overflow-hidden" style={{ minHeight: 360 }}>
+        <HeroSportsBackdrop />
         <FloatingOrbs />
         <div className="relative z-10 px-6 sm:px-8 pt-10 pb-10">
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
@@ -185,23 +232,43 @@ export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: stri
                         {loyaltyPoints}
                       </motion.p>
                     </div>
-                    <div className="mt-1.5 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                      <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(((loyaltyPoints % 10) / 10) * 100 || (loyaltyPoints >= 10 ? 100 : 0), 100)}%` }}
-                        transition={{ delay: 0.6, duration: 1.2, ease: "easeOut" }}
-                        className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FBBF24,#F97316)" }} />
-                    </div>
+                    <motion.div className="mt-1.5">
+                      <LoyaltyProgressBar points={displayPoints} height={8} drainDuration={2} fillDuration={1.2} />
+                    </motion.div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <p style={{ color: rewardsAvailable > 0 ? "#FBBF24" : TS, fontSize: 10 }}>
-                        {rewardsAvailable > 0 ? `${rewardsAvailable} reward ready` : `${pointsToNext} completed booking${pointsToNext === 1 ? "" : "s"} to reward`}
+                        {rewardsAvailable > 0
+                          ? `${rewardsAvailable} reward ready · ${LOYALTY_DISCOUNT_PERCENT}% off court`
+                          : `${pointsToNext} completed booking${pointsToNext === 1 ? "" : "s"} to ${LOYALTY_DISCOUNT_PERCENT}% off`}
                       </p>
-                      <button type="button" onClick={resetMyPoints} className="rounded-lg border border-white/10 px-2 py-1 text-gray-400 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
-                        Reset test
-                      </button>
+                      <motion.div className="flex gap-1">
+                        <button
+                          type="button"
+                          disabled={loyaltyBusy}
+                          onClick={() => void addTestPoint()}
+                          className="rounded-lg border border-yellow-400/25 px-2 py-1 text-yellow-300 hover:bg-yellow-400/10 disabled:opacity-50"
+                          style={{ fontSize: 10, fontWeight: 800 }}
+                          title="Add +1 loyalty point (test)"
+                        >
+                          +1 pt
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loyaltyBusy}
+                          onClick={() => void resetMyPoints()}
+                          className="rounded-lg border border-white/10 px-2 py-1 text-gray-400 hover:text-white hover:bg-white/5 disabled:opacity-50"
+                          style={{ fontSize: 10, fontWeight: 800 }}
+                        >
+                          Reset test
+                        </button>
+                      </motion.div>
                     </div>
                     <AnimatePresence>
                       {rewardsAvailable > 0 && (
                         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-2 rounded-xl border border-yellow-400/25 bg-yellow-400/10 px-3 py-2">
-                          <p className="text-yellow-200 font-black" style={{ fontSize: 11 }}>Level up: Reward unlocked</p>
+                          <p className="text-yellow-200 font-black" style={{ fontSize: 11 }}>
+                            {LOYALTY_DISCOUNT_PERCENT}% court discount ready — apply at checkout
+                          </p>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -380,6 +447,12 @@ export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: stri
           <Lightbox images={MARQUEE_ITEMS} index={lightboxIndex} onClose={() => setLightboxIndex(null)} />
         )}
       </AnimatePresence>
+
+      <LoyaltyCelebrationModal
+        open={celebrationOpen}
+        onClose={closeCelebration}
+        rewardsUnlocked={rewardsUnlocked}
+      />
     </div>
   );
 }

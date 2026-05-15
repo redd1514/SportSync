@@ -131,6 +131,7 @@ function ExecutiveOverview() {
   const { getAnalytics, getAllBookings, getAllUsers, updateUser, getPaymentTransactions, getLoyaltyProgram } = (useAdminAPI as any)();
   const [sub, setSub] = useState<ExecSubTab>('overview');
   const [userConfirm, setUserConfirm] = useState<{ id: string; name: string; action: 'suspend' | 'activate' } | null>(null);
+  const [loyaltyConfirm, setLoyaltyConfirm] = useState<{ id: string; name: string; points: number } | null>(null);
 
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [apiBookings, setApiBookings] = useState<any[]>([]);
@@ -177,6 +178,7 @@ function ExecutiveOverview() {
   const resetUserLoyalty = async (targetUserId: string) => {
     await updateUser(targetUserId, { loyalty_points: 0 });
     await fetchUsers();
+    setLoyaltyConfirm(null);
   };
 
   // Map realtime booking rows (DB shape) to client-shaped rows used in the table
@@ -566,7 +568,7 @@ function ExecutiveOverview() {
           <h3 className="text-white font-black" style={{ fontSize: 18 }}>Loyalty & Rewards Management</h3>
           <div className="grid md:grid-cols-3 gap-3">
             {[
-              { label: 'Reward rule', value: '10 points', desc: '1 completed booking earns 1 point', color: '#fbbf24' },
+              { label: 'Reward rule', value: '10 pts → 25% off', desc: '1 completed booking earns 1 point; redeem for 25% court discount', color: '#fbbf24' },
               { label: 'Rewards ready', value: allUsers.reduce((sum, u) => sum + Math.floor((u.loyaltyPoints || 0) / 10), 0), desc: 'Redeemable user rewards', color: '#22c55e' },
               { label: 'Tracked users', value: allUsers.length, desc: 'Admins and staff are visible but do not earn from desk-only work', color: '#60a5fa' },
             ].map((card) => (
@@ -613,7 +615,7 @@ function ExecutiveOverview() {
                       <td className="px-5 py-3">
                         <button
                           type="button"
-                          onClick={() => void resetUserLoyalty(u.id)}
+                          onClick={() => setLoyaltyConfirm({ id: u.id, name: u.name, points: u.loyaltyPoints || 0 })}
                           className="rounded-xl border border-white/10 px-3 py-2 text-gray-300 hover:text-white hover:bg-white/5 font-black"
                           style={{ fontSize: 11 }}
                         >
@@ -628,6 +630,21 @@ function ExecutiveOverview() {
           </div>
         </div>
       )}
+
+      {/* Loyalty reset confirmation */}
+      <AnimatePresence>
+        {loyaltyConfirm && (
+          <ConfirmModal opts={{
+            title: 'Reset loyalty points?',
+            body: `${loyaltyConfirm.name}\nThis will set their balance from ${loyaltyConfirm.points} pts to 0. Redeemed rewards cannot be recovered.`,
+            confirmLabel: 'Yes, reset points',
+            confirmColor: '#f97316',
+            icon: <Award size={28} className="text-yellow-400" />,
+            onConfirm: () => void resetUserLoyalty(loyaltyConfirm.id),
+            onCancel: () => setLoyaltyConfirm(null),
+          }} />
+        )}
+      </AnimatePresence>
 
       {/* User suspend/activate confirmation */}
       <AnimatePresence>

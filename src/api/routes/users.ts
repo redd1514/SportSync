@@ -138,6 +138,37 @@ usersRouter.get('/:id/loyalty', async (c) => {
   }
 });
 
+usersRouter.post('/:id/loyalty/add-test', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'User not found' }, 404);
+
+    await supabase.from('loyalty_transactions').insert({
+      user_id: user.id,
+      points_change: 1,
+      transaction_type: 'manual_test',
+      reference_id: null,
+    });
+
+    const next = Number(user.loyalty_points || 0) + 1;
+    const { data, error } = await supabase
+      .from('users')
+      .update({ loyalty_points: next })
+      .eq('id', user.id)
+      .select('id, loyalty_points')
+      .single();
+    if (error) throw error;
+    return c.json({
+      userId: data.id,
+      points: data.loyalty_points || 0,
+      rewardsAvailable: Math.floor(Number(data.loyalty_points || 0) / 10),
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
 usersRouter.post('/:id/loyalty/reset', async (c) => {
   try {
     const id = c.req.param('id');

@@ -53,12 +53,20 @@ export const useUserAPI = () => {
     });
   };
 
+  const addTestLoyaltyPoint = (userId: string) => {
+    return handleRequest(`/api/users/${userId}/loyalty/add-test`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  };
+
   return {
     getUserProfile,
     updateUserProfile,
     getUserLoyaltyPoints,
     redeemLoyaltyPoints,
     resetLoyaltyPoints,
+    addTestLoyaltyPoint,
     loading,
     error
   };

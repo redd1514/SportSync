@@ -10,6 +10,8 @@ import { useAnnouncements } from "../../contexts/AnnouncementsContext";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { SportDetailModal } from "../SportDetailModal";
 import { SPORTS_INFO } from "../sportsData";
+import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
+import { LOYALTY_DISCOUNT_PERCENT } from "../../constants/loyalty";
 
 /* ─── Dark palette (no isDark) ─────────────────────────────────────── */
 const BG     = "#0F1011";
@@ -355,13 +357,11 @@ export function PremiumMobileHome({ onNavigate, onOpenAI }: MobileHomeProps) {
                 <p className="font-black" style={{ fontSize: 13, color: TP }}>Loyalty Points</p>
                 <p className="font-black" style={{ fontSize: 16, color: "#FBBF24" }}>{user.loyaltyPoints}</p>
               </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min((user.loyaltyPoints / 10) * 100, 100)}%` }}
-                  transition={{ duration: 1.2, ease: "easeOut", delay: 0.5 }}
-                  className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FBBF24,#F97316)" }} />
-              </div>
+              <LoyaltyProgressBar points={user.loyaltyPoints} height={6} />
               <p style={{ fontSize: 10, color: TS, marginTop: 4 }}>
-                {user.loyaltyPoints >= 10 ? "🎉 Eligible for a free session!" : `${10 - user.loyaltyPoints} pts to free session`}
+                {user.loyaltyPoints >= 10
+                  ? `🎉 ${LOYALTY_DISCOUNT_PERCENT}% court discount ready`
+                  : `${10 - (user.loyaltyPoints % 10 || 10)} pts to ${LOYALTY_DISCOUNT_PERCENT}% off`}
               </p>
             </div>
           </motion.div>

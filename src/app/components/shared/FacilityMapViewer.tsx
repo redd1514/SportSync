@@ -19,6 +19,13 @@ import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { useAddons } from '../../contexts/AddonsContext';
 import { SPORTS_INFO, AddOn, isAddonPerHourPricing, formatAddonLinePeso } from '../sportsData';
 import { SportIcon } from '../SportIcons';
+import { LoyaltyRewardToggle } from './loyalty/LoyaltyRewardToggle';
+import {
+  LOYALTY_REWARD_THRESHOLD,
+  calcLoyaltyCourtDiscount,
+  formatLoyaltyDiscountLabel,
+  loyaltyRewardsAvailable,
+} from '../../constants/loyalty';
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
 const MIN_ZOOM = 0.15;
@@ -515,8 +522,9 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const coachingRate = coachingMode ? Math.max(0, Number(coachHourlyRate || 0)) : 0;
   const computedCoachingFee = coachingMode ? coachingRate * Math.max(1, duration || 1) : 0;
   const courtSubtotal = basePrice * duration;
-  const canUseLoyaltyReward = mode === 'customer' && Number(user?.loyaltyPoints || 0) >= 10 && courtSubtotal > 0;
-  const loyaltyDiscount = useLoyaltyReward && canUseLoyaltyReward ? courtSubtotal : 0;
+  const canUseLoyaltyReward =
+    mode === 'customer' && loyaltyRewardsAvailable(Number(user?.loyaltyPoints || 0)) > 0 && courtSubtotal > 0;
+  const loyaltyDiscount = calcLoyaltyCourtDiscount(courtSubtotal, useLoyaltyReward && canUseLoyaltyReward);
   const total = Math.max(0, courtSubtotal + addonTotal + computedCoachingFee - loyaltyDiscount);
 
   const fallbackPrice = sport === 'Badminton' || sport === 'Pickleball' ? 300 : sport === 'Billiards' || sport === 'Table Tennis' ? 100 : 450;
@@ -545,14 +553,14 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
     }).join(' | ');
     await onConfirm({
       court: courtName, sport, date, time, duration,
-      addOns: [addOnLabels, useLoyaltyReward ? 'Loyalty reward applied' : '', coachingMode ? `Coaching with ${coachName || 'coach'}` : mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
+      addOns: [addOnLabels, useLoyaltyReward ? `Loyalty ${formatLoyaltyDiscountLabel()} applied` : '', coachingMode ? `Coaching with ${coachName || 'coach'}` : mode === 'staff' ? 'Walk-in' : 'Online Booking'].filter(Boolean).join(' | '),
       paymentMethod: mode === 'staff' ? 'cash' : 'pay_at_facility',
       refCode: refCode.current,
       customerName: coachingMode ? (studentName || 'Student') : mode === 'staff' ? customerName : undefined,
       customerPhone: mode === 'staff' ? customerPhone : undefined,
       amount: total,
       addonIds: Array.from(selectedAddons),
-      loyaltyPointsRedeemed: useLoyaltyReward ? 10 : 0,
+      loyaltyPointsRedeemed: useLoyaltyReward ? LOYALTY_REWARD_THRESHOLD : 0,
       loyaltyDiscount,
     });
   };
@@ -622,22 +630,26 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
           );
         })}
         {canUseLoyaltyReward && (
-          <button
-            type="button"
-            onClick={() => setUseLoyaltyReward((next) => !next)}
-            className="w-full rounded-xl border px-3 py-2 flex items-center justify-between gap-3 text-left"
-            style={{ background: useLoyaltyReward ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.04)', borderColor: useLoyaltyReward ? 'rgba(251,191,36,0.35)' : 'rgba(255,255,255,0.08)' }}
-          >
-            <span className="font-black" style={{ color: useLoyaltyReward ? '#fbbf24' : '#d1d5db', fontSize: 12 }}>Use 10 loyalty points</span>
-            <span className="font-black" style={{ color: '#fbbf24', fontSize: 12 }}>-{'\u20B1'}{courtSubtotal.toLocaleString()}</span>
-          </button>
+          <LoyaltyRewardToggle
+            active={useLoyaltyReward}
+            onToggle={() => setUseLoyaltyReward((next) => !next)}
+            discountAmount={calcLoyaltyCourtDiscount(courtSubtotal, true)}
+          />
         )}
-        {loyaltyDiscount > 0 && (
-          <div className="flex justify-between gap-2">
-            <span className="text-yellow-300 flex-1 min-w-0" style={{ fontSize: 12 }}>Loyalty reward</span>
-            <span className="text-yellow-300 font-black flex-shrink-0" style={{ fontSize: 12 }}>-{'\u20B1'}{loyaltyDiscount.toLocaleString()}</span>
-          </div>
-        )}
+        <AnimatePresence>
+          {loyaltyDiscount > 0 && (
+            <motion.div
+              key="loyalty-line"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex justify-between gap-2 overflow-hidden"
+            >
+              <span className="text-yellow-300 flex-1 min-w-0" style={{ fontSize: 12 }}>Loyalty discount</span>
+              <span className="text-yellow-300 font-black flex-shrink-0" style={{ fontSize: 12 }}>-{'\u20B1'}{loyaltyDiscount.toLocaleString()}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="border-t border-white/8 pt-1.5 flex justify-between items-end">
           <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL</span>
           <span className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
@@ -653,8 +665,8 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 60 }}
         transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-        className="w-full sm:max-w-md flex flex-col rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl"
-        style={{ background: '#181818', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '92vh' }}
+        className="w-full max-w-[min(100%,28rem)] flex flex-col rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl mx-auto"
+        style={{ background: '#181818', border: '1px solid rgba(255,255,255,0.1)', maxHeight: 'min(92vh,100dvh)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/8 flex-shrink-0"

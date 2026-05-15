@@ -25,6 +25,8 @@ import { CoachApplicationForm } from "../user/CoachApplicationForm";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
 import { useUserAPI } from "../../hooks/useUserAPI";
+import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
+import { LOYALTY_DISCOUNT_PERCENT, loyaltyRewardsAvailable } from "../../constants/loyalty";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -262,12 +264,12 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
                 <span className="text-gray-400" style={{ fontSize: 12 }}>Points</span>
                 <motion.span key={loyaltyPoints} initial={{ scale: 0.82 }} animate={{ scale: 1 }} className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{loyaltyPoints}/10</motion.span>
               </div>
-              <div className="w-full h-2 bg-[#252525] rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: `${loyaltyProgress}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FFD700,#FF8C00)" }} />
-              </div>
+              <LoyaltyProgressBar points={loyaltyPoints} height={8} />
               <div className="mt-2 flex items-center justify-between gap-2">
                 <p className={loyaltyRewards > 0 ? "text-yellow-300" : "text-gray-600"} style={{ fontSize: 11 }}>
-                  {loyaltyRewards > 0 ? `${loyaltyRewards} reward unlocked` : `${10 - loyaltyPoints} more to earn a reward`}
+                  {loyaltyRewards > 0
+                    ? `${loyaltyRewards} reward · ${LOYALTY_DISCOUNT_PERCENT}% off court`
+                    : `${10 - (loyaltyPoints % 10 || 10)} more for ${LOYALTY_DISCOUNT_PERCENT}% off`}
                 </p>
                 <button type="button" onClick={resetMyLoyalty} className="rounded-lg px-2 py-1 text-gray-500 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
                   Reset

@@ -75,7 +75,7 @@ function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[])
         : 'JRC Sports Complex is open daily:\n\n7:00 AM – 12:00 MN\n\nPeak hours are 5–9 PM on weekdays. Book in advance to secure your court!' 
     };
   if (/loyalty|point|reward|free/.test(q))
-    return { text: 'Loyalty Rewards:\n\n• Earn 1 point per booking\n• 10 points = 1 FREE session\n• Points never expire\n• Valid on any sport, any day\n\nCheck your points in Profile → Loyalty Rewards.' };
+    return { text: 'Loyalty Rewards:\n\n• Earn 1 point per completed booking\n• 10 points = 25% off court fees at checkout\n• Redeem when booking on the facility map\n• Points never expire\n\nCheck your progress on Home or Profile.' };
   if (/coach|train|lesson/.test(q))
     return {
       text: 'Professional coaching is available for all sports!\n\n• Basketball, Volleyball, Badminton, Pickleball & more\n• Certified coaches\n• Individual or group sessions\n• Flexible scheduling',

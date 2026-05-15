@@ -381,11 +381,16 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           r.id === id
             ? {
                 ...r,
-                status: status === 'confirmed'
-                  ? 'confirmed'
-                  : status === 'cancelled'
-                    ? 'rejected'
-                    : status as CoachingRequest["status"],
+                status:
+                  status === 'completed'
+                    ? 'completed'
+                    : status === 'confirmed'
+                      ? 'confirmed'
+                      : status === 'cancelled'
+                        ? 'rejected'
+                        : status === 'rejected'
+                          ? 'rejected'
+                          : 'pending',
                 adminNotes: adminNotes ?? r.adminNotes,
                 ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
               }
@@ -393,6 +398,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
         )
       );
       window.dispatchEvent(new Event('sportsync:notifications-refresh'));
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
     } catch (error) {
       console.error('Error updating request status:', error);
       throw error;
@@ -486,7 +492,24 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 export function useCoaching() {
   const context = useContext(CoachingContext);
   if (context === undefined) {
-    throw new Error("useCoaching must be used within CoachingProvider");
+    console.error("useCoaching must be used within CoachingProvider. Returning fallback context.");
+    const fallback: CoachingContextType = {
+      coaches: [],
+      requests: [],
+      activeRequestId: null,
+      setActiveRequestId: () => {},
+      addRequest: async () => "",
+      updateRequestStatus: async () => {},
+      addCoach: async () => {},
+      updateCoach: async () => {},
+      deleteCoach: async () => {},
+      refreshCoaches: async () => {},
+      refreshRequests: async () => {},
+      findCoachByEmail: () => undefined,
+      isLoading: false,
+      error: null,
+    };
+    return fallback;
   }
   return context;
 }

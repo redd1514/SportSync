@@ -658,6 +658,7 @@ function TicketVerification() {
     try {
       await updateRequestStatus(result.id, 'completed' as any, note);
       setResult({ ...result, status: 'completed' as any, adminNotes: note, req: { ...result.req, status: 'completed' as any, adminNotes: note } });
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
     } catch (e: any) {
       setActionError(e?.message || 'Could not check out this coaching ticket. Please try again.');
     } finally {
