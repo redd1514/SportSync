@@ -52,6 +52,66 @@ const getSportColor = (sport: string, available: boolean, maintenance: boolean) 
   }
 };
 
+const sportVisualKind = (sport: string) => {
+  const s = sport.toLowerCase();
+  if (s.includes("basket")) return "basketball";
+  if (s.includes("volley")) return "volleyball";
+  if (s.includes("badminton")) return "badminton";
+  if (s.includes("pickle")) return "pickleball";
+  if (s.includes("table") || s.includes("tennis")) return "table_tennis";
+  if (s.includes("billiard") || s.includes("pool")) return "billiards";
+  return "custom";
+};
+
+function AdminCourtMarkings({ court }: { court: CourtMapData }) {
+  const { x, y, width: w, height: h, sport, maintenanceMode } = court;
+  const kind = sportVisualKind(sport);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const line = "#ffffff";
+  const thin = Math.max(1, Math.min(w, h) * 0.01);
+  const opacity = maintenanceMode ? 0.1 : 0.22;
+
+  if (kind === "basketball") {
+    return (
+      <g pointerEvents="none" opacity={opacity}>
+        <line x1={cx} y1={y + 10} x2={cx} y2={y + h - 10} stroke={line} strokeWidth={thin} />
+        <circle cx={cx} cy={cy} r={Math.min(w, h) * 0.18} fill="none" stroke={line} strokeWidth={thin} />
+        <rect x={x + 10} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
+        <rect x={x + w - 10 - w * 0.16} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
+        <circle cx={x + w * 0.2} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
+        <circle cx={x + w * 0.8} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
+      </g>
+    );
+  }
+
+  if (kind === "billiards") {
+    const pocket = Math.max(4, Math.min(w, h) * 0.06);
+    return (
+      <g pointerEvents="none" opacity={maintenanceMode ? 0.14 : 0.3}>
+        <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="6" fill="none" stroke={line} strokeWidth={thin + 1} />
+        {[[x + 12, y + 12], [cx, y + 10], [x + w - 12, y + 12], [x + 12, y + h - 12], [cx, y + h - 10], [x + w - 12, y + h - 12]].map(([px, py], i) => (
+          <circle key={i} cx={px} cy={py} r={pocket} fill="#050505" stroke={line} strokeWidth={0.8} />
+        ))}
+      </g>
+    );
+  }
+
+  return (
+    <g pointerEvents="none" opacity={opacity}>
+      <line x1={cx} y1={y + 10} x2={cx} y2={y + h - 10} stroke={line} strokeWidth={thin + 0.5} />
+      {kind !== "table_tennis" && (
+        <>
+          <line x1={x + w * 0.25} y1={y + 10} x2={x + w * 0.25} y2={y + h - 10} stroke={line} strokeWidth={thin} />
+          <line x1={x + w * 0.75} y1={y + 10} x2={x + w * 0.75} y2={y + h - 10} stroke={line} strokeWidth={thin} />
+        </>
+      )}
+      <line x1={x + 10} y1={cy} x2={x + w - 10} y2={cy} stroke={line} strokeWidth={kind === "table_tennis" ? thin + 1.2 : thin} />
+      <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="3" fill="none" stroke={line} strokeWidth={thin} />
+    </g>
+  );
+}
+
 export function FacilityMapAdmin() {
   const { bookings } = useUser();
   const [courts, setCourts] = useState<CourtMapData[]>(INITIAL_COURTS);
@@ -62,13 +122,14 @@ export function FacilityMapAdmin() {
   // Form State for configuration
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [formData, setFormData] = useState<Partial<CourtMapData>>({});
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Dynamic real-time status derived from bookings
   // For demonstration, a court is unavailable if there's any active booking today
   const dynamicCourts = useMemo(() => {
-    const today = "2026-03-13"; // Using static today as per instructions
+    const today = new Date().toISOString().split("T")[0];
     const activeBookings = bookings.filter(b => b.date === today && b.status !== "cancelled" && b.status !== "completed");
     
     return courts.map(c => {
@@ -152,11 +213,10 @@ export function FacilityMapAdmin() {
   };
 
   const removeCourt = (id: string) => {
-    if (window.confirm("Are you sure you want to remove this court?")) {
-      setCourts(prev => prev.filter(c => c.id !== id));
-      if (selectedCourt?.id === id) setSelectedCourt(null);
-      setShowConfigModal(false);
-    }
+    setCourts(prev => prev.filter(c => c.id !== id));
+    if (selectedCourt?.id === id) setSelectedCourt(null);
+    setDeleteConfirmId(null);
+    setShowConfigModal(false);
   };
 
   return (
@@ -227,8 +287,16 @@ export function FacilityMapAdmin() {
                 <rect width="950" height="650" fill="#151515" />
                 <defs>
                   <pattern id="admin-grid" width="50" height="50" patternUnits="userSpaceOnUse">
-                    <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#252525" strokeWidth="1" />
+                    <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#252525" strokeWidth="1" opacity="0.55" />
                   </pattern>
+                  <linearGradient id="admin-court-sheen" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+                    <stop offset="48%" stopColor="#ffffff" stopOpacity="0.04" />
+                    <stop offset="100%" stopColor="#000000" stopOpacity="0.2" />
+                  </linearGradient>
+                  <filter id="admin-court-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#000000" floodOpacity="0.35" />
+                  </filter>
                 </defs>
                 <rect width="950" height="650" fill="url(#admin-grid)" />
                 
@@ -237,6 +305,7 @@ export function FacilityMapAdmin() {
                   const isSelected = selectedCourt?.id === court.id;
                   const isDragged = draggedCourtId === court.id;
                   const color = getSportColor(court.sport, court.available, court.maintenanceMode);
+                  const clipId = `admin-court-clip-${court.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
                   
                   return (
                     <g key={court.id}
@@ -245,16 +314,36 @@ export function FacilityMapAdmin() {
                       onPointerDown={(e) => handlePointerDown(e, court.id)}
                       onClick={() => !isEditingMode && setSelectedCourt(court)}
                     >
+                      {isSelected && (
+                        <rect
+                          x={-7}
+                          y={-7}
+                          width={court.width + 14}
+                          height={court.height + 14}
+                          fill={`${color}22`}
+                          stroke={color}
+                          strokeWidth="1.5"
+                          rx="14"
+                        />
+                      )}
                       <rect
                         width={court.width}
                         height={court.height}
                         fill={color}
-                        opacity={isDragged ? 0.7 : (court.maintenanceMode || !court.available) ? 0.4 : 0.8}
+                        opacity={isDragged ? 0.72 : (court.maintenanceMode || !court.available) ? 0.48 : 0.86}
                         stroke={isSelected ? "#ffffff" : isEditingMode ? "#FF8C00" : "#444"}
                         strokeWidth={isSelected ? 3 : isEditingMode ? 2 : 1}
                         strokeDasharray={isEditingMode ? "4 4" : "none"}
-                        rx="6"
+                        rx="10"
+                        filter="url(#admin-court-shadow)"
                       />
+                      <clipPath id={clipId}>
+                        <rect width={court.width} height={court.height} rx="10" />
+                      </clipPath>
+                      <g clipPath={`url(#${clipId})`}>
+                        <rect width={court.width} height={court.height} fill="url(#admin-court-sheen)" opacity={court.maintenanceMode ? 0.25 : 0.6} />
+                        <AdminCourtMarkings court={{ ...court, x: 0, y: 0 }} />
+                      </g>
                       <text
                         x={court.width / 2}
                         y={court.height / 2 - 10}
@@ -479,7 +568,7 @@ export function FacilityMapAdmin() {
               <div className="p-5 border-t border-white/10 flex justify-between bg-[#111]">
                 {!formData.id?.startsWith('NEW') ? (
                   <button
-                    onClick={() => formData.id && removeCourt(formData.id)}
+                    onClick={() => formData.id && setDeleteConfirmId(formData.id)}
                     className="flex items-center gap-2 text-red-400 hover:bg-red-400/10 px-4 py-2 rounded-xl transition-colors"
                     style={{ fontSize: 13, fontWeight: 700 }}
                   >
@@ -506,6 +595,37 @@ export function FacilityMapAdmin() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {deleteConfirmId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1A1A1A] p-5 shadow-2xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/12 border border-red-500/25">
+                  <AlertTriangle size={18} className="text-red-400" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-black" style={{ fontSize: 16 }}>Remove court?</h3>
+                  <p className="text-gray-400 mt-1" style={{ fontSize: 13 }}>This removes the court from the admin map layout.</p>
+                </div>
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button onClick={() => setDeleteConfirmId(null)} className="flex-1 rounded-xl px-4 py-2.5 text-gray-300 hover:bg-white/8" style={{ fontSize: 13, fontWeight: 800 }}>Cancel</button>
+                <button onClick={() => removeCourt(deleteConfirmId)} className="flex-1 rounded-xl px-4 py-2.5 bg-red-500 text-white hover:bg-red-600" style={{ fontSize: 13, fontWeight: 800 }}>Remove</button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

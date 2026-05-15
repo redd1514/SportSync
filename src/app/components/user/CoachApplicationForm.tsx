@@ -69,6 +69,7 @@ export function CoachApplicationForm() {
   const [requestMode, setRequestMode] = useState<"change_request" | "removal_request">("change_request");
   const [requestDetails, setRequestDetails] = useState("");
   const [requestSent, setRequestSent] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
@@ -106,6 +107,7 @@ export function CoachApplicationForm() {
   const handleSubmit = async () => {
     if (!sport || !bio || availability.length === 0 || !photoUrl || isSubmitting) return;
     setIsSubmitting(true);
+    setFormError("");
     try {
       const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
@@ -130,7 +132,7 @@ export function CoachApplicationForm() {
       setSubmitted(true);
       setStep(3);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not submit application");
+      setFormError(e instanceof Error ? e.message : "Could not submit application");
     } finally {
       setIsSubmitting(false);
     }
@@ -148,6 +150,7 @@ export function CoachApplicationForm() {
   const submitCoachProfileRequest = async () => {
     if (!myCoach || !requestDetails.trim() || isSubmitting) return;
     setIsSubmitting(true);
+    setFormError("");
     try {
       const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
@@ -173,7 +176,7 @@ export function CoachApplicationForm() {
       setRequestDetails("");
       await loadApplications();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not notify admin");
+      setFormError(e instanceof Error ? e.message : "Could not notify admin");
     } finally {
       setIsSubmitting(false);
     }
@@ -258,6 +261,11 @@ export function CoachApplicationForm() {
                     style={{ fontSize: 14, background: `linear-gradient(135deg, ${ACCENT_BLUE}, #1d4ed8)` }}>
                     {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Sending request...</> : <><MessageSquare size={16} /> {actionLabel}</>}
                   </button>
+                  {formError && (
+                    <div className="rounded-2xl p-4 border" style={{ background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.25)" }}>
+                      <p className="text-red-400 font-black" style={{ fontSize: 13 }}>{formError}</p>
+                    </div>
+                  )}
                   {requestSent && (
                     <div className="rounded-2xl p-4 border" style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.25)" }}>
                       <p className="text-green-400 font-black" style={{ fontSize: 13 }}>Request sent to admin.</p>
@@ -525,6 +533,11 @@ export function CoachApplicationForm() {
                   Continue →
                 </motion.button>
               </div>
+              {formError && (
+                <div className="rounded-2xl p-4 border" style={{ background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.25)" }}>
+                  <p className="text-red-400 font-black" style={{ fontSize: 13 }}>{formError}</p>
+                </div>
+              )}
             </motion.div>
           )}
 

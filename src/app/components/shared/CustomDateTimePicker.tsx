@@ -10,6 +10,9 @@ interface CustomDateTimePickerProps {
   minDate?: string;
   accentColor?: string;
   availableTimes?: string[];
+  startHour?: number;
+  endHour?: number;
+  sessionDurationHours?: number;
 }
 
 const BG_CARD  = '#1C1E27';
@@ -28,6 +31,9 @@ export function CustomDateTimePicker({
   minDate,
   accentColor = '#F97316',
   availableTimes,
+  startHour = 7,
+  endHour = 23,
+  sessionDurationHours = 1,
 }: CustomDateTimePickerProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     if (selectedDate) return new Date(selectedDate + 'T00:00:00');
@@ -101,6 +107,8 @@ export function CustomDateTimePicker({
   };
 
   const monthKey = `${viewMonth.getFullYear()}-${viewMonth.getMonth()}`;
+  const latestStartHour = Math.max(startHour, Math.floor(endHour - sessionDurationHours));
+  const timeHours = Array.from({ length: latestStartHour - startHour + 1 }, (_, i) => i + startHour);
 
   return (
     <div className="space-y-3">
@@ -261,11 +269,15 @@ export function CustomDateTimePicker({
             >
               <div className="p-3 border-b" style={{ borderColor: BORDER }}>
                 <p style={{ color: TEXT, fontSize: 12, fontWeight: 800 }}>Select Start Time</p>
-                <p style={{ color: MUTED, fontSize: 11 }}>Last booking ends at 11:00 PM</p>
+                <p style={{ color: MUTED, fontSize: 11 }}>
+                  {sessionDurationHours > 1
+                    ? `${sessionDurationHours}-hour booking. Latest start is ${latestStartHour % 12 || 12}:00 ${latestStartHour >= 12 ? 'PM' : 'AM'}`
+                    : 'Last booking ends at 11:00 PM'}
+                </p>
               </div>
               <div className="p-3 max-h-52 overflow-y-auto custom-scrollbar">
                 <div className="grid grid-cols-3 gap-1.5">
-                  {Array.from({ length: 16 }, (_, i) => i + 7).map(hour => {
+                  {timeHours.map(hour => {
                     const timeStr   = `${String(hour).padStart(2,'0')}:00`;
                     const isSelected = timeStr === selectedTime;
                     const isAvailable = !availableTimes || availableTimes.includes(timeStr);

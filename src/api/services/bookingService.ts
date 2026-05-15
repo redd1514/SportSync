@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient';
 import { BookingRequest, BookingResponse } from '../types';
 import { createHash } from 'crypto';
 import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
+import { deskAdminRowToClientBooking, mapBookingRowToAdmin } from '../utils/bookingMap.ts';
 
 const USE_MOCK_BOOKINGS = process.env.USE_MOCK_BOOKINGS === 'true';
 
@@ -91,17 +92,25 @@ export const bookingService = {
     courtId: string,
     date: string,
     startTime: string,
-    endTime: string
+    endTime: string,
+    excludeBookingId?: string
   ): Promise<boolean> {
     try {
       const resolvedCourtId = await resolveCourtRowId(courtId);
-      const { data, error } = await supabase
+      let query = supabase
         .from('bookings')
         .select('id')
         .eq('court_id', resolvedCourtId)
         .eq('booking_date', date)
-        .in('status', ['pending', 'confirmed', 'checked_in'])
-        .or(`and(start_time.gte.${startTime},start_time.lt.${endTime}),and(end_time.gt.${startTime},end_time.lte.${endTime})`);
+        .in('status', ['pending', 'confirmed', 'checked_in', 'pending_verification', 'rescheduled'])
+        .lt('start_time', endTime)
+        .gt('end_time', startTime);
+
+      if (excludeBookingId) {
+        query = query.neq('id', excludeBookingId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return (data?.length ?? 0) === 0; // True if no conflicts
@@ -257,7 +266,21 @@ export const bookingService = {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*')
+        .select(`
+          id,
+          user_id,
+          booking_date,
+          start_time,
+          end_time,
+          status,
+          total_price,
+          base_price,
+          notes,
+          qr_code_token,
+          created_at,
+          updated_at,
+          courts ( name, sports ( name ) )
+        `)
         .eq('user_id', resolvedUserId)
         .order('booking_date', { ascending: false });
 
@@ -276,7 +299,8 @@ export const bookingService = {
         const mapped = data.map((b: any) => {
            const hasPendingReq = requests?.some(r => r.booking_id === b.id);
            return {
-             ...b,
+             ...deskAdminRowToClientBooking(mapBookingRowToAdmin(b)),
+             cancellationRequested: hasPendingReq || false,
              cancellation_requested: hasPendingReq || false
            };
         });

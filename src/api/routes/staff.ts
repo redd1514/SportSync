@@ -96,7 +96,7 @@ staffRouter.get('/requests/pending', async (c) => {
   try {
     const { data: reqs, error: reqErr } = await supabase
       .from('booking_requests')
-      .select('id, booking_id, reason, status, request_type, requested_new_date, requested_new_start_time')
+      .select('id, booking_id, reason, status, request_type, requested_new_date, requested_new_start_time, requested_new_end_time')
       .eq('status', 'pending')
       .limit(300);
     if (reqErr) throw reqErr;
@@ -138,12 +138,14 @@ staffRouter.get('/requests/pending', async (c) => {
         customerName: u?.full_name || u?.email || 'Customer',
         date: b?.booking_date || '',
         time: b?.start_time || '',
+        endTime: b?.end_time || '',
         court: court?.name || b?.court_id || 'Court',
         reason: r.reason || '',
         status: r.status,
         requestType: r.request_type,
         requestedNewDate: r.requested_new_date || null,
         requestedNewStartTime: r.requested_new_start_time || null,
+        requestedNewEndTime: r.requested_new_end_time || null,
       };
       if (r.request_type === 'reschedule') reschedules.push(base);
       else cancellations.push(base);
@@ -168,7 +170,7 @@ staffRouter.get('/requests/pending', async (c) => {
       for (const coach of coaches || []) coachingCoaches[coach.id] = coach;
     }
     const coaching = (coachingRows || [])
-      .filter((row: any) => !/PAYMENT_VERIFIED|Manual coaching payment verified/i.test(String(row.admin_notes || row.notes || '')))
+      .filter((row: any) => !/PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(String(row.admin_notes || row.notes || '')))
       .map((row: any) => {
         const coach = coachingCoaches[row.coach_id];
         const student = coachingUsers[row.user_id];
@@ -295,6 +297,13 @@ staffRouter.put('/requests/:id/reschedule/approve', async (c) => {
     if (!br.requested_new_date || !br.requested_new_start_time || !br.requested_new_end_time) {
       return c.json({ error: 'Requested schedule is incomplete.' }, 400);
     }
+    const toMinutes = (value: string) => {
+      const [h = '0', m = '0'] = String(value || '').slice(0, 5).split(':');
+      return Number(h) * 60 + Number(m);
+    };
+    if (toMinutes(br.requested_new_start_time) < 7 * 60 || toMinutes(br.requested_new_end_time) > 23 * 60) {
+      return c.json({ error: 'Requested schedule must fit within facility hours: 7:00 AM to 11:00 PM.' }, 400);
+    }
 
     const { data: currentBooking, error: currentErr } = await supabase
       .from('bookings')
@@ -413,7 +422,7 @@ staffRouter.put('/requests/:id/coaching/verify', async (c) => {
     if (!session) return c.json({ error: 'Coaching session not found' }, 404);
     if (session.status !== 'approved') return c.json({ error: 'Coach has not accepted this request yet.' }, 400);
 
-    const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nManual coaching payment verified at the front desk or official GCash QR before session check-in.`.trim();
+    const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nCOACHING_CHECKED_IN\nCoaching payment verified at the front desk before session check-in.`.trim();
     const { error } = await supabase
       .from('coaching_sessions')
       .update({ admin_notes: note, updated_at: new Date().toISOString() })

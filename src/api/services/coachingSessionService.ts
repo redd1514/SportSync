@@ -21,6 +21,11 @@ function notesFromProofAndLinked(paymentProofUrl?: string, linkedBookingId?: str
   return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
+function linkedBookingIdFromNotes(notes?: string | null): string | undefined {
+  const match = String(notes || '').match(/linked_booking:([0-9a-f-]+)/i);
+  return match?.[1];
+}
+
 async function notifyUser(userId: string | undefined, eventType: string, title: string, message: string, extra?: Record<string, unknown>) {
   if (!userId) return;
   await RealtimeEventEmitter.notifyUser(userId, eventType, {
@@ -165,11 +170,12 @@ export const coachingSessionService = {
       .from('coaching_sessions')
       .select('id')
       .eq('user_id', user_id)
+      .eq('coach_id', coach_id)
       .eq('status', 'pending')
       .limit(1);
     if (pendingErr) throw pendingErr;
     if ((activePending || []).length > 0) {
-      throw new Error('You already have a pending coaching request. Please wait for the coach to accept or decline before requesting another session.');
+      throw new Error('You already have a pending request with this coach. Please wait for the coach to accept or decline before requesting them again.');
     }
 
     const { data: coachRow, error: coachErr } = await supabase
@@ -271,21 +277,22 @@ export const coachingSessionService = {
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
 
-    if (dbStatus === 'approved') {
+    const nextStatus = typeof update.status === 'string' ? String(update.status) : undefined;
+    if (nextStatus === 'approved' || nextStatus === 'confirmed') {
       await notifyUser(
         data?.user_id,
         'coaching_request_approved',
         'Coach accepted your session',
-        'Your coach reserved the court. Open My Coaching to view your coaching fee and ticket.',
-        { sessionId: data.id, status: dbStatus },
+        'Your coach accepted your reserved coaching booking. Open My Coaching to view your ticket.',
+        { sessionId: data.id, status: nextStatus },
       );
-    } else if (dbStatus === 'rejected') {
+    } else if (nextStatus === 'rejected') {
       await notifyUser(
         data?.user_id,
         'coaching_request_rejected',
         'Coach declined your session',
         'Your coaching request was declined. You can request another coach or choose a different time.',
-        { sessionId: data.id, status: dbStatus },
+        { sessionId: data.id, status: nextStatus },
       );
     }
     
@@ -294,13 +301,13 @@ export const coachingSessionService = {
 
   async updateSessionStatus(
     id: string,
-    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved',
+    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved' | 'completed',
     adminNotes?: string,
   ): Promise<CoachingSessionRow> {
     // Map UI status → DB status
     // DB only knows: pending | approved | rejected | cancelled
     const dbStatus =
-      status === 'confirmed' || status === 'approved'
+      status === 'confirmed' || status === 'approved' || status === 'completed'
         ? 'approved'
         : status === 'cancelled'
           ? 'cancelled'
@@ -323,6 +330,48 @@ export const coachingSessionService = {
     
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
+
+    const linkedBookingId = linkedBookingIdFromNotes(data?.notes || oldData?.notes);
+    if (dbStatus === 'approved') {
+      if (linkedBookingId) {
+        const linkedStatus = status === 'completed'
+          ? 'completed'
+          : /COACHING_CHECKED_IN|checked_in:/i.test(String(adminNotes || data?.admin_notes || ''))
+            ? 'checked_in'
+            : 'confirmed';
+        await supabase
+          .from('bookings')
+          .update({ status: linkedStatus, updated_at: new Date().toISOString() })
+          .eq('id', linkedBookingId)
+          .in('status', ['pending', 'confirmed', 'pending_verification', 'checked_in']);
+      }
+      if (oldData?.status !== 'approved') {
+        await notifyUser(
+          data?.user_id,
+          'coaching_request_approved',
+          'Coach accepted your session',
+          'Your coach accepted your reserved coaching booking. Open My Coaching to view your ticket.',
+          { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+      }
+    } else if (dbStatus === 'rejected' || dbStatus === 'cancelled') {
+      if (linkedBookingId) {
+        await supabase
+          .from('bookings')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', linkedBookingId)
+          .in('status', ['pending', 'confirmed', 'pending_verification']);
+      }
+      await notifyUser(
+        data?.user_id,
+        'coaching_request_rejected',
+        dbStatus === 'cancelled' ? 'Coaching session cancelled' : 'Coach declined your session',
+        dbStatus === 'cancelled'
+          ? 'Your coaching session was cancelled.'
+          : 'Your coaching request was declined. The linked court reservation was released.',
+        { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+      );
+    }
     
     return data as CoachingSessionRow;
   },

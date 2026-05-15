@@ -5,6 +5,7 @@ import {
   ChevronRight, CalendarDays, Maximize2, Users, Zap, Shield, Clock, MapPin, Star,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
+import { useUserAPI } from "../../hooks/useUserAPI";
 import { useRealtimeBookingAPI } from "../../hooks/useRealtimeAPI";
 import { SPORTS_INFO } from "../sportsData";
 import { getSportColor, SportIcon } from "../SportIcons";
@@ -22,12 +23,26 @@ function greetingText() {
 }
 
 export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
-  const { user } = useUser();
+  const { user, updateUser } = useUser();
+  const { resetLoyaltyPoints } = useUserAPI();
   const { bookings } = useRealtimeBookingAPI(user?.id || '', { autoFetch: true });
   const [hoveredSport, setHoveredSport] = useState<string | null>(null);
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const firstName = user?.name?.split(" ")[0] || "Athlete";
+  const loyaltyPoints = user?.loyaltyPoints || 0;
+  const rewardProgress = loyaltyPoints % 10;
+  const rewardsAvailable = Math.floor(loyaltyPoints / 10);
+  const pointsToNext = rewardProgress === 0 && loyaltyPoints > 0 ? 0 : 10 - rewardProgress;
+  const resetMyPoints = async () => {
+    if (!user) return;
+    try {
+      await resetLoyaltyPoints(user.id);
+    } catch {
+      /* demo/local fallback */
+    }
+    updateUser(user.id, { loyaltyPoints: 0 });
+  };
   
   const localPendingRequests = (() => {
     try {
@@ -159,18 +174,37 @@ export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: stri
                 <div className="rounded-2xl border px-4 py-3 flex items-center gap-3" style={{ background: "rgba(251,191,36,0.05)", borderColor: "rgba(251,191,36,0.15)" }}>
                   <Trophy size={18} style={{ color: "#FBBF24", flexShrink: 0 }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3">
                       <p style={{ color: TP, fontSize: 13, fontWeight: 800 }}>Loyalty Points</p>
-                      <p style={{ color: "#FBBF24", fontSize: 16, fontWeight: 900 }}>{user.loyaltyPoints}</p>
+                      <motion.p
+                        key={loyaltyPoints}
+                        initial={{ scale: 0.85, opacity: 0.4 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        style={{ color: "#FBBF24", fontSize: 16, fontWeight: 900 }}
+                      >
+                        {loyaltyPoints}
+                      </motion.p>
                     </div>
                     <div className="mt-1.5 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                      <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min((user.loyaltyPoints / 10) * 100, 100)}%` }}
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(((loyaltyPoints % 10) / 10) * 100 || (loyaltyPoints >= 10 ? 100 : 0), 100)}%` }}
                         transition={{ delay: 0.6, duration: 1.2, ease: "easeOut" }}
                         className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FBBF24,#F97316)" }} />
                     </div>
-                    <p style={{ color: TS, fontSize: 10, marginTop: 4 }}>
-                      {user.loyaltyPoints >= 10 ? "Eligible for a free session!" : `${10 - user.loyaltyPoints} pts to free session`}
-                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p style={{ color: rewardsAvailable > 0 ? "#FBBF24" : TS, fontSize: 10 }}>
+                        {rewardsAvailable > 0 ? `${rewardsAvailable} reward ready` : `${pointsToNext} completed booking${pointsToNext === 1 ? "" : "s"} to reward`}
+                      </p>
+                      <button type="button" onClick={resetMyPoints} className="rounded-lg border border-white/10 px-2 py-1 text-gray-400 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
+                        Reset test
+                      </button>
+                    </div>
+                    <AnimatePresence>
+                      {rewardsAvailable > 0 && (
+                        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-2 rounded-xl border border-yellow-400/25 bg-yellow-400/10 px-3 py-2">
+                          <p className="text-yellow-200 font-black" style={{ fontSize: 11 }}>Level up: Reward unlocked</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
               )}

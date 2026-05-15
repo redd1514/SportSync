@@ -10,6 +10,8 @@ export interface Announcement {
   type: 'promotion' | 'maintenance' | 'reminder' | 'update' | 'alert' | 'general';
   createdAt: string;
   dismissed?: boolean;
+  actionTab?: 'home' | 'booking' | 'coaching' | string;
+  actionSub?: string;
 }
 
 interface AnnouncementsContextType {
@@ -60,13 +62,24 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         if (notifRes.ok && Array.isArray(notifData)) {
           userNotifications = notifData.map((r: any) => {
             const data = r.data && typeof r.data === 'object' ? r.data : {};
+            const eventType = String(r.event_type || data.eventType || data.type || '').toLowerCase();
+            const title = String(data.title || 'Notification');
+            const message = String(data.message || '');
+            const actionTab = data.targetTab
+              || (/coaching/.test(eventType) || /coach/i.test(`${title} ${message}`) ? 'coaching'
+              : /booking|reschedule|cancel|front_desk|ticket/.test(eventType) ? 'booking'
+              : 'home');
+            const actionSub = data.targetSub
+              || (actionTab === 'coaching' ? 'mycoaching' : actionTab === 'booking' ? 'mybookings' : undefined);
             return {
               id: `notif:${String(r.id)}`,
-              title: String(data.title || 'Notification'),
-              message: String(data.message || ''),
+              title,
+              message,
               type: (String(data.type || 'update') as Announcement['type']),
               createdAt: String(r.created_at || new Date().toISOString()),
               dismissed: Boolean(r.read_at),
+              actionTab,
+              actionSub,
             };
           });
         }

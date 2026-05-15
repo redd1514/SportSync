@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, Clock, X, AlertCircle, CheckCircle, RefreshCw, Loader2, CreditCard, RotateCcw, Trash2, Filter } from 'lucide-react';
+import { Calendar, Clock, X, AlertCircle, CheckCircle, RefreshCw, Loader2, CreditCard, RotateCcw, Trash2, Filter, ChevronDown } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { useBookingAPI } from '../hooks/useBookingAPI';
 import { useRealtimeBookingAPI } from '../hooks/useRealtimeAPI';
@@ -33,10 +33,77 @@ const calculateDuration = (startTime: string, endTime: string): number => {
   return Math.round((endTotal - startTotal) / 60);
 };
 
+const FACILITY_OPEN_HOUR = 7;
+const FACILITY_CLOSE_HOUR = 23;
+
+const addHoursToTime = (time: string, hours: number): string => {
+  const [h = 0, m = 0] = time.split(':').map(Number);
+  const total = h * 60 + m + Math.round(hours * 60);
+  const nextHour = Math.floor(total / 60);
+  const nextMinute = total % 60;
+  return `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`;
+};
+
+function FilterMenu({
+  value,
+  options,
+  onChange,
+  accent = '#FF8C00',
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  accent?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((item) => item.value === value) || options[0];
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="h-9 rounded-xl border border-white/10 bg-white/[0.06] px-3 text-white font-black outline-none flex items-center gap-2 min-w-[120px] justify-between"
+        style={{ fontSize: 12 }}
+      >
+        <span>{selected?.label}</span>
+        <ChevronDown size={13} style={{ color: accent }} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            className="absolute left-0 top-full mt-2 z-40 min-w-full overflow-hidden rounded-xl border border-white/10 bg-[#121212] shadow-2xl"
+          >
+            {options.map((item) => {
+              const active = item.value === value;
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => {
+                    onChange(item.value);
+                    setOpen(false);
+                  }}
+                  className="w-full px-3 py-2.5 text-left font-black transition-colors hover:bg-white/8"
+                  style={{ fontSize: 12, color: active ? accent : '#f5f5f5', background: active ? `${accent}18` : 'transparent' }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export function UserMyBookings() {
-  const { user, updateBooking, addCancellationRequest, bookings: contextBookings } = useUser();
-  const { getQRCodeUrl, loading, error: apiError, requestBookingCancellation, requestBookingReschedule, checkAvailability } = useBookingAPI();
-  const { bookings, isConnected, cancelBooking } = useRealtimeBookingAPI(user?.id || '', {
+  const { user } = useUser();
+  const { loading, error: apiError, requestBookingCancellation, requestBookingReschedule, checkAvailability } = useBookingAPI();
+  const { bookings, isConnected, fetchBookings } = useRealtimeBookingAPI(user?.id || '', {
     autoFetch: true,
   });
   
@@ -60,6 +127,8 @@ export function UserMyBookings() {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'pending' | 'past'>('upcoming');
   const [fullScreenQr, setFullScreenQr] = useState<{ token: string; booking: any } | null>(null);
   const [sportFilter, setSportFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'next7'>('all');
+  const [dateSort, setDateSort] = useState<'newest' | 'oldest'>('newest');
   const [showClearModal, setShowClearModal] = useState(false);
   const [showClearCompletedModal, setShowClearCompletedModal] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -92,9 +161,24 @@ export function UserMyBookings() {
     return Array.from(byId.values());
   }, [bookings]);
 
+  const selectedBookingRecord = useMemo(
+    () => userBookings.find((b) => b.id === selectedBooking) || null,
+    [selectedBooking, userBookings]
+  );
+
+  const selectedBookingDuration = useMemo(() => {
+    if (!selectedBookingRecord) return 1;
+    const explicit = Number(selectedBookingRecord.duration);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    if (selectedBookingRecord.time && selectedBookingRecord.endTime) {
+      return Math.max(1, calculateDuration(selectedBookingRecord.time, selectedBookingRecord.endTime));
+    }
+    return 1;
+  }, [selectedBookingRecord]);
+
   useEffect(() => {
     let isMounted = true;
-    const bookingCourtId = userBookings.find(b => b.id === selectedBooking)?.courtId;
+    const bookingCourtId = selectedBookingRecord?.courtId;
     if (!rescheduleDate || !selectedBooking || !bookingCourtId) {
       setAvailableTimes([]);
       return;
@@ -102,10 +186,15 @@ export function UserMyBookings() {
 
     const fetchTimes = async () => {
       setCheckingTimes(true);
-      const promises = Array.from({ length: 16 }, (_, i) => i + 7).map(async hour => {
+      const latestStartHour = FACILITY_CLOSE_HOUR - selectedBookingDuration;
+      const startHours = Array.from(
+        { length: Math.max(0, Math.floor(latestStartHour) - FACILITY_OPEN_HOUR + 1) },
+        (_, i) => i + FACILITY_OPEN_HOUR
+      );
+      const promises = startHours.map(async hour => {
         const timeStr = `${String(hour).padStart(2, '0')}:00`;
-        const endStr = `${String(hour + 1).padStart(2, '0')}:00`; // Assuming 1 hr duration
-        const isAvail = await checkAvailability(bookingCourtId, rescheduleDate, timeStr, endStr);
+        const endStr = addHoursToTime(timeStr, selectedBookingDuration);
+        const isAvail = await checkAvailability(bookingCourtId, rescheduleDate, timeStr, endStr, selectedBooking);
         return isAvail ? timeStr : null;
       });
 
@@ -119,7 +208,7 @@ export function UserMyBookings() {
 
     return () => { isMounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rescheduleDate, selectedBooking]);
+  }, [rescheduleDate, selectedBooking, selectedBookingDuration, selectedBookingRecord?.courtId]);
 
   
   const today = new Date();
@@ -137,9 +226,36 @@ export function UserMyBookings() {
   const filterBySport = (arr: any[]) =>
     sportFilter === 'all' ? arr : arr.filter(b => b.sport === sportFilter);
 
+  const applyDateControls = (arr: any[]) => {
+    const todayKey = new Date().toISOString().split('T')[0];
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    const nextWeekKey = nextWeek.toISOString().split('T')[0];
+
+    return [...arr]
+      .filter((b) => {
+        if (dateFilter === 'today') return b.date === todayKey;
+        if (dateFilter === 'next7') return b.date >= todayKey && b.date <= nextWeekKey;
+        return true;
+      })
+      .sort((a, b) => {
+        const at = new Date(`${a.date || '1970-01-01'}T${a.time || '00:00'}`).getTime();
+        const bt = new Date(`${b.date || '1970-01-01'}T${b.time || '00:00'}`).getTime();
+        return dateSort === 'newest' ? bt - at : at - bt;
+      });
+  };
+
+  const filterVisibleBookings = (arr: any[]) => applyDateControls(filterBySport(arr));
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(r => setTimeout(r, 1400));
+    const latest = await fetchBookings();
+    const stillPending = new Set(
+      latest
+        .filter((b: any) => b.cancellationRequested || b.cancellation_requested)
+        .map((b: any) => String(b.id))
+    );
+    setLocalPendingRequests(prev => prev.filter(id => stillPending.has(String(id))));
     setIsRefreshing(false);
     toast.success('Bookings refreshed!');
   };
@@ -158,9 +274,8 @@ export function UserMyBookings() {
   };
 
   const upcomingBookings = userBookings.filter(b => {
-    const isPastDate = parseBookingDate(b.date) < today;
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
-    if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+    if (b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
     if (isPendingReq) return false;
     return true;
   });
@@ -173,8 +288,7 @@ export function UserMyBookings() {
 
   const pastBookings = userBookings.filter(b => {
     if (hiddenCompletedIds.includes(b.id)) return false;
-    const isPastDate = parseBookingDate(b.date) < today;
-    return isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
+    return b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
   });
 
   const handleCancelRequest = async () => {
@@ -183,8 +297,9 @@ export function UserMyBookings() {
     try {
       if (!user?.id) throw new Error('Please sign in again.');
       await requestBookingCancellation(selectedBooking, user.id, cancellationReason);
-      
-      setLocalPendingRequests(prev => [...prev, selectedBooking]);
+      const latest = await fetchBookings();
+      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested));
+      if (!serverHasPending) setLocalPendingRequests(prev => [...prev, selectedBooking]);
       setShowCancelModal(false);
       setSelectedBooking(null);
       setCancellationReason('');
@@ -199,12 +314,19 @@ export function UserMyBookings() {
 
   const handleReschedule = async () => {
     if (!selectedBooking || !rescheduleDate || !rescheduleTime) return;
+    const requestedEnd = addHoursToTime(rescheduleTime, selectedBookingDuration);
+    if (requestedEnd > `${FACILITY_CLOSE_HOUR}:00`) {
+      toast.error(`This ${selectedBookingDuration}-hour booking would end after closing. Please choose an earlier time.`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       if (!user?.id) throw new Error('Please sign in again.');
       await requestBookingReschedule(selectedBooking, user.id, 'Reschedule request', rescheduleDate, rescheduleTime);
 
-      setLocalPendingRequests(prev => [...prev, selectedBooking]);
+      const latest = await fetchBookings();
+      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested));
+      if (!serverHasPending) setLocalPendingRequests(prev => [...prev, selectedBooking]);
       setShowRescheduleModal(false);
       setSelectedBooking(null);
       setRescheduleDate('');
@@ -225,13 +347,26 @@ export function UserMyBookings() {
     let border = 'border-gray-500/30';
     let dot = 'bg-gray-400';
 
-    if (booking.status === 'confirmed' || booking.status === 'checked_in') {
-      const isPaid = booking.paymentStatus === 'paid' || booking.payment_status === 'paid';
-      label = isPaid ? 'PAID' : 'RESERVED';
-      bg = isPaid ? 'bg-emerald-500/10' : 'bg-[#FF8C00]/10';
-      text = isPaid ? 'text-emerald-400' : 'text-[#FF8C00]';
-      border = isPaid ? 'border-emerald-500/20' : 'border-[#FF8C00]/20';
-      dot = isPaid ? 'bg-emerald-400' : 'bg-[#FF8C00]';
+    const isCheckedIn = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in';
+
+    if (isCheckedIn) {
+      label = 'ONGOING';
+      bg = 'bg-emerald-500/10';
+      text = 'text-emerald-400';
+      border = 'border-emerald-500/20';
+      dot = 'bg-emerald-400';
+    } else if (booking.status === 'confirmed') {
+      label = 'RESERVED';
+      bg = 'bg-[#FF8C00]/10';
+      text = 'text-[#FF8C00]';
+      border = 'border-[#FF8C00]/20';
+      dot = 'bg-[#FF8C00]';
+    } else if (booking.status === 'pending_payment' || booking.status === 'pending') {
+      label = 'PENDING';
+      bg = 'bg-[#FF8C00]/10';
+      text = 'text-[#FF8C00]';
+      border = 'border-[#FF8C00]/20';
+      dot = 'bg-[#FF8C00]';
     } else if (booking.status === 'pending_verification') {
       label = 'VERIFYING';
       bg = 'bg-yellow-500/10';
@@ -260,7 +395,7 @@ export function UserMyBookings() {
 
     return (
       <div className={`px-2.5 py-1 rounded-full border ${border} ${bg} flex items-center gap-1.5`}>
-        <div className={`w-1.5 h-1.5 rounded-full ${dot} ${booking.status === 'confirmed' ? 'animate-pulse' : ''}`} />
+        <div className={`w-1.5 h-1.5 rounded-full ${dot} ${label === 'PENDING' ? 'animate-pulse' : ''}`} />
         <span className={`${text} font-black uppercase`} style={{ fontSize: 9, letterSpacing: 0.5 }}>{label}</span>
       </div>
     );
@@ -279,7 +414,7 @@ export function UserMyBookings() {
     const color = getSportColor(booking.sport);
     const isPast = booking.status === 'completed' || booking.status === 'cancelled';
     const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id);
-    const canModify = !isPast && !isPendingReq && booking.status !== 'pending' && booking.status !== 'pending_verification';
+    const canModify = !isPast && !isPendingReq && booking.status !== 'pending' && booking.status !== 'pending_verification' && booking.status !== 'checked_in';
 
     const qrValue = booking.refCode || booking.id;
     // Always show the raw token if it starts with JRC-, otherwise abbreviate UUID
@@ -354,7 +489,7 @@ export function UserMyBookings() {
             </div>
 
             {/* QR Code Section */}
-            {!isPast && qrValue && (
+            {qrValue && (
               <div 
                 className="flex flex-col items-center justify-center bg-black/30 rounded-2xl p-4 border border-white/5 sm:w-36 flex-shrink-0 h-fit self-center sm:self-start mt-2 sm:mt-0 relative z-20 cursor-pointer hover:bg-black/40 transition-colors"
                 onClick={() => setFullScreenQr({ token: qrValue, booking })}
@@ -465,25 +600,47 @@ export function UserMyBookings() {
           </div>
         )}
 
-        {/* Sport filter pills */}
+        {/* Sport/date filter controls */}
         {allSports.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2 mb-6">
-            <Filter size={14} className="text-gray-500 flex-shrink-0" />
-            {allSports.map(sport => (
-              <motion.button
-                key={sport}
-                whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
-                onClick={() => setSportFilter(sport)}
-                className={`px-3 py-1.5 rounded-full font-black transition-all border ${
-                  sportFilter === sport
-                    ? 'bg-[#FF8C00]/15 border-[#FF8C00]/40 text-[#FF8C00]'
-                    : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
-                }`}
+          <div className="mb-6 rounded-2xl border border-white/10 bg-[#151515] px-3 py-3 shadow-[0_14px_35px_rgba(0,0,0,0.18)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+                <Filter size={14} className="text-[#FF8C00] flex-shrink-0" />
+                <span className="text-gray-400 font-black uppercase" style={{ fontSize: 10 }}>Filters</span>
+              </div>
+              <FilterMenu
+                value={sportFilter}
+                options={allSports.map((sport) => ({ value: sport, label: sport === 'all' ? 'All Sports' : sport }))}
+                onChange={setSportFilter}
+              />
+              {[
+                { id: 'all' as const, label: 'All Dates' },
+                { id: 'today' as const, label: 'Today' },
+                { id: 'next7' as const, label: 'Next 7 Days' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setDateFilter(item.id)}
+                  className={`h-9 px-3 rounded-xl font-black border transition-colors ${
+                    dateFilter === item.id
+                      ? 'bg-blue-500/15 border-blue-500/35 text-blue-200'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                  }`}
+                  style={{ fontSize: 12 }}
+                >
+                  {item.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setDateSort(prev => prev === 'newest' ? 'oldest' : 'newest')}
+                className="h-9 px-3 rounded-xl font-black border bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 transition-colors"
                 style={{ fontSize: 12 }}
               >
-                {sport === 'all' ? 'All Sports' : sport}
-              </motion.button>
-            ))}
+                Sort: {dateSort === 'newest' ? 'Newest first' : 'Oldest first'}
+              </button>
+            </div>
           </div>
         )}
         {userBookings.length === 0 ? (
@@ -605,8 +762,8 @@ export function UserMyBookings() {
                 className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5"
               >
                 {activeTab === 'upcoming' && (
-                  filterBySport(upcomingBookings).length > 0 ? (
-                    filterBySport(upcomingBookings).map(booking => (
+                  filterVisibleBookings(upcomingBookings).length > 0 ? (
+                    filterVisibleBookings(upcomingBookings).map(booking => (
                       <BookingCard key={booking.id} booking={booking} />
                     ))
                   ) : (
@@ -618,8 +775,8 @@ export function UserMyBookings() {
                 )}
 
                 {activeTab === 'pending' && (
-                  filterBySport(pendingBookings).length > 0 ? (
-                    filterBySport(pendingBookings).map(booking => (
+                  filterVisibleBookings(pendingBookings).length > 0 ? (
+                    filterVisibleBookings(pendingBookings).map(booking => (
                       <BookingCard key={booking.id} booking={booking} />
                     ))
                   ) : (
@@ -631,8 +788,8 @@ export function UserMyBookings() {
                 )}
 
                 {activeTab === 'past' && (
-                  filterBySport(pastBookings).length > 0 ? (
-                    filterBySport(pastBookings).map(booking => (
+                  filterVisibleBookings(pastBookings).length > 0 ? (
+                    filterVisibleBookings(pastBookings).map(booking => (
                       <BookingCard key={booking.id} booking={booking} />
                     ))
                   ) : (
@@ -798,6 +955,9 @@ export function UserMyBookings() {
                   minDate={new Date().toISOString().split('T')[0]}
                   accentColor="#0047AB"
                   availableTimes={availableTimes}
+                  startHour={FACILITY_OPEN_HOUR}
+                  endHour={FACILITY_CLOSE_HOUR}
+                  sessionDurationHours={selectedBookingDuration}
                 />
               )}
             </div>
@@ -993,4 +1153,4 @@ export function UserMyBookings() {
       )}
     </div>
   );
-}
+}

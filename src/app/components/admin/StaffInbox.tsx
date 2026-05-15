@@ -74,13 +74,153 @@ type ChangeRequestRow = {
   customerName: string;
   date: string;
   time: string;
+  endTime?: string | null;
   court: string;
   reason: string;
   requestType: 'cancellation' | 'reschedule';
   requestedNewDate?: string | null;
   requestedNewStartTime?: string | null;
+  requestedNewEndTime?: string | null;
   isReal?: boolean;
 };
+
+function minutesFromTime(raw?: string | null): number {
+  const s = String(raw || '').slice(0, 5);
+  const [h = '0', m = '0'] = s.split(':');
+  return Number(h) * 60 + Number(m);
+}
+
+function addMinutesToTime(raw: string, minutes: number): string {
+  const total = minutesFromTime(raw) + minutes;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+}
+
+function ScheduleComparison({ request }: { request: ChangeRequestRow }) {
+  const dayStart = 7 * 60;
+  const dayEnd = 23 * 60;
+  const daySpan = dayEnd - dayStart;
+  const currentStart = minutesFromTime(request.time);
+  const currentEnd = request.endTime ? minutesFromTime(request.endTime) : currentStart + 60;
+  const duration = Math.max(60, currentEnd - currentStart);
+  const requestedStart = minutesFromTime(request.requestedNewStartTime);
+  const requestedEnd = request.requestedNewEndTime ? minutesFromTime(request.requestedNewEndTime) : requestedStart + duration;
+
+  const blockStyle = (start: number, end: number) => ({
+    left: `${Math.max(0, ((start - dayStart) / daySpan) * 100)}%`,
+    width: `${Math.max(6, ((end - start) / daySpan) * 100)}%`,
+  });
+
+  const rows = [
+    {
+      label: 'Before',
+      date: request.date,
+      start: request.time,
+      end: request.endTime || addMinutesToTime(request.time, duration),
+      tone: 'rgba(248,113,113,0.85)',
+      soft: 'rgba(248,113,113,0.12)',
+      border: 'rgba(248,113,113,0.26)',
+      startMin: currentStart,
+      endMin: currentEnd,
+    },
+    {
+      label: 'Requested',
+      date: request.requestedNewDate || '',
+      start: request.requestedNewStartTime || '',
+      end: request.requestedNewEndTime || addMinutesToTime(request.requestedNewStartTime || request.time, duration),
+      tone: 'rgba(96,165,250,0.95)',
+      soft: 'rgba(96,165,250,0.13)',
+      border: 'rgba(96,165,250,0.30)',
+      startMin: requestedStart,
+      endMin: requestedEnd,
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-blue-500/20 bg-[#101827] p-4 overflow-hidden">
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <p className="text-blue-100 font-black" style={{ fontSize: 13 }}>Schedule change</p>
+          <p className="text-blue-200/65 font-black mt-0.5" style={{ fontSize: 10 }}>
+            Before and requested date cards
+          </p>
+        </div>
+        <span className="rounded-full border border-blue-400/25 bg-blue-400/10 px-2 py-1 text-blue-100 font-black" style={{ fontSize: 10 }}>
+          {Math.round(duration / 60)} hr
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        {rows.map((row) => (
+          <motion.div
+            key={`date-${row.label}`}
+            layout
+            className="rounded-xl border p-3"
+            style={{ borderColor: row.border, background: row.soft }}
+            whileHover={{ y: -2 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+          >
+            <p className="text-white font-black" style={{ fontSize: 11 }}>{row.label}</p>
+            <p className="text-gray-300 font-black mt-1" style={{ fontSize: 10 }}>{formatDateLong(row.date)}</p>
+            <p className="mt-2 font-black" style={{ fontSize: 12, color: row.tone }}>{formatTimeShort(row.start)} - {formatTimeShort(row.end)}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      <div className="relative rounded-2xl border border-white/10 bg-black/20 p-3">
+        <div className="mb-2 flex items-center justify-between text-gray-500 font-black" style={{ fontSize: 9 }}>
+          <span>7 AM</span>
+          <span>3 PM</span>
+          <span>11 PM</span>
+        </div>
+        <div className="relative h-24 rounded-xl bg-[#0B1220] border border-white/10 overflow-hidden">
+          {[0, 25, 50, 75, 100].map((left) => (
+            <div key={left} className="absolute top-0 bottom-0 w-px bg-white/10" style={{ left: `${left}%` }} />
+          ))}
+          {rows.map((row, idx) => (
+            <motion.div
+              key={`bar-${row.label}-${row.date}-${row.start}`}
+              layout
+              initial={{ opacity: 0, x: idx === 0 ? -16 : 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+              className="absolute h-8 rounded-xl border shadow-[0_10px_28px_rgba(0,0,0,0.35)]"
+              style={{
+                ...blockStyle(row.startMin, row.endMin),
+                top: idx === 0 ? 14 : 54,
+                background: row.tone,
+                borderColor: 'rgba(255,255,255,0.24)',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 mt-3">
+        {rows.map((row) => (
+          <div key={row.label} className="rounded-xl border p-3" style={{ borderColor: row.border, background: row.soft }}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-white font-black" style={{ fontSize: 11 }}>{row.label}</p>
+              <p className="text-gray-300 font-black text-right" style={{ fontSize: 10 }}>
+                {formatDateLong(row.date)} · {formatTimeShort(row.start)}-{formatTimeShort(row.end)}
+              </p>
+            </div>
+            <div className="relative h-10 rounded-xl bg-black/25 border border-white/10 overflow-hidden">
+              <div className="absolute left-0 top-0 h-full w-px bg-white/10" />
+              <div className="absolute left-1/2 top-0 h-full w-px bg-white/10" />
+              <div className="absolute right-0 top-0 h-full w-px bg-white/10" />
+              <div
+                className="absolute top-1.5 h-7 rounded-lg shadow-[0_0_18px_rgba(96,165,250,0.25)]"
+                style={{ ...blockStyle(row.startMin, row.endMin), background: row.tone }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function formatTimeShort(raw: string): string {
   const s = String(raw || '');
@@ -176,7 +316,7 @@ function ModalShell({
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-3xl border border-white/10 bg-[#141824] shadow-2xl overflow-hidden"
+            className="w-full max-w-3xl rounded-3xl border border-white/10 bg-[#141824] shadow-2xl overflow-hidden"
           >
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-white/8">
               <div className="min-w-0">
@@ -199,6 +339,52 @@ function ModalShell({
         </div>
       )}
     </AnimatePresence>
+  );
+}
+
+function ChangeRequestsSkeleton() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="lg:col-span-2 bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden">
+        <div className="p-4 border-b border-white/5 bg-[#141820] animate-pulse">
+          <div className="h-5 w-36 rounded-lg bg-white/10 mb-4" />
+          <div className="flex gap-2">
+            <div className="h-8 w-16 rounded-xl bg-white/10" />
+            <div className="h-8 w-24 rounded-xl bg-white/10" />
+            <div className="h-8 flex-1 rounded-xl bg-white/10" />
+          </div>
+        </div>
+        <div className="divide-y divide-white/5">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="px-4 py-3 animate-pulse">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/10" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 w-2/5 rounded bg-white/10" />
+                  <div className="h-3 w-3/5 rounded bg-white/8" />
+                  <div className="h-2.5 w-4/5 rounded bg-white/5" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="lg:col-span-3 bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden animate-pulse">
+        <div className="p-5 border-b border-white/5 bg-[#141820]">
+          <div className="h-3 w-20 rounded bg-white/10 mb-3" />
+          <div className="h-6 w-64 rounded bg-white/10 mb-2" />
+          <div className="h-3 w-48 rounded bg-white/8" />
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="h-20 rounded-2xl bg-white/[0.06] border border-white/8" />
+          <div className="h-24 rounded-2xl bg-blue-500/[0.08] border border-blue-500/15" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="h-12 rounded-2xl bg-white/[0.06]" />
+            <div className="h-12 rounded-2xl bg-white/[0.06]" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -233,6 +419,7 @@ export function StaffInbox() {
   const [refreshHint, setRefreshHint] = useState<'changes' | 'announcements' | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [isChangeLoading, setIsChangeLoading] = useState(false);
+  const [hasLoadedChanges, setHasLoadedChanges] = useState(false);
 
   const openRefreshHint = (scope: 'changes' | 'announcements') => {
     setRefreshHint(scope);
@@ -254,7 +441,8 @@ export function StaffInbox() {
     openRefreshHint('changes');
   };
 
-  const fetchInboxData = async () => {
+  const fetchInboxData = async (showSkeleton = false) => {
+    if (showSkeleton) setIsChangeLoading(true);
     try {
       const data = await getPendingRequests();
       if (data) {
@@ -266,11 +454,16 @@ export function StaffInbox() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setHasLoadedChanges(true);
+      if (showSkeleton) {
+        window.setTimeout(() => setIsChangeLoading(false), 520);
+      }
     }
   };
 
   useEffect(() => {
-    fetchInboxData();
+    fetchInboxData(true);
     const int = setInterval(fetchInboxData, 15000);
     return () => clearInterval(int);
   }, []);
@@ -347,8 +540,8 @@ export function StaffInbox() {
     setTimeout(() => setAnnounceSent(''), 3000);
   };
 
-  const visibleCancellations = requests.cancellations.length > 0 ? requests.cancellations : dummyCancellations;
-  const visibleReschedules = requests.reschedules?.length > 0 ? requests.reschedules : dummyReschedules;
+  const visibleCancellations = requests.cancellations || [];
+  const visibleReschedules = requests.reschedules || [];
   const visibleCoaching = requests.coaching.length > 0 ? requests.coaching : dummyCoaching;
   const pendingCancellations = visibleCancellations.length + visibleReschedules.length;
   const pendingCoaching = visibleCoaching.length;
@@ -436,7 +629,7 @@ export function StaffInbox() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-white font-black truncate" style={{ fontSize: 14 }}>{t.label}</p>
-                    <p className="text-gray-500 font-black mt-0.5" style={{ fontSize: 11 }}>{t.desc}</p>
+                    <p className="text-gray-300 font-black mt-0.5" style={{ fontSize: 11 }}>{t.desc}</p>
                   </div>
                 </div>
                 {t.badge > 0 ? (
@@ -456,7 +649,7 @@ export function StaffInbox() {
       </div>
 
       {notice ? (
-        <div className="fixed top-4 right-4 z-[1300] rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-emerald-200 font-black" style={{ fontSize: 12 }}>
+        <div className="fixed top-5 right-5 z-[1600] rounded-2xl border border-emerald-400/40 bg-[#052e1a] px-4 py-3 text-emerald-100 font-black shadow-2xl" style={{ fontSize: 12, boxShadow: '0 16px 50px rgba(0,0,0,0.55)' }}>
           {notice}
         </div>
       ) : null}
@@ -465,6 +658,9 @@ export function StaffInbox() {
         <AnimatePresence mode="wait">
           {sub === 'cancellations' && (
             <motion.div key="change-requests" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="lg:col-span-5">
+              {isChangeLoading && !hasLoadedChanges ? (
+                <ChangeRequestsSkeleton />
+              ) : (
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 {/* Left: list */}
                 <div className="lg:col-span-2 bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden">
@@ -518,21 +714,21 @@ export function StaffInbox() {
                         {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
                       </button>
                       <div className="relative flex-1 min-w-[160px]">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                           value={query}
                           onChange={(e) => setQuery(e.target.value)}
-                          placeholder="Search name, court, reason…"
-                          className="w-full rounded-xl pl-10 pr-3 py-2 bg-white/[0.06] border border-white/10 text-gray-100 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 font-black"
+                          placeholder="Search name, court, reason..."
+                          className="w-full rounded-xl pl-10 pr-3 py-2 bg-white/[0.06] border border-white/10 text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 font-black"
                           style={{ fontSize: 12 }}
                         />
                       </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
-                      <p className="text-gray-600 font-black" style={{ fontSize: 10 }}>
+                      <p className="text-gray-400 font-black" style={{ fontSize: 10 }}>
                         {filteredChangeRows.length} pending
                       </p>
-                      <p className="text-gray-600 font-black" style={{ fontSize: 10 }}>
+                      <p className="text-gray-400 font-black" style={{ fontSize: 10 }}>
                         Sort: {sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
                       </p>
                     </div>
@@ -591,10 +787,10 @@ export function StaffInbox() {
                                     {r.requestType === 'reschedule' ? 'RESCHEDULE' : 'CANCEL'}
                                   </span>
                                 </div>
-                                <p className={`font-black mt-1 truncate transition-colors ${active ? 'text-blue-200' : 'text-gray-500'}`} style={{ fontSize: 11 }}>
+                                <p className={`font-black mt-1 truncate transition-colors ${active ? 'text-blue-100' : 'text-gray-300'}`} style={{ fontSize: 11 }}>
                                   {r.court} · {formatDateLong(r.date)} · {formatTimeShort(r.time)}
                                 </p>
-                                <p className="text-gray-600 font-black mt-1 truncate" style={{ fontSize: 10 }}>
+                                <p className={`font-black mt-1 truncate transition-colors ${active ? 'text-white' : 'text-gray-400'}`} style={{ fontSize: 10 }}>
                                   {r.reason || '—'}
                                 </p>
                               </div>
@@ -623,7 +819,7 @@ export function StaffInbox() {
                             <p className="text-white font-black truncate" style={{ fontSize: 18 }}>
                               {selectedChange.requestType === 'reschedule' ? 'Reschedule' : 'Cancellation'} · {selectedChange.customerName}
                             </p>
-                            <p className="text-gray-500 font-black mt-1" style={{ fontSize: 12 }}>
+                            <p className="text-gray-300 font-black mt-1" style={{ fontSize: 12 }}>
                               {selectedChange.court} · {formatDateLong(selectedChange.date)} · {formatTimeShort(selectedChange.time)}
                             </p>
                           </div>
@@ -648,9 +844,9 @@ export function StaffInbox() {
                       </div>
 
                       <div className="flex-1 p-5 space-y-4">
-                        <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
-                          <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Reason</p>
-                          <p className="text-gray-200 mt-2" style={{ fontSize: 13, lineHeight: 1.55 }}>
+                        <div className="rounded-2xl border border-white/15 bg-white/[0.06] p-4 shadow-inner">
+                          <p className="text-gray-300 font-black uppercase" style={{ fontSize: 10 }}>Reason</p>
+                          <p className="text-white font-black mt-2" style={{ fontSize: 13, lineHeight: 1.55 }}>
                             {selectedChange.reason || '—'}
                           </p>
                         </div>
@@ -703,6 +899,7 @@ export function StaffInbox() {
                   )}
                 </div>
               </div>
+              )}
             </motion.div>
           )}
 
@@ -992,6 +1189,7 @@ export function StaffInbox() {
         title={confirmAction?.approved ? 'Approve request?' : 'Reject request?'}
       >
         <div className="space-y-4">
+          <div className={modalRequest?.requestType === 'reschedule' ? 'grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4' : 'block'}>
           <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Request details</p>
@@ -1041,6 +1239,8 @@ export function StaffInbox() {
                 {modalRequest?.reason || 'No reason provided.'}
               </p>
             </div>
+          </div>
+          {modalRequest?.requestType === 'reschedule' ? <ScheduleComparison request={modalRequest} /> : null}
           </div>
 
           {!confirmAction?.approved ? (

@@ -47,6 +47,8 @@ coachingSessionsRouter.post('/', async (c) => {
       start_time: String(body.start_time || body.startTime || body.requestedTime),
       end_time: String(body.end_time || body.endTime),
       status: body.status || 'pending',
+      linked_booking_id: body.linked_booking_id || body.linkedBookingId,
+      payment_proof_url: body.payment_proof_url || body.paymentProofUrl,
     });
     return c.json(session, 201);
   } catch (error: any) {

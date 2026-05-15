@@ -29,6 +29,13 @@ export function durationHoursFromTimes(start: string, end: string): number {
   return Math.max(1, Math.round(d * 10) / 10) || 1;
 }
 
+function dbTimestampToUtcIso(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const text = String(value);
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(text)) return text;
+  return `${text}Z`;
+}
+
 /** Map DB row (+ joined court/sport) to admin / calendar row */
 export function mapBookingRowToAdmin(row: {
   id: string;
@@ -60,6 +67,8 @@ export function mapBookingRowToAdmin(row: {
   paymentStatus: string;
   checkInStatus: 'none' | 'checked_in';
   checkInTime?: string;
+  checkOutStatus?: 'none' | 'checked_out';
+  checkOutTime?: string;
   createdAt: string;
   facilityMapId?: string;
   userId?: string;
@@ -75,10 +84,12 @@ export function mapBookingRowToAdmin(row: {
   );
   const refCode = row.qr_code_token || meta.refCode || row.id.slice(0, 8).toUpperCase();
   const checkedIn = row.status === 'checked_in';
+  const checkedOut = row.status === 'completed';
   const uiStatus:
     | 'pending_payment'
     | 'pending_verification'
     | 'confirmed'
+    | 'checked_in'
     | 'cancelled'
     | 'completed' =
     row.status === 'cancelled'
@@ -87,7 +98,11 @@ export function mapBookingRowToAdmin(row: {
         ? 'pending_payment'
         : row.status === 'completed'
           ? 'completed'
-          : 'confirmed';
+          : row.status === 'checked_in'
+            ? 'checked_in'
+            : row.status === 'confirmed'
+              ? 'confirmed'
+              : 'pending_payment';
   return {
     id: row.id,
     refCode,
@@ -100,11 +115,13 @@ export function mapBookingRowToAdmin(row: {
     time: start,
     duration,
     amount: Number(row.total_price ?? 0),
-    status: checkedIn ? 'confirmed' : uiStatus,
-    paymentStatus: row.status === 'pending' ? 'pending' : 'paid',
+    status: uiStatus,
+    paymentStatus: checkedIn || checkedOut ? 'paid' : 'pending',
     checkInStatus: checkedIn ? 'checked_in' : 'none',
-    checkInTime: checkedIn ? row.updated_at || row.created_at : undefined,
-    createdAt: row.created_at ?? new Date().toISOString(),
+    checkInTime: checkedIn ? dbTimestampToUtcIso(row.updated_at || row.created_at) : undefined,
+    checkOutStatus: checkedOut ? 'checked_out' : 'none',
+    checkOutTime: checkedOut ? dbTimestampToUtcIso(row.updated_at || row.created_at) : undefined,
+    createdAt: dbTimestampToUtcIso(row.created_at) ?? new Date().toISOString(),
     facilityMapId: typeof meta.facilityMapId === 'string' && meta.facilityMapId ? meta.facilityMapId : undefined,
     userId: row.user_id || undefined,
   };
@@ -129,6 +146,8 @@ export function deskAdminRowToClientBooking(a: ReturnType<typeof mapBookingRowTo
     refCode: a.refCode,
     checkInStatus: a.checkInStatus,
     checkInTime: a.checkInTime,
+    checkOutStatus: a.checkOutStatus,
+    checkOutTime: a.checkOutTime,
     facilityMapId: a.facilityMapId,
     userId: a.userId,
   };

@@ -36,9 +36,32 @@ function parseAcceptanceDetails(adminNotes?: string): Partial<CoachingRequest> {
   }
 }
 
+function parseLinkedBooking(notes?: string): Partial<CoachingRequest> {
+  if (!notes) return {};
+  const match = notes.match(/linked_booking:([0-9a-f-]+)/i);
+  return match ? { linkedBookingId: match[1] } : {};
+}
+
+function parseReservedBookingDetails(notes?: string): Partial<CoachingRequest> {
+  if (!notes) return {};
+  const match = notes.match(/COACHING_BOOKING:(\{.*\})/s);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      courtName: typeof parsed.court === "string" ? parsed.court : undefined,
+      courtAmount: typeof parsed.courtAmount === "number" ? parsed.courtAmount : undefined,
+      coachFee: typeof parsed.coachFee === "number" ? parsed.coachFee : undefined,
+      totalAmount: typeof parsed.totalDue === "number" ? parsed.totalDue : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape.
  * DB statuses: pending | approved | rejected | cancelled
- * UI statuses: pending | confirmed | rejected
+ * UI statuses: pending | confirmed | rejected | completed
  */
 export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>): CoachingRequest {
   const notes = typeof row.notes === "string" ? row.notes : "";
@@ -51,7 +74,9 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
 
   const dbStatus = String(row.status || "pending");
   let status: CoachingRequest["status"] = "pending";
-  if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled" || dbStatus === "completed") {
+  if (/COACHING_CHECKED_OUT|checked_out:/i.test(adminNotes || "") || dbStatus === "completed") {
+    status = "completed";
+  } else if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled") {
     status = "confirmed";
   } else if (dbStatus === "rejected" || dbStatus === "cancelled") {
     status = "rejected";
@@ -77,9 +102,14 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     requestedDate: String(row.session_date ?? row.requestedDate ?? ""),
     requestedTime: String(row.start_time ?? row.requestedTime ?? ""),
     endTime: row.end_time ? String(row.end_time) : undefined,
-    message: typeof row.message === "string" ? row.message : (notes || ""),
+    message: (typeof row.message === "string" ? row.message : notes)
+      .replace(/COACHING_BOOKING:\{.*\}/s, "")
+      .replace(/linked_booking:[0-9a-f-]+/i, "")
+      .trim(),
     adminNotes,
     durationHours,
+    ...parseLinkedBooking(notes),
+    ...parseReservedBookingDetails(notes),
     ...parseAcceptanceDetails(adminNotes),
     status,
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
@@ -134,8 +164,9 @@ export interface CoachingRequest {
   courtAmount?: number;
   coachFee?: number;
   totalAmount?: number;
-  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined */
-  status: "pending" | "confirmed" | "rejected";
+  coachingMessage?: string;
+  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined | completed = checked out */
+  status: "pending" | "confirmed" | "rejected" | "completed";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
   viewerIsStudent?: boolean;
   viewerIsCoachForThisSession?: boolean;
@@ -147,7 +178,7 @@ interface CoachingContextType {
   activeRequestId: string | null;
   setActiveRequestId: (id: string | null) => void;
   addRequest: (req: Omit<CoachingRequest, "id" | "status">) => Promise<string>;
-  updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled", adminNotes?: string) => Promise<void>;
+  updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled" | "completed", adminNotes?: string) => Promise<void>;
   addCoach: (coach: Omit<Coach, "id">) => Promise<void>;
   updateCoach: (id: string, data: Partial<Coach>) => Promise<void>;
   deleteCoach: (id: string) => Promise<void>;
@@ -298,6 +329,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           start_time: startTime,
           end_time: endTime,
           status: 'pending',
+          linked_booking_id: req.linkedBookingId,
         }),
       });
 
@@ -330,7 +362,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 
   const updateRequestStatus = async (
     id: string,
-    status: "pending" | "confirmed" | "rejected" | "cancelled",
+    status: "pending" | "confirmed" | "rejected" | "cancelled" | "completed",
     adminNotes?: string,
   ): Promise<void> => {
     try {
@@ -349,7 +381,11 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           r.id === id
             ? {
                 ...r,
-                status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"],
+                status: status === 'confirmed'
+                  ? 'confirmed'
+                  : status === 'cancelled'
+                    ? 'rejected'
+                    : status as CoachingRequest["status"],
                 adminNotes: adminNotes ?? r.adminNotes,
                 ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
               }

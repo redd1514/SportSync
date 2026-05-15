@@ -132,6 +132,8 @@ export function AdminCoachingManagement() {
   const [verifyingRequest, setVerifyingRequest] = useState<CoachingRequest | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ req: CoachingRequest; action: 'confirmed' | 'rejected' } | null>(null);
   const [appConfirm, setAppConfirm] = useState<{ app: CoachApplication; action: 'approved' | 'rejected' } | null>(null);
+  const [deleteCoachTarget, setDeleteCoachTarget] = useState<Coach | null>(null);
+  const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [applications, setApplications] = useState<CoachApplication[]>([]);
 
   const loadApplications = useCallback(async () => {
@@ -261,9 +263,9 @@ export function AdminCoachingManagement() {
       if (editingCoach) await updateCoach(editingCoach.id, data);
       else await addCoach(data);
       setShowCoachModal(false);
+      setNotice({ type: 'success', message: editingCoach ? 'Coach updated.' : 'Coach added.' });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Could not save coach";
-      alert(msg);
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : "Could not save coach" });
     }
   };
 
@@ -278,6 +280,24 @@ export function AdminCoachingManagement() {
 
   return (
     <div className="space-y-6">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="rounded-2xl border px-4 py-3 flex items-center justify-between gap-3"
+            style={{
+              background: notice.type === 'error' ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+              borderColor: notice.type === 'error' ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)',
+              color: notice.type === 'error' ? '#f87171' : '#4ade80',
+            }}
+          >
+            <span className="font-black" style={{ fontSize: 13 }}>{notice.message}</span>
+            <button onClick={() => setNotice(null)} className="text-white/60 hover:text-white"><X size={14} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -407,14 +427,7 @@ export function AdminCoachingManagement() {
                     className="p-1.5 rounded-lg bg-[#252525] text-gray-400 hover:text-white hover:bg-[#333] transition-colors">
                     <Edit2 size={13} />
                   </button>
-                  <button onClick={async () => {
-                    if (!confirm("Remove this coach from the directory?")) return;
-                    try {
-                      await deleteCoach(coach.id);
-                    } catch (err: unknown) {
-                      alert(err instanceof Error ? err.message : "Delete failed");
-                    }
-                  }}
+                  <button onClick={() => setDeleteCoachTarget(coach)}
                     className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
                     <Trash2 size={13} />
                   </button>
@@ -837,7 +850,7 @@ export function AdminCoachingManagement() {
                     setApplications((prev) => prev.map((a) => (a.id === appConfirm.app.id ? mapped : a)));
                     setAppConfirm(null);
                   } catch (err: unknown) {
-                    alert(err instanceof Error ? err.message : 'Could not approve application');
+                    setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not approve application' });
                   }
                 }}
                   className="flex-1 py-3 rounded-xl text-white font-black transition-all hover:brightness-110"
@@ -847,6 +860,38 @@ export function AdminCoachingManagement() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {deleteCoachTarget && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.94, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1A1A1A] p-5 shadow-2xl">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/12 border border-red-500/25">
+                  <Trash2 size={18} className="text-red-400" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-black" style={{ fontSize: 16 }}>Remove coach?</h3>
+                  <p className="text-gray-400 mt-1" style={{ fontSize: 13 }}>{deleteCoachTarget.name} will be removed from the coaching directory.</p>
+                </div>
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button onClick={() => setDeleteCoachTarget(null)} className="flex-1 rounded-xl px-4 py-2.5 text-gray-300 hover:bg-white/8" style={{ fontSize: 13, fontWeight: 800 }}>Cancel</button>
+                <button onClick={async () => {
+                  try {
+                    await deleteCoach(deleteCoachTarget.id);
+                    setNotice({ type: 'success', message: 'Coach removed.' });
+                  } catch (err: unknown) {
+                    setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Delete failed' });
+                  } finally {
+                    setDeleteCoachTarget(null);
+                  }
+                }} className="flex-1 rounded-xl px-4 py-2.5 bg-red-500 text-white hover:bg-red-600" style={{ fontSize: 13, fontWeight: 800 }}>Remove</button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

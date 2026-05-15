@@ -156,7 +156,7 @@ export function PremiumMobileHome({ onNavigate, onOpenAI }: MobileHomeProps) {
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const upcoming  = bookings.filter(b => ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(b.status)).slice(0, 3);
+  const upcoming  = bookings.filter(b => ["confirmed", "checked_in", "pending_payment", "pending_verification", "rescheduled"].includes(b.status)).slice(0, 3);
   const unreadCount = undismissedCount;
   const firstName = user?.name?.split(" ")[0] || "Athlete";
 

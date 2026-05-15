@@ -4,11 +4,12 @@ import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
   HelpCircle, Star, CheckCircle, Clock, XCircle,
-  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download, Camera,
+  X, QrCode, RefreshCw, AlertTriangle, Download, Camera,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
+import { useRealtimeBookingAPI } from "../../hooks/useRealtimeAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
 import { downloadTicketQrPng } from "../../../shared/qrDownload";
@@ -21,7 +22,12 @@ interface MobileProfileScreenProps {
 
 const statusConfig = {
   upcoming: { color: "#3b82f6", bg: "#3b82f620", label: "Upcoming", icon: Clock },
-  confirmed: { color: "#FF8C00", bg: "#FF8C0020", label: "Confirmed", icon: CheckCircle },
+  pending: { color: "#FF8C00", bg: "#FF8C0020", label: "Pending", icon: Clock },
+  pending_payment: { color: "#FF8C00", bg: "#FF8C0020", label: "Pending", icon: Clock },
+  pending_verification: { color: "#eab308", bg: "#eab30820", label: "Review", icon: AlertTriangle },
+  confirmed: { color: "#FF8C00", bg: "#FF8C0020", label: "Reserved", icon: Clock },
+  checked_in: { color: "#22c55e", bg: "#22c55e20", label: "Ongoing", icon: CheckCircle },
+  rescheduled: { color: "#3b82f6", bg: "#3b82f620", label: "Rescheduled", icon: RefreshCw },
   completed: { color: "#22c55e", bg: "#22c55e20", label: "Done", icon: CheckCircle },
   cancelled: { color: "#ef4444", bg: "#ef444420", label: "Cancelled", icon: XCircle },
 };
@@ -360,9 +366,10 @@ function QRTicketDialog({ booking, onClose }: {
 
 export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const { user, bookings, logout, updateBooking, addCancellationRequest, updateUser } = useUser();
+  const { bookings: liveUserBookings } = useRealtimeBookingAPI(user?.id || "", { autoFetch: true });
   const { findCoachByEmail } = useCoaching();
   const { getUserProfile, getUserLoyaltyPoints, updateUserProfile } = useUserAPI();
-  const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming");
+  const [activeTab, setActiveTab] = useState<"upcoming" | "pending" | "completed">("upcoming");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<typeof bookings[0] | null>(null);
@@ -421,7 +428,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     setAccountPhone(user?.phone || "");
   }, [user?.id]);
 
-  const userBookings = bookings;
+  const userBookings = liveUserBookings.length > 0 ? liveUserBookings : bookings;
 
   const localPendingRequests = (() => {
     try {
@@ -449,16 +456,18 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   };
 
   const filteredBookings = userBookings.filter((b) => {
-    const isPastDate = parseBookingDate(b.date) < today;
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
     
     if (activeTab === "upcoming") {
-      if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      if (b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
       if (isPendingReq) return false;
       return true;
+    } else if (activeTab === "pending") {
+      if (b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      return isPendingReq;
     } else {
       if (hiddenCompletedIds.includes(b.id)) return false;
-      return isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
+      return b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
     }
   });
 
@@ -630,7 +639,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
         {/* Tabs */}
         <div className="flex bg-[#1A1A1A] rounded-xl p-1 mb-4">
-          {(["upcoming", "completed"] as const).map((tab) => (
+          {(["upcoming", "pending", "completed"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -654,10 +663,12 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             </div>
           ) : (
             filteredBookings.map((booking) => {
-              const status = (statusConfig as any)[booking.status] || statusConfig.completed;
+              const normalizedStatus = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in' ? 'checked_in' : booking.status;
+              const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id);
+              const status = isPendingReq ? statusConfig.pending_verification : ((statusConfig as any)[normalizedStatus] || statusConfig.pending_payment);
               const StatusIcon = status.icon;
               const sportColor = getSportColor(booking.sport);
-              const isUpcoming = ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(booking.status);
+              const isUpcoming = ["confirmed", "pending", "pending_payment", "pending_verification", "rescheduled", "checked_in"].includes(normalizedStatus);
               const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
               const endH = parseInt(booking.time) + (booking.duration || 1);
               return (
@@ -724,59 +735,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         </div>
       </div>
 
-      {/* Contact Info */}
-      <div className="px-5 mb-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
-          <button
-            type="button"
-            onClick={() => {
-              setIsEditingAccount(false);
-              setActiveModal("settings");
-            }}
-            className="px-3 py-1.5 rounded-xl text-[#FF8C00] font-black"
-            style={{ fontSize: 12, background: "rgba(255,140,0,0.1)", border: "1px solid rgba(255,140,0,0.22)" }}
-          >
-            Edit
-          </button>
-        </div>
-        <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-white/5 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center flex-shrink-0">
-              <Phone size={15} className="text-[#FF8C00]" />
-            </div>
-            <div>
-              <p className="text-gray-500" style={{ fontSize: 11 }}>Phone</p>
-              <p className="text-white font-black" style={{ fontSize: 14 }}>{user.phone}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#0047AB]/20 flex items-center justify-center flex-shrink-0">
-              <Mail size={15} className="text-[#0047AB]" />
-            </div>
-            <div>
-              <p className="text-gray-500" style={{ fontSize: 11 }}>Email</p>
-              <p className="text-white font-black" style={{ fontSize: 14 }}>{user.email}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Account Menu */}
       <div className="px-5 mb-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
-          <button
-            type="button"
-            onClick={() => {
-              setIsEditingAccount(false);
-              setActiveModal("settings");
-            }}
-            className="px-3 py-1.5 rounded-xl text-gray-300 font-black"
-            style={{ fontSize: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-          >
-            Account Info
-          </button>
         </div>
         <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
           {[

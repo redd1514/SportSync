@@ -22,9 +22,9 @@ import { FacilityMapViewer } from "../shared/FacilityMapViewer";
 import { FloatingAIChat } from "../FloatingAIChat";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
-import { useAnnouncements } from "../../contexts/AnnouncementsContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
+import { useUserAPI } from "../../hooks/useUserAPI";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -260,12 +260,19 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
               </div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-400" style={{ fontSize: 12 }}>Points</span>
-                <span className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{user.loyaltyPoints}/10</span>
+                <motion.span key={loyaltyPoints} initial={{ scale: 0.82 }} animate={{ scale: 1 }} className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{loyaltyPoints}/10</motion.span>
               </div>
               <div className="w-full h-2 bg-[#252525] rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min((user.loyaltyPoints / 10) * 100, 100)}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FFD700,#FF8C00)" }} />
+                <motion.div initial={{ width: 0 }} animate={{ width: `${loyaltyProgress}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FFD700,#FF8C00)" }} />
               </div>
-              <p className="text-gray-600 mt-2" style={{ fontSize: 11 }}>{user.loyaltyPoints >= 10 ? "🎉 Eligible for a FREE session!" : `${10 - user.loyaltyPoints} more to earn a free session`}</p>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className={loyaltyRewards > 0 ? "text-yellow-300" : "text-gray-600"} style={{ fontSize: 11 }}>
+                  {loyaltyRewards > 0 ? `${loyaltyRewards} reward unlocked` : `${10 - loyaltyPoints} more to earn a reward`}
+                </p>
+                <button type="button" onClick={resetMyLoyalty} className="rounded-lg px-2 py-1 text-gray-500 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
+                  Reset
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -278,6 +285,10 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
 /* ─── Main shell ─── */
 interface DesktopAppShellProps { onLogout: () => void; }
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
+  const { user, logout, isAdmin, isStaff, updateUser } = useUser();
+  const { resetLoyaltyPoints } = useUserAPI();
+  const { findCoachByEmail } = useCoaching();
+  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : null;
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -290,17 +301,31 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
     sport: string;
     date: string;
     time: string;
+    coachId?: string;
     coachingSessionId?: string;
     coachingStudentName?: string;
     coachingStudentId?: string;
     coachName?: string;
     coachHourlyRate?: number;
     durationHours?: number;
+    coachingMessage?: string;
   } | undefined>(undefined);
 
   // From Incoming: Profile Photo logic
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
+  const loyaltyPoints = user?.loyaltyPoints || 0;
+  const loyaltyRewards = Math.floor(loyaltyPoints / 10);
+  const loyaltyProgress = loyaltyRewards > 0 ? 100 : Math.min((loyaltyPoints / 10) * 100, 100);
+  const resetMyLoyalty = async () => {
+    if (!user) return;
+    try {
+      await resetLoyaltyPoints(user.id);
+    } catch {
+      /* demo fallback */
+    }
+    updateUser(user.id, { loyaltyPoints: 0 });
+  };
 
   useEffect(() => {
     setProfilePhoto(loadProfilePhoto(user?.id));
@@ -326,6 +351,14 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
     setActiveTab(t);
     if (typeof sub === "string") setActiveSub(prev => ({ ...prev, [t]: sub }));
     setMobileOpen(false);
+  };
+
+  const openNotification = (ann: (typeof announcements)[number]) => {
+    if (!ann.dismissed) dismissAnnouncement(ann.id);
+    if (ann.actionTab === "coaching") navigate("coaching", ann.actionSub || "mycoaching");
+    else if (ann.actionTab === "booking") navigate("booking", ann.actionSub || "mybookings");
+    else navigate("home");
+    setShowNotifs(false);
   };
 
   const getCurrentSub = () => activeSub[activeTab] || "";
@@ -362,7 +395,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                     mode="customer"
                     compact
                     prefill={bookingPrefill}
-                    onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                    onExitCoachingReservation={bookingPrefill?.coachingSessionId || bookingPrefill?.coachId ? () => {
                       setBookingPrefill(undefined);
                       setActiveTab("coaching");
                       setActiveSub(prev => ({ ...prev, coaching: "mycoaching" }));
@@ -385,7 +418,10 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
               transition={{ duration: 0.15 }}
               className="h-full overflow-y-auto custom-scrollbar"
             >
-              {sub === "services" && <UserCoachingServices onNavigate={(t) => { if (t === "mycoaching") navigate("coaching", "mycoaching"); }} />}
+              {sub === "services" && <UserCoachingServices onNavigate={(t, params) => {
+                if (t === "mycoaching") navigate("coaching", "mycoaching");
+                else if (t === "book_court") navigate("book_court", params);
+              }} />}
               {sub === "mycoaching" && <UserMyCoaching onNavigate={(t, params) => { 
                 if (t === "coaches") navigate("coaching", "services"); 
                 else if (t === "book_court") navigate("book_court", params);
@@ -707,11 +743,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                       return (
                         <button
                           key={ann.id}
-                          onClick={() => {
-                            if (!ann.dismissed) dismissAnnouncement(ann.id);
-                            navigate("home");
-                            setShowNotifs(false);
-                          }}
+                          onClick={() => openNotification(ann)}
                           className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
                         >
                           <div
@@ -738,7 +770,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                     {announcements.length === 0 ? (
                       <div className="py-8 text-center text-gray-500" style={{ fontSize: 13 }}>No notifications</div>
                     ) : announcements.map(n => (
-                      <button key={n.id} onClick={() => { dismissAnnouncement(n.id); setShowNotifs(false); }}
+                      <button key={n.id} onClick={() => openNotification(n)}
                         className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
                       >
                         <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `rgba(255,140,0,0.15)` }}>

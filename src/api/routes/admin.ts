@@ -464,9 +464,9 @@ adminRouter.get('/loyalty-program', async (c) => {
   try {
     return c.json({
       name: 'Sports Sync Rewards',
-      pointsPerRupee: 1,
-      redeemThreshold: 100,
-      bonusMultiplier: 1.5,
+      pointsPerCompletedBooking: 1,
+      redeemThreshold: 10,
+      bonusMultiplier: 1,
     });
   } catch (error: any) {
     return c.json(null);

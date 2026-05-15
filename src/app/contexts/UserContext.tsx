@@ -18,7 +18,7 @@ export interface Booking {
   time: string;
   duration: number;
   court: string;
-  status: "pending_payment" | "pending_verification" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "rejected";
+  status: "pending_payment" | "pending_verification" | "confirmed" | "checked_in" | "cancelled" | "rescheduled" | "completed" | "rejected";
   amount: number;
   paymentStatus: "paid" | "pending" | "pending_verification" | "rejected";
   paymentProofUrl?: string;
@@ -285,31 +285,40 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const normalizeBooking = (booking: any): Booking => ({
-    id: booking.id,
-    sport: booking.sport || 'Court Booking',
-    date: booking.date || booking.booking_date || '',
-    time: booking.time || booking.start_time || '',
-    duration: booking.duration || booking.duration_hours || 1,
-    court: booking.court || booking.court_id || '',
-    status: booking.status || 'pending',
-    amount: booking.amount || booking.total_price || 0,
-    paymentStatus: booking.paymentStatus || booking.payment_status || 'pending',
-    paymentProofUrl: booking.paymentProofUrl || booking.payment_proof_url,
-    createdAt: booking.createdAt || booking.created_at || new Date().toISOString(),
-    customerName: booking.customerName || booking.customer_name,
-    customerPhone: booking.customerPhone || booking.customer_phone,
-    addOns: booking.addOns || booking.add_ons,
-    cancellationRequested: booking.cancellationRequested || booking.cancellation_requested,
-    cancellationReason: booking.cancellationReason || booking.cancellation_reason,
-    refCode: booking.refCode || booking.ref_code,
-    checkInStatus: booking.checkInStatus || booking.check_in_status,
-    checkInTime: booking.checkInTime || booking.check_in_time,
-    checkOutStatus: booking.checkOutStatus || booking.check_out_status,
-    checkOutTime: booking.checkOutTime || booking.check_out_time,
-    facilityMapId: booking.facilityMapId || booking.facility_map_id,
-    userId: booking.userId || booking.user_id,
-  });
+  const normalizeBooking = (booking: any): Booking => {
+    const rawStatus = booking.status || 'pending';
+    const checkedIn = booking.checkInStatus === 'checked_in' || booking.check_in_status === 'checked_in' || rawStatus === 'checked_in';
+    const completed = rawStatus === 'completed';
+    const uiStatus =
+      rawStatus === 'pending'
+          ? 'pending_payment'
+          : rawStatus;
+    return {
+      id: booking.id,
+      sport: booking.sport || 'Court Booking',
+      date: booking.date || booking.booking_date || '',
+      time: booking.time || booking.start_time || '',
+      duration: booking.duration || booking.duration_hours || 1,
+      court: booking.court || booking.court_id || '',
+      status: uiStatus,
+      amount: booking.amount || booking.total_price || 0,
+      paymentStatus: checkedIn || completed ? 'paid' : (booking.paymentStatus || booking.payment_status || 'pending'),
+      paymentProofUrl: booking.paymentProofUrl || booking.payment_proof_url,
+      createdAt: booking.createdAt || booking.created_at || new Date().toISOString(),
+      customerName: booking.customerName || booking.customer_name,
+      customerPhone: booking.customerPhone || booking.customer_phone,
+      addOns: booking.addOns || booking.add_ons,
+      cancellationRequested: booking.cancellationRequested || booking.cancellation_requested,
+      cancellationReason: booking.cancellationReason || booking.cancellation_reason,
+      refCode: booking.refCode || booking.ref_code,
+      checkInStatus: checkedIn ? 'checked_in' : (booking.checkInStatus || booking.check_in_status || 'none'),
+      checkInTime: booking.checkInTime || booking.check_in_time,
+      checkOutStatus: booking.checkOutStatus || booking.check_out_status,
+      checkOutTime: booking.checkOutTime || booking.check_out_time,
+      facilityMapId: booking.facilityMapId || booking.facility_map_id,
+      userId: booking.userId || booking.user_id,
+    };
+  };
 
   const loadBookingsForUser = async (userId: string) => {
     try {
@@ -395,6 +404,7 @@ useEffect(() => {
             ...nextUser,
             id: String((syncedUser as { id?: string }).id || nextUser.id),
             name: String((syncedUser as { full_name?: string; name?: string }).full_name || (syncedUser as { name?: string }).name || nextUser.name),
+            loyaltyPoints: Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number }).loyalty_points ?? (syncedUser as { loyaltyPoints?: number }).loyaltyPoints ?? 0),
             role: roleFromSyncedUserRow(syncedUser as Record<string, unknown>, "user"),
           }
         : nextUser;
@@ -463,6 +473,7 @@ useEffect(() => {
               ...nextUser,
               id: String((syncedUser as { id?: string }).id || nextUser.id),
               name: String((syncedUser as { full_name?: string; name?: string }).full_name || (syncedUser as { name?: string }).name || nextUser.name),
+              loyaltyPoints: Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number }).loyalty_points ?? (syncedUser as { loyaltyPoints?: number }).loyaltyPoints ?? 0),
               role: roleFromSyncedUserRow(syncedUser as Record<string, unknown>, "user"),
             }
           : nextUser;
@@ -547,8 +558,8 @@ useEffect(() => {
         email,
         phone: "+63 912 345 6789",
         favoriteSports: ["Basketball", "Badminton"],
-        loyaltyPoints: 12,
-        totalBookings: 12,
+        loyaltyPoints: Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number } | null)?.loyalty_points ?? 0),
+        totalBookings: 0,
         memberSince: "2025-11-15",
         accountStatus: "active",
         role
@@ -667,7 +678,6 @@ useEffect(() => {
       setUser({
         ...user,
         totalBookings: user.totalBookings + 1,
-        loyaltyPoints: user.loyaltyPoints + 1
       });
     }
   };
@@ -706,6 +716,7 @@ useEffect(() => {
     setAllUsers(prev =>
       prev.map(u => u.id === id ? { ...u, ...updates } : u)
     );
+    setUser(prev => (prev && prev.id === id ? { ...prev, ...updates } : prev));
   };
 
   const calcCourtPrice = (sport: string, date: string, time24: string): number => {

@@ -25,8 +25,10 @@ type ViewMode = 'monthly' | 'weekly' | 'daily';
 
 // Status colors
 const STATUS_COLORS: Record<string, string> = {
-  confirmed: 'bg-green-500',
+  confirmed: 'bg-amber-500',
+  checked_in: 'bg-green-500',
   pending: 'bg-gray-500',
+  pending_payment: 'bg-amber-500',
   pending_verification: 'bg-yellow-500',
   cancelled: 'bg-red-500',
   rescheduled: 'bg-blue-500',
@@ -34,13 +36,31 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_BORDER_COLORS: Record<string, string> = {
-  confirmed: 'border-green-600',
+  confirmed: 'border-amber-600',
+  checked_in: 'border-green-600',
   pending: 'border-gray-600',
+  pending_payment: 'border-amber-600',
   pending_verification: 'border-yellow-600',
   cancelled: 'border-red-600',
   rescheduled: 'border-blue-600',
   completed: 'border-gray-600'
 };
+
+function getCalendarBookingState(booking: any) {
+  const checkedIn = booking?.checkInStatus === 'checked_in' || booking?.status === 'checked_in';
+  const completed = booking?.status === 'completed';
+  const cancelled = booking?.status === 'cancelled';
+  const rawStatus = String(booking?.status || 'pending');
+  if (cancelled) return { key: 'cancelled', label: 'Cancelled', color: '#f87171', bg: 'rgba(239,68,68,0.15)' };
+  if (completed) return { key: 'completed', label: 'Completed', color: '#94a3b8', bg: 'rgba(100,116,139,0.2)' };
+  if (checkedIn) return { key: 'checked_in', label: 'Checked in', color: '#4ade80', bg: 'rgba(34,197,94,0.15)' };
+  if (rawStatus === 'pending_verification') return { key: 'pending_verification', label: 'Pending Review', color: '#facc15', bg: 'rgba(234,179,8,0.15)' };
+  return { key: 'pending_payment', label: 'Reserved', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' };
+}
+
+function isBookingPayableAtDesk(booking: any) {
+  return booking?.checkInStatus === 'checked_in' || booking?.status === 'checked_in' || booking?.status === 'completed';
+}
 
 export function AdminBookingCalendar() {
   const { bookings: staticBookings, updateBooking, deleteBooking, cancellationRequests, updateCancellationRequest } = useUser();
@@ -48,7 +68,7 @@ export function AdminBookingCalendar() {
   const { allSportNames, customSports } = useAddons();
   const { maps } = useFacilityMap();
   const { getAllBookings } = (useAdminAPI as any)();
-  const { createBooking, checkAvailability } = (useBookingAPI as any)();
+  const { createBooking, checkAvailability, checkInBooking, checkOutBooking } = (useBookingAPI as any)();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
   
@@ -231,8 +251,9 @@ export function AdminBookingCalendar() {
                         
                         const top = (startHour - 6) * 80;
                         const height = (booking.duration || 1) * 80;
-                        const statusColor = STATUS_COLORS[booking.status] || STATUS_COLORS.pending;
-                        const borderColor = STATUS_BORDER_COLORS[booking.status] || STATUS_BORDER_COLORS.pending;
+                        const displayState = getCalendarBookingState(booking);
+                        const statusColor = STATUS_COLORS[displayState.key] || STATUS_COLORS.pending;
+                        const borderColor = STATUS_BORDER_COLORS[displayState.key] || STATUS_BORDER_COLORS.pending;
 
                         return (
                           <div
@@ -246,7 +267,7 @@ export function AdminBookingCalendar() {
                               <p className="text-white/80 text-[10px] font-medium mt-0.5">{booking.time} ({booking.duration}h)</p>
                               <div className="mt-auto pt-1">
                                 <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-black/30 text-white uppercase tracking-wider">
-                                  {booking.status}
+                                  {displayState.label}
                                 </span>
                               </div>
                             </div>
@@ -336,7 +357,8 @@ export function AdminBookingCalendar() {
                         
                         const top = (startHour - 6) * 80;
                         const height = (booking.duration || 1) * 80;
-                        const statusColor = STATUS_COLORS[booking.status] || STATUS_COLORS.pending;
+                        const displayState = getCalendarBookingState(booking);
+                        const statusColor = STATUS_COLORS[displayState.key] || STATUS_COLORS.pending;
                         
                         // Prevent overlapping visually by offsetting if multiple bookings at same time
                         const overlapping = dayBookings.filter(b => timeToDecimal(b.time) === startHour);
@@ -429,7 +451,7 @@ export function AdminBookingCalendar() {
               {dayBookings.slice(0, 3).map(booking => (
                 <div 
                   key={booking.id} 
-                  className={`text-[10px] truncate px-1.5 py-0.5 rounded ${STATUS_COLORS[booking.status] || STATUS_COLORS.pending} text-white font-medium`}
+                  className={`text-[10px] truncate px-1.5 py-0.5 rounded ${STATUS_COLORS[getCalendarBookingState(booking).key] || STATUS_COLORS.pending} text-white font-medium`}
                 >
                   {booking.time} - {booking.customerName}
                 </div>
@@ -503,8 +525,8 @@ export function AdminBookingCalendar() {
           {/* Legend */}
           <div className="hidden lg:flex items-center gap-3 mr-4">
             {Object.entries({
-              confirmed: 'Confirmed',
-              pending: 'Pending',
+              pending_payment: 'Reserved',
+              checked_in: 'Checked in',
               pending_verification: 'Verification',
               cancelled: 'Cancelled',
               completed: 'Completed'
@@ -631,16 +653,10 @@ export function AdminBookingCalendar() {
                       <span className="px-2.5 py-0.5 rounded-full font-black capitalize"
                         style={{
                           fontSize: 11,
-                          background: selectedBooking.status === 'confirmed' ? 'rgba(34,197,94,0.15)' :
-                                      selectedBooking.status === 'pending' ? 'rgba(234,179,8,0.15)' :
-                                      selectedBooking.status === 'cancelled' ? 'rgba(239,68,68,0.15)' :
-                                      selectedBooking.status === 'completed' ? 'rgba(100,116,139,0.2)' : 'rgba(59,130,246,0.15)',
-                          color: selectedBooking.status === 'confirmed' ? '#4ade80' :
-                                 selectedBooking.status === 'pending' ? '#facc15' :
-                                 selectedBooking.status === 'cancelled' ? '#f87171' :
-                                 selectedBooking.status === 'completed' ? '#94a3b8' : '#60a5fa',
+                          background: getCalendarBookingState(selectedBooking).bg,
+                          color: getCalendarBookingState(selectedBooking).color,
                         }}>
-                        {selectedBooking.status === 'pending_verification' ? 'Pending Verification' : selectedBooking.status}
+                        {getCalendarBookingState(selectedBooking).label}
                       </span>
                     </div>
                   </div>
@@ -679,7 +695,7 @@ export function AdminBookingCalendar() {
                       <span className="text-gray-500 font-black uppercase" style={{ fontSize: 10, letterSpacing: 0.5 }}>Payment</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {selectedBooking.paymentStatus === 'paid' ? (
+                      {isBookingPayableAtDesk(selectedBooking) ? (
                         <CheckCircle size={14} className="text-green-400" />
                       ) : selectedBooking.paymentStatus === 'pending' ? (
                         <AlertTriangle size={14} className="text-yellow-400" />
@@ -689,12 +705,12 @@ export function AdminBookingCalendar() {
                         <Clock size={14} className="text-gray-400" />
                       )}
                       <span className={`font-black capitalize ${
-                        selectedBooking.paymentStatus === 'paid' ? 'text-green-400' :
+                        isBookingPayableAtDesk(selectedBooking) ? 'text-green-400' :
                         selectedBooking.paymentStatus === 'pending' ? 'text-yellow-400' :
                         selectedBooking.paymentStatus === 'failed' ? 'text-red-400' :
                         'text-gray-400'
                       }`} style={{ fontSize: 13 }}>
-                        {selectedBooking.paymentStatus || 'Unpaid'}
+                        {isBookingPayableAtDesk(selectedBooking) ? 'Paid' : 'To be paid'}
                       </span>
                     </div>
                   </div>
@@ -760,34 +776,55 @@ export function AdminBookingCalendar() {
                         <XCircle size={14} /> Cancel
                       </button>
                     )}
-                    {selectedBooking.status === 'pending' && (
+                    {!isBookingPayableAtDesk(selectedBooking) && !['cancelled', 'completed'].includes(selectedBooking.status) && (
                       <button
                         onClick={() => setConfirmAction({
-                          label: 'Confirm Booking',
-                          description: 'Mark this booking as confirmed and payment as paid.',
+                          label: 'Mark Checked In',
+                          description: 'Confirm the guest has arrived and payment has been collected at the desk.',
                           color: '#22c55e', icon: CheckCircle,
-                          onConfirm: () => {
-                            updateBooking(selectedBooking.id, { status: 'confirmed', paymentStatus: 'paid' });
-                            setSelectedBooking({ ...selectedBooking, status: 'confirmed', paymentStatus: 'paid' });
+                          onConfirm: async () => {
+                            let updated: any = null;
+                            try {
+                              updated = await checkInBooking(selectedBooking.id);
+                            } catch (err) {
+                              console.warn('Admin calendar check-in fell back to local update:', err);
+                            }
+                            const next = {
+                              ...selectedBooking,
+                              ...(updated || {}),
+                              status: 'checked_in',
+                              paymentStatus: 'paid',
+                              checkInStatus: 'checked_in',
+                              checkInTime: updated?.checkInTime || new Date().toISOString(),
+                            };
+                            updateBooking(selectedBooking.id, next);
+                            setSelectedBooking(next);
                             syncCoachingRequest(selectedBooking.id, 'confirmed');
                             setConfirmAction(null);
                           }
                         })}
                         className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl font-black transition-all hover:brightness-110"
                         style={{ fontSize: 13, background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.2)' }}>
-                        <CheckCircle size={14} /> Confirm
+                        <CheckCircle size={14} /> Mark Checked In
                       </button>
                     )}
                     {/* Automation Note: Verification is now handled automatically via Payment Gateway */}
-                    {selectedBooking.status === 'confirmed' && (
+                    {isBookingPayableAtDesk(selectedBooking) && selectedBooking.status !== 'completed' && (
                       <button
                         onClick={() => setConfirmAction({
                           label: 'Mark as Completed',
                           description: 'The session has been completed.',
                           color: '#2563EB', icon: Zap,
-                          onConfirm: () => {
-                            updateBooking(selectedBooking.id, { status: 'completed' });
-                            setSelectedBooking({ ...selectedBooking, status: 'completed' });
+                          onConfirm: async () => {
+                            let updated: any = null;
+                            try {
+                              updated = await checkOutBooking(selectedBooking.id);
+                            } catch (err) {
+                              console.warn('Admin calendar checkout fell back to local update:', err);
+                            }
+                            const next = { ...selectedBooking, ...(updated || {}), status: 'completed', checkOutStatus: 'checked_out', checkOutTime: updated?.checkOutTime || new Date().toISOString() };
+                            updateBooking(selectedBooking.id, next);
+                            setSelectedBooking(next);
                             syncCoachingRequest(selectedBooking.id, 'completed');
                             setConfirmAction(null);
                           }

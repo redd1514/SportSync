@@ -46,11 +46,19 @@ export const useUserAPI = () => {
     });
   };
 
+  const resetLoyaltyPoints = (userId: string) => {
+    return handleRequest(`/api/users/${userId}/loyalty/reset`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  };
+
   return {
     getUserProfile,
     updateUserProfile,
     getUserLoyaltyPoints,
     redeemLoyaltyPoints,
+    resetLoyaltyPoints,
     loading,
     error
   };

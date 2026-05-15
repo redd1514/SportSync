@@ -174,6 +174,11 @@ function ExecutiveOverview() {
     }
   }, [getAllUsers]);
 
+  const resetUserLoyalty = async (targetUserId: string) => {
+    await updateUser(targetUserId, { loyalty_points: 0 });
+    await fetchUsers();
+  };
+
   // Map realtime booking rows (DB shape) to client-shaped rows used in the table
   const mapDbBookingToClient = (row: any) => {
     const fromNotes = parseBookingNotes(row.notes).customerName;
@@ -559,13 +564,27 @@ function ExecutiveOverview() {
       {sub === 'loyalty' && (
         <div className="space-y-4">
           <h3 className="text-white font-black" style={{ fontSize: 18 }}>Loyalty & Rewards Management</h3>
-          <div className="bg-[#1A1A1A] rounded-2xl p-6 border border-white/5">
-            <h4 className="text-white font-black mb-3" style={{ fontSize: 15 }}>Current Reward Rule</h4>
-            <div className="bg-[#252525] rounded-xl p-4 flex items-center gap-4">
-              <Award size={24} className="text-yellow-400 flex-shrink-0" />
-              <div>
-                <p className="text-white font-black" style={{ fontSize: 14 }}>Book 10 sessions, get 1 free!</p>
-                <p className="text-gray-400" style={{ fontSize: 12 }}>Users earn 1 point per booking. 10 points = 1 free session discount.</p>
+          <div className="grid md:grid-cols-3 gap-3">
+            {[
+              { label: 'Reward rule', value: '10 points', desc: '1 completed booking earns 1 point', color: '#fbbf24' },
+              { label: 'Rewards ready', value: allUsers.reduce((sum, u) => sum + Math.floor((u.loyaltyPoints || 0) / 10), 0), desc: 'Redeemable user rewards', color: '#22c55e' },
+              { label: 'Tracked users', value: allUsers.length, desc: 'Admins and staff are visible but do not earn from desk-only work', color: '#60a5fa' },
+            ].map((card) => (
+              <div key={card.label} className="rounded-2xl border border-white/8 bg-[#1A1A1A] p-4">
+                <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10, letterSpacing: 0.8 }}>{card.label}</p>
+                <p className="font-black mt-1" style={{ color: card.color, fontSize: 22 }}>{card.value}</p>
+                <p className="text-gray-400 mt-1" style={{ fontSize: 12 }}>{card.desc}</p>
+              </div>
+            ))}
+          </div>
+          <div className="bg-[#1A1A1A] rounded-2xl p-5 border border-white/5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-yellow-400/10 border border-yellow-400/25">
+                <Award size={24} className="text-yellow-400" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-white font-black" style={{ fontSize: 15 }}>Current Reward Rule</h4>
+                <p className="text-gray-400 mt-1" style={{ fontSize: 12, lineHeight: 1.55 }}>A signed-in user earns 1 point only when their booking is checked out and marked completed. Cancelled, rejected, pending, staff-created walk-ins without a user, and admin/staff accounts do not earn customer rewards.</p>
               </div>
             </div>
           </div>
@@ -576,7 +595,7 @@ function ExecutiveOverview() {
             <div className="min-w-[500px]">
               <table className="w-full text-left">
                 <thead className="bg-[#222]">
-                  <tr>{['User', 'Points', 'Progress', 'Rewards'].map(h => (
+                  <tr>{['User', 'Points', 'Progress', 'Rewards', 'Action'].map(h => (
                     <th key={h} className="px-5 py-3 text-gray-500 uppercase" style={{ fontSize: 11, fontWeight: 800 }}>{h}</th>
                   ))}</tr>
                 </thead>
@@ -591,6 +610,16 @@ function ExecutiveOverview() {
                         </div>
                       </td>
                       <td className="px-5 py-3 text-gray-400" style={{ fontSize: 13 }}>{Math.floor(u.loyaltyPoints / 10)} reward(s)</td>
+                      <td className="px-5 py-3">
+                        <button
+                          type="button"
+                          onClick={() => void resetUserLoyalty(u.id)}
+                          className="rounded-xl border border-white/10 px-3 py-2 text-gray-300 hover:text-white hover:bg-white/5 font-black"
+                          style={{ fontSize: 11 }}
+                        >
+                          Reset points
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
