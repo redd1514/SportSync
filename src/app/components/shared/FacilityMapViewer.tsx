@@ -19,7 +19,9 @@ import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { useAddons } from '../../contexts/AddonsContext';
 import { SPORTS_INFO, AddOn, isAddonPerHourPricing, formatAddonLinePeso } from '../sportsData';
 import { SportIcon } from '../SportIcons';
+import { FacilityMapCourtMarkings, FACILITY_COURT_SHEEN_GRADIENT } from './facilityMapCourtMarkings';
 import { LoyaltyRewardToggle } from './loyalty/LoyaltyRewardToggle';
+import { FACILITY_COURT_FILL_OPACITY, FACILITY_COURT_SHEEN_OPACITY } from '../../contexts/FacilityMapContext';
 import {
   LOYALTY_REWARD_THRESHOLD,
   calcLoyaltyCourtDiscount,
@@ -43,81 +45,6 @@ function getCourtColors(liveStatus: LiveStatus, sport: string): { fill: string; 
   if (liveStatus === 'occupied')    return { fill: '#991b1b', stroke: '#b91c1c' };
   const sc = getSportMapColor(sport);
   return { fill: sc, stroke: sc };
-}
-
-function sportVisualKind(sport: string) {
-  const s = sport.toLowerCase();
-  if (s.includes('basket')) return 'basketball';
-  if (s.includes('volley')) return 'volleyball';
-  if (s.includes('badminton')) return 'badminton';
-  if (s.includes('pickle')) return 'pickleball';
-  if (s.includes('table') || s.includes('tennis')) return 'table_tennis';
-  if (s.includes('billiard') || s.includes('pool')) return 'billiards';
-  return 'custom';
-}
-
-function CourtMarkings({ block, locked }: { block: CourtBlock; locked: boolean }) {
-  const { x, y, width: w, height: h } = block;
-  const kind = sportVisualKind(block.sport);
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  const line = locked ? '#9ca3af' : '#ffffff';
-  const thin = Math.max(1, Math.min(w, h) * 0.01);
-  const opacity = locked ? 0.1 : 0.18;
-
-  if (kind === 'basketball') {
-    return (
-      <g pointerEvents="none" opacity={opacity}>
-        <line x1={cx} y1={y + 8} x2={cx} y2={y + h - 8} stroke={line} strokeWidth={thin} />
-        <circle cx={cx} cy={cy} r={Math.min(w, h) * 0.18} fill="none" stroke={line} strokeWidth={thin} />
-        <rect x={x + 8} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
-        <rect x={x + w - 8 - w * 0.16} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
-        <circle cx={x + w * 0.2} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
-        <circle cx={x + w * 0.8} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
-      </g>
-    );
-  }
-
-  if (kind === 'billiards') {
-    const pocket = Math.max(4, Math.min(w, h) * 0.06);
-    return (
-      <g pointerEvents="none" opacity={locked ? 0.14 : 0.28}>
-        <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="6" fill="none" stroke={line} strokeWidth={thin + 1} />
-        {[ [x+12,y+12], [cx,y+10], [x+w-12,y+12], [x+12,y+h-12], [cx,y+h-10], [x+w-12,y+h-12] ].map(([px, py], i) => (
-          <circle key={i} cx={px} cy={py} r={pocket} fill="#050505" stroke={line} strokeWidth={0.8} />
-        ))}
-        <circle cx={cx - w * 0.13} cy={cy} r={Math.max(2, pocket * 0.45)} fill={line} />
-        <circle cx={cx + w * 0.1} cy={cy - h * 0.08} r={Math.max(2, pocket * 0.45)} fill={line} />
-        <circle cx={cx + w * 0.16} cy={cy + h * 0.08} r={Math.max(2, pocket * 0.45)} fill={line} />
-      </g>
-    );
-  }
-
-  if (kind === 'custom') {
-    return (
-      <g pointerEvents="none" opacity={opacity}>
-        <path d={`M ${x + 10} ${y + h - 10} L ${x + w - 10} ${y + 10} M ${x + 10} ${y + 10} L ${x + w - 10} ${y + h - 10}`} stroke={line} strokeWidth={thin} strokeDasharray="6 5" />
-        <rect x={x + 12} y={y + 12} width={w - 24} height={h - 24} rx="8" fill="none" stroke={line} strokeWidth={thin} strokeDasharray="4 6" />
-      </g>
-    );
-  }
-
-  return (
-    <g pointerEvents="none" opacity={opacity}>
-      <line x1={cx} y1={y + 8} x2={cx} y2={y + h - 8} stroke={line} strokeWidth={thin + 0.5} />
-      {kind !== 'table_tennis' && (
-        <>
-          <line x1={x + w * 0.25} y1={y + 10} x2={x + w * 0.25} y2={y + h - 10} stroke={line} strokeWidth={thin} />
-          <line x1={x + w * 0.75} y1={y + 10} x2={x + w * 0.75} y2={y + h - 10} stroke={line} strokeWidth={thin} />
-        </>
-      )}
-      <line x1={x + 10} y1={cy} x2={x + w - 10} y2={cy} stroke={line} strokeWidth={thin} />
-      <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="3" fill="none" stroke={line} strokeWidth={thin} />
-      {kind === 'table_tennis' && (
-        <line x1={x + 10} y1={cy} x2={x + w - 10} y2={cy} stroke={line} strokeWidth={thin + 1.2} />
-      )}
-    </g>
-  );
 }
 
 const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -1723,11 +1650,7 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
                 <pattern id="vgrid" width="40" height="40" patternUnits="userSpaceOnUse">
                   <circle cx="40" cy="40" r="0.6" fill="#1e1e1e" />
                 </pattern>
-                <linearGradient id="courtSheen" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.18" />
-                  <stop offset="52%" stopColor="#ffffff" stopOpacity="0.03" />
-                  <stop offset="100%" stopColor="#000000" stopOpacity="0.18" />
-                </linearGradient>
+                {FACILITY_COURT_SHEEN_GRADIENT}
               </defs>
               <rect width={canvasW} height={canvasH} fill="url(#vgrid)" />
               <rect x="2" y="2" width={canvasW-4} height={canvasH-4} fill="none" stroke="#2a2a2a" strokeWidth="2" rx="4" strokeDasharray="8 4" />
@@ -1751,15 +1674,15 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
                     )}
                     <rect x={b.x} y={b.y} width={b.width} height={b.height}
                       fill={courtColors.fill}
-                      opacity={liveStatus === 'maintenance' ? 0.22 : liveStatus === 'occupied' ? 0.82 : isHovered ? 0.92 : 0.75}
+                      opacity={liveStatus === 'maintenance' ? 0.22 : liveStatus === 'occupied' ? 0.82 : isHovered ? 0.92 : FACILITY_COURT_FILL_OPACITY}
                       stroke={courtColors.stroke} strokeWidth={isHovered ? 2.5 : 1.5} rx="8" />
                     <clipPath id={clipId}>
                       <rect x={b.x} y={b.y} width={b.width} height={b.height} rx="8" />
                     </clipPath>
                     <g clipPath={`url(#${clipId})`}>
-                      <rect x={b.x} y={b.y} width={b.width} height={b.height} fill="url(#courtSheen)" opacity={liveStatus === 'maintenance' ? 0.2 : 0.55} />
-                      {b.width >= 54 && b.height >= 42 && liveStatus !== 'maintenance' && (
-                        <CourtMarkings block={b} locked={sportLocked} />
+                      <rect x={b.x} y={b.y} width={b.width} height={b.height} fill="url(#facilityCourtSheen)" opacity={liveStatus === 'maintenance' ? 0.2 : FACILITY_COURT_SHEEN_OPACITY} />
+                      {liveStatus !== 'maintenance' && (
+                        <FacilityMapCourtMarkings block={b} locked={sportLocked} />
                       )}
                     </g>
                     {isHovered && isClickable && (

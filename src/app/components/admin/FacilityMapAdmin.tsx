@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Plus, Edit2, Trash2, Save, X, Move, AlertTriangle, CheckCircle, Search, Filter, CalendarDays } from "lucide-react";
 import { ALL_COURTS, SPORTS_INFO } from "../sportsData";
 import { useUser } from "../../contexts/UserContext";
+import { FacilityMapCourtMarkings } from "../shared/facilityMapCourtMarkings";
 
 interface CourtMapData {
   id: string;
@@ -51,66 +52,6 @@ const getSportColor = (sport: string, available: boolean, maintenance: boolean) 
     default: return "#4b5563";
   }
 };
-
-const sportVisualKind = (sport: string) => {
-  const s = sport.toLowerCase();
-  if (s.includes("basket")) return "basketball";
-  if (s.includes("volley")) return "volleyball";
-  if (s.includes("badminton")) return "badminton";
-  if (s.includes("pickle")) return "pickleball";
-  if (s.includes("table") || s.includes("tennis")) return "table_tennis";
-  if (s.includes("billiard") || s.includes("pool")) return "billiards";
-  return "custom";
-};
-
-function AdminCourtMarkings({ court }: { court: CourtMapData }) {
-  const { x, y, width: w, height: h, sport, maintenanceMode } = court;
-  const kind = sportVisualKind(sport);
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  const line = "#ffffff";
-  const thin = Math.max(1, Math.min(w, h) * 0.01);
-  const opacity = maintenanceMode ? 0.1 : 0.22;
-
-  if (kind === "basketball") {
-    return (
-      <g pointerEvents="none" opacity={opacity}>
-        <line x1={cx} y1={y + 10} x2={cx} y2={y + h - 10} stroke={line} strokeWidth={thin} />
-        <circle cx={cx} cy={cy} r={Math.min(w, h) * 0.18} fill="none" stroke={line} strokeWidth={thin} />
-        <rect x={x + 10} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
-        <rect x={x + w - 10 - w * 0.16} y={cy - h * 0.16} width={w * 0.16} height={h * 0.32} fill="none" stroke={line} strokeWidth={thin} />
-        <circle cx={x + w * 0.2} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
-        <circle cx={x + w * 0.8} cy={cy} r={Math.min(w, h) * 0.09} fill="none" stroke={line} strokeWidth={thin} />
-      </g>
-    );
-  }
-
-  if (kind === "billiards") {
-    const pocket = Math.max(4, Math.min(w, h) * 0.06);
-    return (
-      <g pointerEvents="none" opacity={maintenanceMode ? 0.14 : 0.3}>
-        <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="6" fill="none" stroke={line} strokeWidth={thin + 1} />
-        {[[x + 12, y + 12], [cx, y + 10], [x + w - 12, y + 12], [x + 12, y + h - 12], [cx, y + h - 10], [x + w - 12, y + h - 12]].map(([px, py], i) => (
-          <circle key={i} cx={px} cy={py} r={pocket} fill="#050505" stroke={line} strokeWidth={0.8} />
-        ))}
-      </g>
-    );
-  }
-
-  return (
-    <g pointerEvents="none" opacity={opacity}>
-      <line x1={cx} y1={y + 10} x2={cx} y2={y + h - 10} stroke={line} strokeWidth={thin + 0.5} />
-      {kind !== "table_tennis" && (
-        <>
-          <line x1={x + w * 0.25} y1={y + 10} x2={x + w * 0.25} y2={y + h - 10} stroke={line} strokeWidth={thin} />
-          <line x1={x + w * 0.75} y1={y + 10} x2={x + w * 0.75} y2={y + h - 10} stroke={line} strokeWidth={thin} />
-        </>
-      )}
-      <line x1={x + 10} y1={cy} x2={x + w - 10} y2={cy} stroke={line} strokeWidth={kind === "table_tennis" ? thin + 1.2 : thin} />
-      <rect x={x + 10} y={y + 10} width={w - 20} height={h - 20} rx="3" fill="none" stroke={line} strokeWidth={thin} />
-    </g>
-  );
-}
 
 export function FacilityMapAdmin() {
   const { bookings } = useUser();
@@ -342,7 +283,19 @@ export function FacilityMapAdmin() {
                       </clipPath>
                       <g clipPath={`url(#${clipId})`}>
                         <rect width={court.width} height={court.height} fill="url(#admin-court-sheen)" opacity={court.maintenanceMode ? 0.25 : 0.6} />
-                        <AdminCourtMarkings court={{ ...court, x: 0, y: 0 }} />
+                        <FacilityMapCourtMarkings
+                          block={{
+                            id: court.id,
+                            sport: court.sport,
+                            name: court.name,
+                            x: 0,
+                            y: 0,
+                            width: court.width,
+                            height: court.height,
+                            status: court.maintenanceMode ? 'maintenance' : 'available',
+                          }}
+                          locked={court.maintenanceMode}
+                        />
                       </g>
                       <text
                         x={court.width / 2}

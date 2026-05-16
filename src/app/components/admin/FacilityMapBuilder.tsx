@@ -12,7 +12,10 @@ import {
 } from 'lucide-react';
 import {
   useFacilityMap, CourtBlock, FacilityMap, getSportMapColor,
+  resolveCourtSportColor, FACILITY_COURT_FILL_OPACITY,
+  FACILITY_COURT_SHEEN_OPACITY, FACILITY_COURT_SELECTED_FILL_OPACITY,
 } from '../../contexts/FacilityMapContext';
+import { FacilityMapCourtMarkings, FACILITY_COURT_SHEEN_GRADIENT } from '../shared/facilityMapCourtMarkings';
 import { useAddons } from '../../contexts/AddonsContext';
 import { SportIcon } from '../SportIcons';
 import { ConfirmDialog, ConfirmDialogOptions } from '../shared/ConfirmDialog';
@@ -75,59 +78,6 @@ function applyResize(handle:HandleId, dx:number, dy:number, orig:CourtBlock): Co
   if (handle.includes('w')) { const nw=Math.max(MIN,w-dx); x=x+w-nw; w=nw; }
   if (handle.includes('n')) { const nh=Math.max(MIN,h-dy); y=y+h-nh; h=nh; }
   return { ...orig, x:snap(x), y:snap(y), width:snap(w), height:snap(h) };
-}
-
-function BuilderCourtMarkings({ block, zoom }: { block: CourtBlock; zoom: number }) {
-  const x = block.x;
-  const y = block.y;
-  const w = block.width;
-  const h = block.height;
-  const sw = Math.max(1 / zoom, 0.7);
-  const mark = "rgba(255,255,255,0.22)";
-  const faint = "rgba(255,255,255,0.12)";
-  const sport = block.sport.toLowerCase();
-  if (w < 78 || h < 52) return null;
-
-  if (sport.includes('basketball')) {
-    const keyW = Math.min(w * 0.18, 44);
-    return (
-      <g pointerEvents="none">
-        <line x1={x + w / 2} y1={y + 10} x2={x + w / 2} y2={y + h - 10} stroke={faint} strokeWidth={sw} />
-        <circle cx={x + w / 2} cy={y + h / 2} r={Math.min(w, h) * 0.16} fill="none" stroke={mark} strokeWidth={sw} />
-        <rect x={x + 8} y={y + h / 2 - keyW / 2} width={keyW} height={keyW} fill="none" stroke={faint} strokeWidth={sw} />
-        <rect x={x + w - 8 - keyW} y={y + h / 2 - keyW / 2} width={keyW} height={keyW} fill="none" stroke={faint} strokeWidth={sw} />
-      </g>
-    );
-  }
-
-  if (sport.includes('volleyball') || sport.includes('badminton') || sport.includes('pickleball') || sport.includes('tennis')) {
-    return (
-      <g pointerEvents="none">
-        <line x1={x + w / 2} y1={y + 8} x2={x + w / 2} y2={y + h - 8} stroke={mark} strokeWidth={sw * 1.2} />
-        <line x1={x + w * 0.25} y1={y + 10} x2={x + w * 0.25} y2={y + h - 10} stroke={faint} strokeWidth={sw} />
-        <line x1={x + w * 0.75} y1={y + 10} x2={x + w * 0.75} y2={y + h - 10} stroke={faint} strokeWidth={sw} />
-        <line x1={x + 10} y1={y + h / 2} x2={x + w - 10} y2={y + h / 2} stroke={faint} strokeWidth={sw} />
-      </g>
-    );
-  }
-
-  if (sport.includes('billiard')) {
-    const r = Math.min(w, h) * 0.06;
-    return (
-      <g pointerEvents="none" fill="rgba(10,10,10,0.34)">
-        {[ [x + 12, y + 12], [x + w / 2, y + 10], [x + w - 12, y + 12], [x + 12, y + h - 12], [x + w / 2, y + h - 10], [x + w - 12, y + h - 12] ].map(([cx, cy], i) => (
-          <circle key={i} cx={cx} cy={cy} r={r} />
-        ))}
-      </g>
-    );
-  }
-
-  return (
-    <g pointerEvents="none">
-      <line x1={x + w / 2} y1={y + 10} x2={x + w / 2} y2={y + h - 10} stroke={faint} strokeWidth={sw} />
-      <circle cx={x + w / 2} cy={y + h / 2} r={Math.min(w, h) * 0.18} fill="none" stroke={faint} strokeWidth={sw} />
-    </g>
-  );
 }
 
 /* ─── New-Map Wizard ─────────────────────────────────────────────── */
@@ -538,7 +488,7 @@ function InspectorPanel({ block, canvasW, canvasH, allBlocks, onUpdate, onDelete
 }) {
   const isBuiltIn = SPORTS.some(s => s.sport === block.sport);
   const isCustom  = !isBuiltIn;
-  const color = isCustom ? (customSports.find(c=>c.name===block.sport)?.color ?? '#6b7280') : getSportMapColor(block.sport);
+  const color = resolveCourtSportColor(block, customSports);
   const [localName, setLocalName] = useState(block.name);
   const [localSport, setLocalSport] = useState(block.sport);
   useEffect(()=>{ setLocalName(block.name); setLocalSport(block.sport); },[block.id, block.name, block.sport]);
@@ -1389,14 +1339,7 @@ export function FacilityMapBuilder() {
             onClick={(e)=>{ e.stopPropagation(); setSelectedId(null); setCtxMenu(null); }}
           >
             <defs>
-              <linearGradient id="builderCourtSheen" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="rgba(255,255,255,0.22)" />
-                <stop offset="42%" stopColor="rgba(255,255,255,0.06)" />
-                <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-              </linearGradient>
-              <filter id="builderCourtShadow" x="-20%" y="-20%" width="140%" height="140%">
-                <feDropShadow dx="0" dy="5" stdDeviation="5" floodColor="#000000" floodOpacity="0.32" />
-              </filter>
+              {FACILITY_COURT_SHEEN_GRADIENT}
               {blocks.map(b=>(
                 <clipPath key={clipIdFor(b.id)} id={clipIdFor(b.id)}>
                   <rect x={b.x+4} y={b.y+4} width={Math.max(0,b.width-8)} height={Math.max(0,b.height-8)}/>
@@ -1450,10 +1393,7 @@ export function FacilityMapBuilder() {
 
             {/* Courts */}
             {blocks.map(b=>{
-              // Use customColor if set, or look up from customSports, else default sport color
-              const color = b.customColor
-                || customSports.find(cs=>cs.name===b.sport)?.color
-                || getSportMapColor(b.sport);
+              const color = resolveCourtSportColor(b, customSports);
               const isSel=selectedId===b.id;
               const isDrag=dragState?.id===b.id;
               const isMaint=b.status==='maintenance';
@@ -1463,25 +1403,29 @@ export function FacilityMapBuilder() {
               const clipId = clipIdFor(b.id);
               const nameFont = Math.max(7, Math.min(11, (b.width - 12) / Math.max(7, b.name.length) * 1.55));
               const sportFont = Math.max(6, Math.min(9, (b.width - 12) / Math.max(7, b.sport.length) * 1.35));
+              const fillOpacity = isMaint ? 0.22 : isDrag ? 0.6 : isSel ? FACILITY_COURT_SELECTED_FILL_OPACITY : FACILITY_COURT_FILL_OPACITY;
 
               return (
                 <g key={b.id} style={{cursor:isDrag?'grabbing':isSel?'grab':'pointer'}}
                   onClick={e=>e.stopPropagation()}>
-                  <rect x={b.x-5} y={b.y-5} width={b.width+10} height={b.height+10}
-                    fill={isSel ? `${color}22` : `${color}10`} opacity={isSel ? 1 : 0.55} rx="13"
-                    style={{ pointerEvents: 'none' }} />
-                  {isSel&&<rect x={b.x-6} y={b.y-6} width={b.width+12} height={b.height+12} fill="none" stroke="rgba(255,255,255,0.32)" strokeWidth={1.5/zoom} rx="14"/>}
+                  {isSel && (
+                    <rect x={b.x-6} y={b.y-6} width={b.width+12} height={b.height+12}
+                      fill={`${color}25`} stroke={color} strokeWidth={1.5/zoom} rx="13" opacity="0.7"
+                      style={{ pointerEvents: 'none' }} />
+                  )}
                   <rect x={b.x} y={b.y} width={b.width} height={b.height}
-                    fill={isMaint?'#374151':color} opacity={isDrag?.6:isMaint?.35:.82}
-                    stroke={isSel?'white':`${color}88`} strokeWidth={isSel?2/zoom:1.2/zoom} rx="10"
-                    filter="url(#builderCourtShadow)"
+                    fill={isMaint ? '#374151' : color}
+                    opacity={fillOpacity}
+                    stroke={color}
+                    strokeWidth={isSel ? 2.5/zoom : 1.5/zoom}
+                    rx="8"
                     onPointerDown={e=>handleCourtPointerDown(e,b.id)}
                     onContextMenu={e=>{ e.preventDefault(); e.stopPropagation(); setSelectedId(b.id); setCtxMenu({id:b.id,px:e.clientX,py:e.clientY}); }}
                   />
-                  {!isMaint&&(
+                  {!isMaint && (
                     <g clipPath={`url(#${clipId})`} style={{ pointerEvents: 'none' }}>
-                      <rect x={b.x} y={b.y} width={b.width} height={b.height} fill="url(#builderCourtSheen)" opacity="0.8" />
-                      <BuilderCourtMarkings block={b} zoom={zoom} />
+                      <rect x={b.x} y={b.y} width={b.width} height={b.height} fill="url(#facilityCourtSheen)" opacity={FACILITY_COURT_SHEEN_OPACITY} />
+                      <FacilityMapCourtMarkings block={b} />
                     </g>
                   )}
                   {isMaint&&(
