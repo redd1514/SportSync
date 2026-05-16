@@ -5,6 +5,7 @@ import {
   mapBookingRowToAdmin,
   parseBookingNotes,
 } from '../utils/bookingMap';
+import { resolveUserRowId } from './bookingService';
 
 const BOOKING_SELECT = `
       id,
@@ -39,6 +40,10 @@ export type DeskBookingInput = {
   ref_code?: string;
   add_ons?: string;
   staff_id?: string | null;
+  /** Supabase public.users id or auth id for customer-originated map bookings */
+  user_id?: string | null;
+  loyalty_points_redeemed?: number;
+  loyalty_discount?: number;
   /** Published facility map id (from map editor) for multi-facility scoping */
   facility_map_id?: string | null;
   /** Logged-in customer (public.users.id) — required for My Bookings */
@@ -100,6 +105,33 @@ function isValidUuid(s: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s.trim());
 }
 
+async function ensureWalkInUserId(): Promise<string> {
+  const authId = '00000000-0000-4000-8000-000000000001';
+  const email = 'walkin@sportsync.local';
+  const { data: existing, error: existingErr } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', email)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (existing?.id) return existing.id as string;
+
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      auth_id: authId,
+      email,
+      full_name: 'Walk-in Guest',
+      phone: null,
+      role: 'user',
+      loyalty_points: 0,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data!.id as string;
+}
+
 async function resolveCourtId(courtName: string, sportName: string): Promise<string | null> {
   const name = courtName.trim();
   if (!name) return null;
@@ -148,6 +180,14 @@ export async function createDeskBooking(input: DeskBookingInput) {
   const ref = (input.ref_code || genRefCode()).toUpperCase();
   const startNorm = normalizeStartTime(input.start_time);
   const endNorm = endTimeFromStartAndDuration(startNorm, input.duration_hours);
+  const resolvedUserId = input.user_id ? await resolveUserRowId(input.user_id) : null;
+  const loyaltyPointsRedeemed = Math.max(0, Number(input.loyalty_points_redeemed || 0));
+  if (loyaltyPointsRedeemed > 0 && resolvedUserId) {
+    const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+    if (Number(u?.loyalty_points || 0) < loyaltyPointsRedeemed) {
+      throw new Error('Not enough loyalty points for this reward.');
+    }
+  }
 
   const available = await isCourtSlotAvailable(courtId, input.booking_date, startNorm, endNorm);
   if (!available) {
@@ -164,6 +204,7 @@ export async function createDeskBooking(input: DeskBookingInput) {
     addOns: input.add_ons ?? '',
     source: input.source,
     paymentMethod: input.payment_method,
+    ...(loyaltyPointsRedeemed > 0 ? { loyaltyPointsRedeemed, loyaltyDiscount: input.loyalty_discount ?? 0 } : {}),
     ...(input.facility_map_id ? { facilityMapId: input.facility_map_id } : {}),
   });
 
@@ -189,6 +230,7 @@ export async function createDeskBooking(input: DeskBookingInput) {
 
   if (bErr) throw bErr;
   const bookingId = booking!.id as string;
+  const paymentCompleted = input.source !== 'map_customer';
 
   const { data: payment, error: pErr } = await supabase
     .from('payments')
@@ -197,14 +239,28 @@ export async function createDeskBooking(input: DeskBookingInput) {
       booking_id: bookingId,
       amount: input.total_price,
       payment_method: input.payment_method,
-      status: 'completed',
+      status: paymentCompleted ? 'completed' : 'pending',
       transaction_id: `DESK-${ref}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      completed_at: new Date().toISOString(),
+      completed_at: paymentCompleted ? new Date().toISOString() : null,
     })
     .select('id')
     .single();
 
   if (pErr) throw pErr;
+
+  if (loyaltyPointsRedeemed > 0 && resolvedUserId) {
+    await supabase.from('loyalty_transactions').insert({
+      user_id: resolvedUserId,
+      points_change: -loyaltyPointsRedeemed,
+      transaction_type: 'redemption',
+      reference_id: bookingId,
+    });
+    const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+    await supabase
+      .from('users')
+      .update({ loyalty_points: Math.max(0, Number(u?.loyalty_points || 0) - loyaltyPointsRedeemed) })
+      .eq('id', resolvedUserId);
+  }
 
   if (isValidUuid(input.staff_id)) {
     await supabase.from('staff_operations').insert({
@@ -333,6 +389,12 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
 
   if (uErr) throw uErr;
 
+  await supabase
+    .from('payments')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('booking_id', bookingId)
+    .eq('status', 'pending');
+
   if (isValidUuid(staffId)) {
     await supabase.from('staff_operations').insert({
       staff_id: staffId,
@@ -345,10 +407,58 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
   return fetchBookingById(bookingId);
 }
 
+export async function refundLoyaltyRedemptionForUnstartedBooking(bookingId: string) {
+  const { data: booking, error: bookingErr } = await supabase
+    .from('bookings')
+    .select('id,user_id,status')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bookingErr || !booking?.user_id) return;
+  if (booking.status === 'checked_in' || booking.status === 'completed') return;
+
+  const { data: redemptions } = await supabase
+    .from('loyalty_transactions')
+    .select('points_change')
+    .eq('reference_id', bookingId)
+    .eq('transaction_type', 'redemption');
+
+  const redeemed = Math.abs(
+    (redemptions || []).reduce((sum: number, row: any) => sum + Math.min(0, Number(row.points_change || 0)), 0),
+  );
+  if (redeemed <= 0) return;
+
+  const { data: existingRefund } = await supabase
+    .from('loyalty_transactions')
+    .select('id')
+    .eq('reference_id', bookingId)
+    .eq('transaction_type', 'redemption_refund')
+    .limit(1);
+  if ((existingRefund || []).length > 0) return;
+
+  const { error: txErr } = await supabase.from('loyalty_transactions').insert({
+    user_id: booking.user_id,
+    points_change: redeemed,
+    transaction_type: 'redemption_refund',
+    reference_id: bookingId,
+  });
+  if (txErr) return;
+
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('loyalty_points')
+    .eq('id', booking.user_id)
+    .maybeSingle();
+
+  await supabase
+    .from('users')
+    .update({ loyalty_points: Number(userRow?.loyalty_points || 0) + redeemed })
+    .eq('id', booking.user_id);
+}
+
 export async function checkOutBooking(bookingId: string, staffId?: string | null) {
   const { data: cur, error: curErr } = await supabase
     .from('bookings')
-    .select('id,status')
+    .select('id,status,user_id')
     .eq('id', bookingId)
     .maybeSingle();
   if (curErr) throw curErr;
@@ -358,12 +468,29 @@ export async function checkOutBooking(bookingId: string, staffId?: string | null
     throw new Error('Cannot check-out before check-in. Please check-in the guest first, then check-out when they finish.');
   }
 
+  if (!cur.user_id) {
+    const walkInUserId = await ensureWalkInUserId();
+    const { error: ownerErr } = await supabase
+      .from('bookings')
+      .update({ user_id: walkInUserId, updated_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .is('user_id', null);
+    if (ownerErr) throw ownerErr;
+    await supabase
+      .from('payments')
+      .update({ user_id: walkInUserId })
+      .eq('booking_id', bookingId)
+      .is('user_id', null);
+  }
+
   const { error: uErr } = await supabase
     .from('bookings')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('id', bookingId);
 
   if (uErr) throw uErr;
+
+  await ensureLoyaltyPointForCompletedBooking(bookingId);
 
   if (isValidUuid(staffId)) {
     await supabase.from('staff_operations').insert({
@@ -375,6 +502,44 @@ export async function checkOutBooking(bookingId: string, staffId?: string | null
   }
 
   return fetchBookingById(bookingId);
+}
+
+async function ensureLoyaltyPointForCompletedBooking(bookingId: string) {
+  const { data: booking, error: bookingErr } = await supabase
+    .from('bookings')
+    .select('id,user_id,status')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bookingErr || !booking?.user_id || booking.status !== 'completed') return;
+
+  const { data: existing } = await supabase
+    .from('loyalty_transactions')
+    .select('id')
+    .eq('reference_id', bookingId)
+    .in('transaction_type', ['booking', 'booking_completed'])
+    .limit(1);
+  if ((existing || []).length > 0) return;
+
+  const { error: txErr } = await supabase
+    .from('loyalty_transactions')
+    .insert({
+      user_id: booking.user_id,
+      points_change: 1,
+      transaction_type: 'booking_completed',
+      reference_id: booking.id,
+    });
+  if (txErr) return;
+
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('loyalty_points')
+    .eq('id', booking.user_id)
+    .maybeSingle();
+
+  await supabase
+    .from('users')
+    .update({ loyalty_points: Number(userRow?.loyalty_points || 0) + 1 })
+    .eq('id', booking.user_id);
 }
 
 export async function listStaffOperationsRecent(limit = 250) {

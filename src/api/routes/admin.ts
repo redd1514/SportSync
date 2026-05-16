@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
-import { bookingService } from '../services/bookingService.ts';
-import { paymentService } from '../services/paymentService.ts';
 import { supabase } from '../services/supabaseClient.ts';
+import { getAllBookingsFiltered, refundLoyaltyRedemptionForUnstartedBooking } from '../services/deskBookingService.ts';
 
 const adminRouter = new Hono();
 
@@ -57,58 +56,7 @@ adminRouter.get('/bookings', async (c) => {
     const end = c.req.query('end');
 
     const filters = date ? { date } : start && end ? { start, end } : {};
-    const allBookings = await bookingService.getAllBookings(filters);
-
-    // Resolve missing customer names by looking up users via both id and auth_id
-    const unresolvedUserIds = [...new Set(
-      (allBookings || [])
-        .filter((b: any) => !b.customer_name && b.user_id)
-        .map((b: any) => String(b.user_id))
-    )];
-
-    const customerByAnyId: Record<string, string> = {};
-    if (unresolvedUserIds.length > 0) {
-      const [{ data: usersById }, { data: usersByAuthId }] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, auth_id, full_name, email')
-          .in('id', unresolvedUserIds),
-        supabase
-          .from('users')
-          .select('id, auth_id, full_name, email')
-          .in('auth_id', unresolvedUserIds),
-      ]);
-
-      for (const u of usersById || []) {
-        const name = u.full_name || u.email || '';
-        if (name) {
-          customerByAnyId[String(u.id)] = name;
-          if (u.auth_id) customerByAnyId[String(u.auth_id)] = name;
-        }
-      }
-
-      for (const u of usersByAuthId || []) {
-        const name = u.full_name || u.email || '';
-        if (name) {
-          customerByAnyId[String(u.id)] = name;
-          if (u.auth_id) customerByAnyId[String(u.auth_id)] = name;
-        }
-      }
-    }
-
-    // Map bookings to client shape
-    const bookings = (allBookings || []).map((b) => ({
-    id: b.id,
-    refCode: b.id,
-    customerName: (b as { customer_name?: string }).customer_name || customerByAnyId[String(b.user_id || '')] || 'Customer',
-    court: (b as any).court_name || b.court_id || 'Court',
-    date: b.booking_date,
-    startTime: b.start_time,
-    time: `${b.start_time} - ${b.end_time}`,
-    amount: b.total_price || 0,
-    status: b.status || 'pending',
-    createdAt: (b as any).created_at || '',
-}));
+    const bookings = await getAllBookingsFiltered(filters);
 
     return c.json(bookings || []);
   } catch (error: any) {
@@ -464,9 +412,10 @@ adminRouter.get('/loyalty-program', async (c) => {
   try {
     return c.json({
       name: 'Sports Sync Rewards',
-      pointsPerRupee: 1,
-      redeemThreshold: 100,
-      bonusMultiplier: 1.5,
+      pointsPerCompletedBooking: 1,
+      redeemThreshold: 10,
+      courtDiscountPercent: 25,
+      bonusMultiplier: 1,
     });
   } catch (error: any) {
     return c.json(null);
@@ -501,6 +450,7 @@ adminRouter.post('/approve-cancellation', async (c) => {
       .update({ status: 'approved', processed_at: new Date().toISOString() })
       .eq('id', requestId);
     if (br?.booking_id) {
+      await refundLoyaltyRedemptionForUnstartedBooking(br.booking_id);
       await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', br.booking_id);
     }
     return c.json({ success: true, id: requestId, approved_at: new Date().toISOString() });

@@ -108,17 +108,25 @@ export const bookingService = {
     courtId: string,
     date: string,
     startTime: string,
-    endTime: string
+    endTime: string,
+    excludeBookingId?: string
   ): Promise<boolean> {
     try {
       const resolvedCourtId = await resolveCourtRowId(courtId);
-      const { data, error } = await supabase
+      let query = supabase
         .from('bookings')
         .select('id')
         .eq('court_id', resolvedCourtId)
         .eq('booking_date', date)
-        .in('status', ['pending', 'confirmed', 'checked_in'])
-        .or(`and(start_time.gte.${startTime},start_time.lt.${endTime}),and(end_time.gt.${startTime},end_time.lte.${endTime})`);
+        .in('status', ['pending', 'confirmed', 'checked_in', 'pending_verification', 'rescheduled'])
+        .lt('start_time', endTime)
+        .gt('end_time', startTime);
+
+      if (excludeBookingId) {
+        query = query.neq('id', excludeBookingId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return (data?.length ?? 0) === 0; // True if no conflicts
@@ -274,7 +282,21 @@ export const bookingService = {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select(USER_BOOKING_SELECT)
+        .select(`
+          id,
+          user_id,
+          booking_date,
+          start_time,
+          end_time,
+          status,
+          total_price,
+          base_price,
+          notes,
+          qr_code_token,
+          created_at,
+          updated_at,
+          courts ( name, sports ( name ) )
+        `)
         .eq('user_id', resolvedUserId)
         .order('booking_date', { ascending: false });
 
@@ -286,20 +308,30 @@ export const bookingService = {
         const bookingIds = data.map((b: any) => b.id);
         const { data: requests } = await supabase
           .from('booking_requests')
-          .select('booking_id')
+          .select('id, booking_id, request_type, reason, requested_new_date, requested_new_start_time, requested_new_end_time, created_at')
           .in('booking_id', bookingIds)
           .eq('status', 'pending');
-
-        return data.map((row: any) => {
-          const admin = mapBookingRowToAdmin(row);
-          const client = deskAdminRowToClientBooking(admin);
-          const hasPendingReq = requests?.some((r) => r.booking_id === row.id);
-          return {
-            ...client,
-            cancellation_requested: hasPendingReq || false,
-          } as BookingResponse;
+          
+        const mapped = data.map((b: any) => {
+           const pendingReq = requests?.find(r => r.booking_id === b.id);
+           return {
+             ...deskAdminRowToClientBooking(mapBookingRowToAdmin(b)),
+             cancellationRequested: !!pendingReq,
+             cancellation_requested: !!pendingReq,
+             pendingChangeRequest: pendingReq ? {
+               id: pendingReq.id,
+               type: pendingReq.request_type,
+               reason: pendingReq.reason || '',
+               requestedDate: pendingReq.requested_new_date || null,
+               requestedStartTime: pendingReq.requested_new_start_time || null,
+               requestedEndTime: pendingReq.requested_new_end_time || null,
+               createdAt: pendingReq.created_at || null,
+             } : null,
+           };
         });
+        return (mapped as unknown) as BookingResponse[];
       }
+      
       if (USE_MOCK_BOOKINGS) {
         throw new Error('Using mock bookings');
       }

@@ -69,6 +69,7 @@ export function CoachApplicationForm() {
   const [requestMode, setRequestMode] = useState<"change_request" | "removal_request">("change_request");
   const [requestDetails, setRequestDetails] = useState("");
   const [requestSent, setRequestSent] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const toggleDay = (d: string) => setAvailability(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
@@ -84,7 +85,7 @@ export function CoachApplicationForm() {
     return sameEmail || sameId;
   });
   const activeNewApplication = myApplications.find((app) =>
-    (app.applicationType || "new") === "new" && app.status === "pending"
+    (app.applicationType || "new") === "new" && (app.status === "pending" || app.status === "approved")
   );
   const pendingCoachRequest = myApplications.find((app) =>
     app.applicationType !== "new" && app.status === "pending"
@@ -106,6 +107,7 @@ export function CoachApplicationForm() {
   const handleSubmit = async () => {
     if (!sport || !bio || availability.length === 0 || !photoUrl || isSubmitting) return;
     setIsSubmitting(true);
+    setFormError("");
     try {
       const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
@@ -127,10 +129,11 @@ export function CoachApplicationForm() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as { error?: string }).error || "Could not submit application");
+      if ((data as any)?.id) setApplications((prev) => [data as CoachApplication, ...prev]);
       setSubmitted(true);
       setStep(3);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not submit application");
+      setFormError(e instanceof Error ? e.message : "Could not submit application");
     } finally {
       setIsSubmitting(false);
     }
@@ -148,6 +151,7 @@ export function CoachApplicationForm() {
   const submitCoachProfileRequest = async () => {
     if (!myCoach || !requestDetails.trim() || isSubmitting) return;
     setIsSubmitting(true);
+    setFormError("");
     try {
       const res = await apiFetch(`/api/coach-applications`, {
         method: "POST",
@@ -173,7 +177,7 @@ export function CoachApplicationForm() {
       setRequestDetails("");
       await loadApplications();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not notify admin");
+      setFormError(e instanceof Error ? e.message : "Could not notify admin");
     } finally {
       setIsSubmitting(false);
     }
@@ -258,6 +262,11 @@ export function CoachApplicationForm() {
                     style={{ fontSize: 14, background: `linear-gradient(135deg, ${ACCENT_BLUE}, #1d4ed8)` }}>
                     {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Sending request...</> : <><MessageSquare size={16} /> {actionLabel}</>}
                   </button>
+                  {formError && (
+                    <div className="rounded-2xl p-4 border" style={{ background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.25)" }}>
+                      <p className="text-red-400 font-black" style={{ fontSize: 13 }}>{formError}</p>
+                    </div>
+                  )}
                   {requestSent && (
                     <div className="rounded-2xl p-4 border" style={{ background: "rgba(34,197,94,0.08)", borderColor: "rgba(34,197,94,0.25)" }}>
                       <p className="text-green-400 font-black" style={{ fontSize: 13 }}>Request sent to admin.</p>
@@ -316,10 +325,10 @@ export function CoachApplicationForm() {
           <div className="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)" }}>
             <CheckCircle size={40} className="text-green-400" />
           </div>
-          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Application Submitted!</h2>
+          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Waiting for Admin Approval</h2>
           <p style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
             Your coaching application for <strong style={{ color: TEXT_PRIMARY }}>{sport}</strong> has been received. 
-            Our admin team will review it and respond within 24 hours via your account notifications.
+            You will be notified when admin accepts or rejects it. If accepted, your coach badge will appear on your profile.
           </p>
           <div className="rounded-2xl p-4 border mb-6" style={{ background: SURFACE2, borderColor: BORDER }}>
             <div className="grid grid-cols-2 gap-3 text-left">
@@ -341,14 +350,6 @@ export function CoachApplicationForm() {
               </div>
             </div>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); setPhotoUrl(""); }}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black transition-all"
-            style={{ fontSize: 14, background: `${ACCENT_BLUE}18`, border: `1px solid ${ACCENT_BLUE}40`, color: "#60a5fa" }}
-          >
-            <RefreshCw size={15} /> Submit Another Application
-          </motion.button>
         </motion.div>
       </div>
     );
@@ -525,6 +526,11 @@ export function CoachApplicationForm() {
                   Continue →
                 </motion.button>
               </div>
+              {formError && (
+                <div className="rounded-2xl p-4 border" style={{ background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.25)" }}>
+                  <p className="text-red-400 font-black" style={{ fontSize: 13 }}>{formError}</p>
+                </div>
+              )}
             </motion.div>
           )}
 

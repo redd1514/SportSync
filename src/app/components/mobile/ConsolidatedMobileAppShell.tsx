@@ -114,12 +114,14 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
     sport: string;
     date: string;
     time: string;
+    coachId?: string;
     coachingSessionId?: string;
     coachingStudentName?: string;
     coachingStudentId?: string;
     coachName?: string;
     coachHourlyRate?: number;
     durationHours?: number;
+    coachingMessage?: string;
   } | undefined>(undefined);
   const { isAdmin, isStaff, logout }  = useUser();
 
@@ -178,7 +180,7 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
                       mode="customer"
                       compact
                       prefill={bookingPrefill}
-                      onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                      onExitCoachingReservation={bookingPrefill?.coachingSessionId || bookingPrefill?.coachId ? () => {
                         setBookingPrefill(undefined);
                         setMainTab("coaching");
                         setCoachSub("mycoaching");

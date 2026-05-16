@@ -114,13 +114,113 @@ usersRouter.get('/:id/loyalty', async (c) => {
   try {
     const id = c.req.param('id');
     const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'User not found' }, 404);
+    const { data: transactions } = await supabase
+      .from('loyalty_transactions')
+      .select('id, points_change, transaction_type, reference_id, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(25);
+    const points = Number(user?.loyalty_points || 0);
     return c.json({
-      userId: id,
-      points: user?.loyalty_points || 0,
-      tier: 'bronze',
+      userId: user.id,
+      points,
+      tier: points >= 30 ? 'gold' : points >= 10 ? 'silver' : 'bronze',
       redeemableAmount: 0,
       nextTierPoints: 10,
+      rewardThreshold: 10,
+      rewardsAvailable: Math.floor(points / 10),
+      pointsToNextReward: (10 - (points % 10)) % 10,
+      transactions: transactions || [],
     });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+usersRouter.post('/:id/loyalty/add-test', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'User not found' }, 404);
+
+    await supabase.from('loyalty_transactions').insert({
+      user_id: user.id,
+      points_change: 1,
+      transaction_type: 'manual_test',
+      reference_id: null,
+    });
+
+    const next = Number(user.loyalty_points || 0) + 1;
+    const { data, error } = await supabase
+      .from('users')
+      .update({ loyalty_points: next })
+      .eq('id', user.id)
+      .select('id, loyalty_points')
+      .single();
+    if (error) throw error;
+    return c.json({
+      userId: data.id,
+      points: data.loyalty_points || 0,
+      rewardsAvailable: Math.floor(Number(data.loyalty_points || 0) / 10),
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+usersRouter.post('/:id/loyalty/reset', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'User not found' }, 404);
+
+    await supabase
+      .from('loyalty_transactions')
+      .insert({
+        user_id: user.id,
+        points_change: -Number(user.loyalty_points || 0),
+        transaction_type: 'manual_reset',
+        reference_id: null,
+      });
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({ loyalty_points: 0 })
+      .eq('id', user.id)
+      .select('id, loyalty_points')
+      .single();
+    if (error) throw error;
+    return c.json({ userId: data.id, points: data.loyalty_points || 0 });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+usersRouter.post('/:id/loyalty/redeem', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const points = Math.max(10, Number(body.points || 10));
+    const user = await findUserRow(id);
+    if (!user) return c.json({ error: 'User not found' }, 404);
+    if (Number(user.loyalty_points || 0) < points) return c.json({ error: 'Not enough loyalty points' }, 400);
+
+    await supabase.from('loyalty_transactions').insert({
+      user_id: user.id,
+      points_change: -points,
+      transaction_type: 'redemption',
+      reference_id: null,
+    });
+    const next = Number(user.loyalty_points || 0) - points;
+    const { data, error } = await supabase
+      .from('users')
+      .update({ loyalty_points: next })
+      .eq('id', user.id)
+      .select('id, loyalty_points')
+      .single();
+    if (error) throw error;
+    return c.json({ userId: data.id, points: data.loyalty_points || 0, rewardsAvailable: Math.floor(Number(data.loyalty_points || 0) / 10) });
   } catch (error: any) {
     return c.json({ error: error.message }, 400);
   }
@@ -172,6 +272,7 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
       const coachUser = coach ? userMap.get(coach.user_id) : null;
       const student = userMap.get(session.user_id);
       const notes = typeof session.notes === 'string' ? session.notes : '';
+      const linkedBookingId = notes.match(/linked_booking:([0-9a-f-]+)/i)?.[1];
       const viewerIsStudent = String(session.user_id) === String(usersTableId);
       const viewerIsCoachForThisSession = viewerCoachIdSet.has(String(session.coach_id));
 
@@ -186,7 +287,9 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
         requestedTime: session.start_time,
         endTime: session.end_time,
         message: notes,
+        notes,
         adminNotes: session.admin_notes,
+        linkedBookingId,
         durationHours: session.duration_hours != null ? Number(session.duration_hours) : undefined,
         status: mapSessionStatusForUi(String(session.status || 'pending')),
         viewerIsStudent,

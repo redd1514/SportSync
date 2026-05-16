@@ -66,9 +66,10 @@ function FloatingParticle({ icon: Icon, color, x, y, size, delay }: typeof PARTI
 }
 
 /* ── Input field ── */
-function AuthInput({ icon: Icon, type, value, onChange, placeholder, onKeyDown, rightElement }: {
+function AuthInput({ icon: Icon, type, value, onChange, placeholder, onKeyDown, rightElement, autoComplete, name }: {
   icon: any; type: string; value: string; onChange: (v: string) => void;
   placeholder: string; onKeyDown?: (e: React.KeyboardEvent) => void; rightElement?: React.ReactNode;
+  autoComplete?: string; name?: string;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -78,6 +79,8 @@ function AuthInput({ icon: Icon, type, value, onChange, placeholder, onKeyDown, 
       </div>
       <input
         type={type} value={value}
+        name={name}
+        autoComplete={autoComplete}
         onChange={e => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setFocused(true)}
@@ -516,8 +519,8 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
                     </div>
 
                     {[
-                      { icon: User, placeholder: "Full name", value: name, onChange: setName, type: "text" },
-                      { icon: Mail, placeholder: "Email address", value: email, onChange: setEmail, type: "email" },
+                      { icon: User, placeholder: "Full name", value: name, onChange: setName, type: "text", name: "name", autoComplete: "name" },
+                      { icon: Mail, placeholder: "Email address", value: email, onChange: setEmail, type: "email", name: "email", autoComplete: "email" },
                     ].map((f, i) => (
                       <motion.div key={f.placeholder} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
                         <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>
@@ -530,12 +533,14 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Password</label>
                       <AuthInput icon={Lock} type={showPassword ? "text" : "password"} value={password} onChange={setPassword} placeholder="Min. 6 characters"
+                        name="new-password" autoComplete="new-password"
                         rightElement={<button type="button" onClick={() => setShowPw(!showPassword)} style={{ color: TS }}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>} />
                     </motion.div>
 
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Confirm Password</label>
                       <AuthInput icon={Lock} type="password" value={confirmPassword} onChange={setConfirm} placeholder="Re-enter password"
+                        name="confirm-new-password" autoComplete="new-password"
                         onKeyDown={e => e.key === "Enter" && handleSignUp()} />
                     </motion.div>
 
@@ -568,12 +573,13 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Email</label>
-                      <AuthInput icon={Mail} type="email" value={email} onChange={setEmail} placeholder="your@email.com" onKeyDown={e => e.key === "Enter" && handleSignIn()} />
+                      <AuthInput icon={Mail} type="email" value={email} onChange={setEmail} placeholder="your@email.com" name="email" autoComplete="username" onKeyDown={e => e.key === "Enter" && handleSignIn()} />
                     </motion.div>
 
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Password</label>
                       <AuthInput icon={Lock} type={showPassword ? "text" : "password"} value={password} onChange={setPassword} placeholder="Your password"
+                        name="current-password" autoComplete="current-password"
                         onKeyDown={e => e.key === "Enter" && handleSignIn()}
                         rightElement={<button type="button" onClick={() => setShowPw(!showPassword)} style={{ color: TS }}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>} />
                         
@@ -661,7 +667,7 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
 
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Email</label>
-                      <AuthInput icon={Mail} type="email" value={email} onChange={setEmail} placeholder="your@email.com" onKeyDown={e => e.key === "Enter" && handleResetPassword()} />
+                      <AuthInput icon={Mail} type="email" value={email} onChange={setEmail} placeholder="your@email.com" name="email" autoComplete="username" onKeyDown={e => e.key === "Enter" && handleResetPassword()} />
                     </motion.div>
 
                     {error && <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl px-4 py-3" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171", fontSize: 13 }}>{error}</motion.div>}
@@ -694,12 +700,14 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>New Password</label>
                       <AuthInput icon={Lock} type={showPassword ? "text" : "password"} value={newPassword} onChange={setNewPassword} placeholder="Min. 6 characters"
+                        name="new-password" autoComplete="new-password"
                         rightElement={<button type="button" onClick={() => setShowPw(!showPassword)} style={{ color: TS }}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>} />
                     </motion.div>
 
                     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                       <label style={{ color: TS, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: "block", marginBottom: 6, textTransform: "uppercase" }}>Confirm New Password</label>
                       <AuthInput icon={Lock} type="password" value={confirmNewPassword} onChange={setConfirmNewPassword} placeholder="Re-enter new password"
+                        name="confirm-new-password" autoComplete="new-password"
                         onKeyDown={e => e.key === "Enter" && handleUpdatePassword()} />
                     </motion.div>
 

@@ -3,15 +3,16 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ArrowRight, Calendar, CheckCircle, Clock, GraduationCap, QrCode, Shield,
   Star, Users, X, XCircle, AlertCircle, MessageSquare, ClipboardCheck,
-  MapPin, CreditCard, Search,
+  MapPin, CreditCard, Search, ChevronDown, Download,
+  Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { QRCodeSVG } from "qrcode.react";
+import { downloadTicketQrPng } from "../../../shared/qrDownload";
 import type { CoachingRequest } from "../../contexts/CoachingContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useUser } from "../../contexts/UserContext";
 import { getSportColor, SportIcon } from "../SportIcons";
-import { SectionLoader } from "../shared/LoadingScreen";
 
 const BG = "#131314";
 const SURF = "#1E1E1F";
@@ -53,11 +54,66 @@ function dateLabel(date: string) {
 }
 
 function isManualPaymentVerified(req: CoachingRequest) {
-  return /PAYMENT_VERIFIED|Manual coaching payment verified/i.test(req.adminNotes || "");
+  return /PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(req.adminNotes || "");
 }
 
 function amountLabel(value?: number) {
   return `₱${Math.max(0, Number(value || 0)).toLocaleString()}`;
+}
+
+function coachingTicketCode(req: CoachingRequest) {
+  return `COACH-${req.id.slice(0, 8).toUpperCase()}`;
+}
+
+function CompactMenu<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((item) => item.value === value) || options[0];
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((next) => !next)}
+        className="rounded-xl px-3 py-2 text-white font-black outline-none flex items-center justify-between gap-2 min-w-[130px]"
+        style={{ background: SURF2, border: `1px solid ${BORDER}`, fontSize: 12 }}
+      >
+        <span>{selected?.label}</span>
+        <ChevronDown size={13} color="#a855f7" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            className="absolute left-0 top-full z-40 mt-2 min-w-full overflow-hidden rounded-xl border border-white/10 bg-[#151515] shadow-2xl"
+          >
+            {options.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => {
+                  onChange(item.value);
+                  setOpen(false);
+                }}
+                className="w-full px-3 py-2.5 text-left font-black hover:bg-white/8"
+                style={{ fontSize: 12, color: item.value === value ? "#c084fc" : "#f5f5f5", background: item.value === value ? "rgba(168,85,247,0.16)" : "transparent" }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: CoachingRequest["status"] }) {
@@ -65,6 +121,7 @@ function StatusBadge({ status }: { status: CoachingRequest["status"] }) {
     pending: { label: "Awaiting coach", color: "#eab308", bg: "rgba(234,179,8,0.13)", icon: Clock },
     confirmed: { label: "Confirmed", color: GREEN, bg: "rgba(34,197,94,0.13)", icon: CheckCircle },
     rejected: { label: "Declined", color: RED, bg: "rgba(239,68,68,0.13)", icon: XCircle },
+    completed: { label: "Completed", color: BLUE, bg: "rgba(37,99,235,0.13)", icon: ClipboardCheck },
   } as const;
   const item = map[status] || map.pending;
   return (
@@ -91,18 +148,47 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
   );
 }
 
+function SessionCardSkeleton() {
+  return (
+    <div className="rounded-xl border overflow-hidden animate-pulse" style={{ background: SURF, borderColor: BORDER }}>
+      <div className="h-1 bg-white/10" />
+      <div className="p-3 md:p-4">
+        <div className="flex items-start gap-2.5">
+          <div className="w-10 h-10 rounded-xl bg-white/10 flex-shrink-0" />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2 flex-1">
+                <div className="h-4 w-36 rounded bg-white/10" />
+                <div className="h-3 w-24 rounded bg-white/5" />
+              </div>
+              <div className="h-6 w-24 rounded-full bg-white/8" />
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div className="h-10 rounded-lg bg-white/[0.06]" />
+              <div className="h-10 rounded-lg bg-white/[0.06]" />
+            </div>
+            <div className="h-10 rounded-lg bg-white/[0.06]" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionCard({
   req,
   mode,
   onTicket,
-  onBookCourt,
   onDecision,
+  onReview,
+  onReviewDetails,
 }: {
   req: CoachingRequest;
   mode: "student" | "coach";
   onTicket: (req: CoachingRequest) => void;
-  onBookCourt: (req: CoachingRequest) => void;
   onDecision: (req: CoachingRequest, action: "confirmed" | "rejected") => void;
+  onReview: (req: CoachingRequest) => void;
+  onReviewDetails: (req: CoachingRequest) => void;
 }) {
   const color = getSportColor(req.sport);
   const name = mode === "coach" ? req.userName : req.coachName;
@@ -115,39 +201,39 @@ function SessionCard({
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border overflow-hidden"
+      className="rounded-xl border overflow-hidden"
       style={{ background: SURF, borderColor: BORDER }}
     >
       <div className="h-1" style={{ background: `linear-gradient(90deg, ${mode === "coach" ? BLUE : color}, transparent)` }} />
-      <div className="p-4 md:p-5">
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `${color}18`, border: `1px solid ${color}35` }}>
-            {mode === "coach" ? <Users size={21} color={BLUE} /> : <SportIcon sport={req.sport} size={22} color={color} />}
+      <div className="p-3 md:p-4">
+        <div className="flex items-start gap-2.5">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${color}18`, border: `1px solid ${color}35` }}>
+            {mode === "coach" ? <Users size={18} color={BLUE} /> : <SportIcon sport={req.sport} size={19} color={color} />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-white font-black truncate" style={{ fontSize: 16 }}>{name || "Coaching session"}</p>
-                <p className="font-black" style={{ color: mode === "coach" ? BLUE : color, fontSize: 12 }}>{subtitle}</p>
+                <p className="text-white font-black truncate" style={{ fontSize: 14 }}>{name || "Coaching session"}</p>
+                <p className="font-black" style={{ color: mode === "coach" ? BLUE : color, fontSize: 11 }}>{subtitle}</p>
               </div>
               <StatusBadge status={req.status} />
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-2 mt-4">
-              <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+            <div className="grid sm:grid-cols-2 gap-2 mt-3">
+              <div className="rounded-lg p-2.5 border" style={{ background: SURF2, borderColor: BORDER }}>
                 <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
                   <Calendar size={13} />
                   <span>{dateLabel(req.requestedDate)}</span>
                 </div>
               </div>
-              <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+              <div className="rounded-lg p-2.5 border" style={{ background: SURF2, borderColor: BORDER }}>
                 <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
                   <Clock size={13} />
                   <span>{fmt12(req.requestedTime)}{req.endTime ? ` - ${fmt12(req.endTime)}` : ""}</span>
                 </div>
               </div>
             </div>
-            <div className="mt-2 rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
+            <div className="mt-2 rounded-lg p-2.5 border" style={{ background: SURF2, borderColor: BORDER }}>
               <div className="flex items-center justify-between gap-3" style={{ color: TS, fontSize: 12 }}>
                 <span>{mode === "coach" ? "Coaching fee student will pay" : "Coaching fee"}</span>
                 <span className="font-black text-white">{amountLabel(req.totalAmount || req.coachFee)}</span>
@@ -155,24 +241,24 @@ function SessionCard({
             </div>
 
             {req.message && (
-              <div className="mt-3 rounded-xl p-3 border flex gap-2" style={{ background: "rgba(255,255,255,0.035)", borderColor: BORDER }}>
+              <div className="mt-2 rounded-lg p-2.5 border flex gap-2" style={{ background: "rgba(255,255,255,0.035)", borderColor: BORDER }}>
                 <MessageSquare size={14} color={TS} className="mt-0.5 flex-shrink-0" />
                 <p style={{ color: TS, fontSize: 12, lineHeight: 1.55 }}>{req.message}</p>
               </div>
             )}
 
-            <div className="mt-4">
+            <div className="mt-3">
               {mode === "coach" && req.status === "pending" && (
                 <>
                 <div className="rounded-xl p-3 mb-3" style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.22)" }}>
-                  <p className="font-black" style={{ color: "#93c5fd", fontSize: 12 }}>Reserve a court to accept</p>
-                  <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>Choose an available {req.sport} court from the facility map. You pay the court fee reservation, and the student pays the coaching fee only.</p>
+                  <p className="font-black" style={{ color: "#93c5fd", fontSize: 12 }}>Review the reserved coaching booking</p>
+                  <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>The student already selected and paid for the court. Accept to release their coaching ticket, or decline to notify them and release the court reservation.</p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <button onClick={() => onBookCourt(req)}
+                  <button onClick={() => onDecision(req, "confirmed")}
                     className="flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
                     style={{ background: "linear-gradient(135deg,#22c55e,#16a34a)", fontSize: 13 }}>
-                    <MapPin size={15} /> Reserve Court & Accept
+                    <ClipboardCheck size={15} /> Accept Session
                   </button>
                   <button onClick={() => onDecision(req, "rejected")}
                     className="sm:w-40 py-3 rounded-xl font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
@@ -183,14 +269,16 @@ function SessionCard({
                 </>
               )}
 
-              {mode === "student" && req.status === "confirmed" && (
+              {mode === "student" && (req.status === "confirmed" || req.status === "completed") && (
                 <>
                 <div className="rounded-xl p-3 mb-3" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.22)" }}>
-                  <p className="font-black" style={{ color: "#86efac", fontSize: 12 }}>{paymentVerified ? "Payment verified. You are cleared." : "Coach accepted. Payment is next."}</p>
+                  <p className="font-black" style={{ color: "#86efac", fontSize: 12 }}>{req.status === "completed" ? "Completed" : paymentVerified ? "Checked in by front desk" : "Coach accepted"}</p>
                   <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>
-                    {paymentVerified
-                      ? "Front desk has verified your manual payment. Show the coaching ticket at check-in."
-                      : "Your coach has secured the court. Pay only the coaching fee through JRC staff or the official GCash QR, then show the ticket at check-in."}
+                    {req.status === "completed"
+                      ? "The session has been finished."
+                      : paymentVerified
+                      ? "Front desk has verified this coaching ticket."
+                      : "Go to the facility and pay the total amount at the front desk to begin the coaching session."}
                   </p>
                 </div>
                 {showCourtDetails && (
@@ -198,13 +286,13 @@ function SessionCard({
                     <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
                       <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
                         <MapPin size={13} />
-                        <span>{req.courtName || "Court reserved by coach"}</span>
+                        <span>{req.courtName || "Reserved court"}</span>
                       </div>
                     </div>
                     <div className="rounded-xl p-3 border" style={{ background: SURF2, borderColor: BORDER }}>
                       <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
                         <CreditCard size={13} />
-                        <span>Coaching fee: {amountLabel(req.totalAmount || req.coachFee)}</span>
+                        <span>Total amount: {amountLabel(req.totalAmount || req.coachFee)}</span>
                       </div>
                     </div>
                   </div>
@@ -216,6 +304,20 @@ function SessionCard({
                     <QrCode size={15} /> View Coaching Ticket
                   </button>
                 </div>
+                {req.status === "completed" && !req.rating && (
+                  <button onClick={() => onReview(req)}
+                    className="w-full py-3 mt-3 rounded-xl text-white font-black flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+                    style={{ background: "linear-gradient(135deg,#f59e0b,#f97316)", fontSize: 13 }}>
+                    <Star size={15} /> Rate Coach
+                  </button>
+                )}
+                {req.status === "completed" && req.rating && (
+                  <button onClick={() => onReviewDetails(req)}
+                    className="w-full py-3 mt-3 rounded-xl font-black flex items-center justify-center gap-2 border transition-all hover:bg-yellow-400/15"
+                    style={{ color: "#fde68a", borderColor: "rgba(251,191,36,0.28)", background: "rgba(251,191,36,0.09)", fontSize: 13 }}>
+                    <Star size={15} fill="#fbbf24" color="#fbbf24" /> Your rating: {req.rating}/5
+                  </button>
+                )}
                 </>
               )}
 
@@ -224,9 +326,28 @@ function SessionCard({
                   <p className="font-black" style={{ color: "#86efac", fontSize: 12 }}>{paymentVerified ? "Accepted session - payment verified" : "Accepted session"}</p>
                   <p style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>
                     {paymentVerified
-                      ? "Front desk has verified the student's manual payment, so this coaching session is cleared to proceed."
-                      : `Court: ${req.courtName || "reserved"}. You handle the court reservation payment; the student pays the coaching fee only.`}
+                      ? "Front desk has verified the student's payment, so this coaching session is cleared to proceed."
+                      : `Accepted. Facility: ${req.courtName || "reserved court"}. Please wait for the student to pay at the front desk.`}
                   </p>
+                </div>
+              )}
+
+              {mode === "coach" && req.status === "completed" && (
+                <div className="rounded-xl p-3 relative" style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.22)" }}>
+                  <p className="font-black" style={{ color: "#93c5fd", fontSize: 12 }}>Completed session</p>
+                  <p className="pr-24" style={{ color: TS, fontSize: 12, lineHeight: 1.5 }}>
+                    You have finished the coaching session with {req.userName || "this student"}.
+                  </p>
+                  {req.rating && (
+                    <button
+                      type="button"
+                      onClick={() => onReviewDetails(req)}
+                      className="absolute right-3 bottom-3 px-2.5 py-1.5 rounded-lg border font-black flex items-center gap-1.5 hover:bg-yellow-400/15 transition-colors"
+                      style={{ color: "#fde68a", borderColor: "rgba(251,191,36,0.28)", background: "rgba(251,191,36,0.09)", fontSize: 11 }}
+                    >
+                      <Star size={12} fill="#fbbf24" color="#fbbf24" /> {req.rating}/5
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -289,18 +410,29 @@ function DecisionModal({
       <motion.div initial={{ opacity: 0, scale: 0.92, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92, y: 18 }}
         className="relative w-full max-w-md rounded-3xl border p-6" style={{ background: SURF, borderColor: BORDER }}>
         <button onClick={onClose} className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-white/6 flex items-center justify-center text-gray-400 hover:text-white"><X size={16} /></button>
-        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: accepting ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)" }}>
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto" style={{ background: accepting ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)" }}>
           {accepting ? <ClipboardCheck size={28} className="text-green-400" /> : <XCircle size={28} className="text-red-400" />}
         </div>
-        <h3 className="text-white font-black mb-2" style={{ fontSize: 20 }}>{accepting ? "Accept this session?" : "Decline this session?"}</h3>
-        <p style={{ color: TS, fontSize: 13, lineHeight: 1.6 }}>
+        <h3 className="text-white font-black mb-2 text-center" style={{ fontSize: 20 }}>{accepting ? "Accept this session?" : "Decline this session?"}</h3>
+        <p className="text-center" style={{ color: TS, fontSize: 13, lineHeight: 1.6 }}>
           {accepting
-            ? `This confirms ${req.userName}'s ${req.sport} coaching session on ${dateLabel(req.requestedDate)}.`
-            : `This will notify ${req.userName} that you cannot take this ${req.sport} session.`}
+            ? `This releases the coaching ticket for ${req.userName}.`
+            : `This notifies ${req.userName} and releases the linked court reservation.`}
         </p>
-        <div className="mt-5 rounded-2xl p-4" style={{ background: SURF2 }}>
-          <p className="text-white font-black" style={{ fontSize: 14 }}>{fmt12(req.requestedTime)}{req.endTime ? ` - ${fmt12(req.endTime)}` : ""}</p>
-          <p style={{ color: TS, fontSize: 12 }}>{dateLabel(req.requestedDate)}</p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          {[
+            ["Student", req.userName],
+            ["Sport", req.sport],
+            ["Date", dateLabel(req.requestedDate)],
+            ["Time", `${fmt12(req.requestedTime)}${req.endTime ? ` - ${fmt12(req.endTime)}` : ""}`],
+            ["Court", req.courtName || "Reserved court"],
+            ["Total", amountLabel(req.totalAmount || req.coachFee)],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-2xl p-3 text-center" style={{ background: SURF2 }}>
+              <p className="font-black uppercase" style={{ color: TS, fontSize: 9 }}>{label}</p>
+              <p className="text-white font-black mt-1" style={{ fontSize: 12 }}>{value}</p>
+            </div>
+          ))}
         </div>
         <div className="mt-5 flex gap-3">
           <button onClick={onClose} className="flex-1 py-3 rounded-xl font-black text-gray-300" style={{ background: "rgba(255,255,255,0.07)", fontSize: 13 }}>Cancel</button>
@@ -325,11 +457,12 @@ function DecisionModal({
 function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => void }) {
   const color = getSportColor(req.sport);
   const paymentVerified = isManualPaymentVerified(req);
+  const ticketCode = coachingTicketCode(req);
   return (
     <div className="fixed inset-0 z-[220] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/90 backdrop-blur-md" onClick={onClose} />
       <motion.div initial={{ opacity: 0, scale: 0.92, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92, y: 18 }}
-        className="relative w-full max-w-sm rounded-3xl overflow-hidden border shadow-2xl" style={{ background: "#101011", borderColor: `${color}45` }}>
+        className="relative w-full max-w-sm rounded-3xl overflow-hidden border shadow-2xl max-h-[calc(100dvh-2rem)] flex flex-col" style={{ background: "#101011", borderColor: `${color}45` }}>
         <button onClick={onClose} className="absolute top-4 right-4 z-10 w-9 h-9 rounded-xl bg-black/35 flex items-center justify-center text-white/70 hover:text-white"><X size={16} /></button>
         <div className="p-6" style={{ background: `linear-gradient(135deg, ${color}35, rgba(255,255,255,0.03))` }}>
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: `${color}24`, border: `1px solid ${color}45` }}>
@@ -338,7 +471,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
           <p className="text-white font-black" style={{ fontSize: 22 }}>Coaching Ticket</p>
           <p style={{ color: "#cbd5e1", fontSize: 13 }}>{req.coachName} · {req.sport}</p>
         </div>
-        <div className="px-6 py-5 space-y-4">
+        <div className="px-6 py-5 space-y-4 overflow-y-auto custom-scrollbar">
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl p-3" style={{ background: SURF }}>
               <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>DATE</p>
@@ -354,30 +487,40 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
             <p className="text-white font-black" style={{ fontSize: 12 }}>{req.courtName || "Reserved by coach"}</p>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-2xl p-3" style={{ background: SURF }}>
+            <div className="rounded-2xl p-3 min-h-[76px] text-center flex flex-col items-center justify-center" style={{ background: SURF }}>
               <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COACH FEE</p>
               <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.coachFee)}</p>
             </div>
-            <div className="rounded-2xl p-3" style={{ background: SURF }}>
-              <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COURT BY COACH</p>
+            <div className="rounded-2xl p-3 min-h-[76px] text-center flex flex-col items-center justify-center" style={{ background: SURF }}>
+              <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>COURT FEE</p>
               <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.courtAmount)}</p>
             </div>
-            <div className="rounded-2xl p-3" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
-              <p style={{ color: "#86efac", fontSize: 10, fontWeight: 800 }}>STUDENT DUE</p>
+            <div className="rounded-2xl p-3 text-center" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
+              <p style={{ color: "#86efac", fontSize: 10, fontWeight: 800 }}>TOTAL AMOUNT</p>
               <p className="text-white font-black" style={{ fontSize: 12 }}>{amountLabel(req.totalAmount || req.coachFee)}</p>
             </div>
           </div>
           <div className="rounded-3xl bg-white p-4 flex flex-col items-center">
-            <QRCodeSVG value={JSON.stringify({ type: "coaching", reqId: req.id, coach: req.coachName, date: req.requestedDate })} size={178} level="H" />
-            <p className="mt-3 text-gray-500 font-black" style={{ fontSize: 10 }}>{paymentVerified ? "PAYMENT VERIFIED BY FRONT DESK" : "SHOW AFTER MANUAL PAYMENT"}</p>
-            <p className="text-gray-900 font-black" style={{ fontSize: 14 }}>{req.id.slice(0, 8).toUpperCase()}</p>
+            <QRCodeSVG value={ticketCode} size={178} level="H" />
+            <p className="mt-3 text-gray-500 font-black" style={{ fontSize: 10 }}>{req.status === "completed" ? "CHECKED OUT" : paymentVerified ? "CHECKED IN BY FRONT DESK" : "SHOW AT FRONT DESK"}</p>
+            <p className="text-gray-900 font-black" style={{ fontSize: 14 }}>{ticketCode}</p>
+            <button
+              type="button"
+              onClick={() => void downloadTicketQrPng({ value: ticketCode, fileBaseName: `${ticketCode}-Coaching-Ticket`, displayCode: ticketCode })}
+              className="mt-3 w-full py-2.5 rounded-xl font-black text-gray-800 border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+              style={{ fontSize: 12 }}
+            >
+              <Download size={14} /> Download QR
+            </button>
           </div>
           <div className="rounded-2xl p-3" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)" }}>
-            <p className="font-black text-green-300" style={{ fontSize: 12 }}>{paymentVerified ? "Payment verified" : "Payment instructions"}</p>
+            <p className="font-black text-green-300" style={{ fontSize: 12 }}>{req.status === "completed" ? "Checked out" : paymentVerified ? "Checked in" : "Front desk instructions"}</p>
             <p style={{ color: "#cbd5e1", fontSize: 11, lineHeight: 1.5 }}>
-              {paymentVerified
-                ? "Front desk has marked this coaching session as manually paid. Show this ticket when you arrive."
-                : "Pay the coaching fee at the front desk or use the official JRC GCash QR on site. Staff will verify before check-in."}
+              {req.status === "completed"
+                ? "The session has been finished."
+                : paymentVerified
+                ? "Front desk has verified this coaching session."
+                : `Go to the facility and pay ${amountLabel(req.totalAmount || req.coachFee)} at the front desk to begin the coaching session.`}
             </p>
           </div>
         </div>
@@ -386,15 +529,108 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
   );
 }
 
+function ReviewModal({ req, onClose, onSubmit }: { req: CoachingRequest; onClose: () => void; onSubmit: (rating: number, comment: string) => Promise<void> }) {
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
+      <motion.div initial={{ opacity: 0, scale: 0.9, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 18 }}
+        className="relative w-full max-w-md rounded-3xl border p-6" style={{ background: SURF, borderColor: BORDER }}>
+        <button onClick={onClose} className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-white/6 flex items-center justify-center text-gray-400 hover:text-white"><X size={16} /></button>
+        <h3 className="text-white font-black text-center" style={{ fontSize: 20 }}>Rate {req.coachName}</h3>
+        <p className="text-center mt-1" style={{ color: TS, fontSize: 13 }}>How did the coaching session feel?</p>
+        <div className="flex justify-center gap-2 my-6">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <motion.button key={n} type="button" whileTap={{ scale: 0.82, rotate: -8 }} whileHover={{ y: -3 }}
+              onClick={() => setRating(n)}
+              className="w-11 h-11 rounded-2xl flex items-center justify-center"
+              style={{ background: n <= rating ? "rgba(251,191,36,0.18)" : "rgba(255,255,255,0.06)", border: `1px solid ${n <= rating ? "rgba(251,191,36,0.42)" : BORDER}` }}>
+              <Star size={24} fill={n <= rating ? "#fbbf24" : "transparent"} color={n <= rating ? "#fbbf24" : TS} />
+            </motion.button>
+          ))}
+        </div>
+        <textarea
+          value={comment}
+          onChange={(event) => setComment(event.target.value.slice(0, 240))}
+          placeholder="Optional review..."
+          className="w-full rounded-2xl px-4 py-3 bg-white/[0.06] border border-white/10 text-white placeholder:text-gray-600 outline-none focus:ring-2 focus:ring-orange-500/25"
+          style={{ fontSize: 13, lineHeight: 1.5, minHeight: 100 }}
+        />
+        {error && (
+          <p className="mt-3 rounded-xl px-3 py-2 text-red-200 font-black" style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", fontSize: 12 }}>
+            {error}
+          </p>
+        )}
+        <div className="mt-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl font-black text-gray-300" style={{ background: "rgba(255,255,255,0.07)", fontSize: 13 }}>Cancel</button>
+          <button
+            onClick={async () => {
+              if (busy) return;
+              setError("");
+              setBusy(true);
+              try {
+                await onSubmit(rating, comment);
+                onClose();
+              } catch (err: any) {
+                setError(err?.message || "Could not save rating. Please try again.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+            disabled={busy}
+            className="flex-1 py-3 rounded-xl text-white font-black disabled:opacity-60"
+            style={{ background: "linear-gradient(135deg,#f59e0b,#f97316)", fontSize: 13 }}>
+            {busy ? "Saving..." : "Submit"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ReviewDetailsModal({ req, onClose }: { req: CoachingRequest; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={onClose} />
+      <motion.div initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.92, y: 16 }}
+        className="relative w-full max-w-sm rounded-3xl border p-6" style={{ background: SURF, borderColor: BORDER }}>
+        <button onClick={onClose} className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-white/6 flex items-center justify-center text-gray-400 hover:text-white"><X size={16} /></button>
+        <p className="text-white font-black text-center" style={{ fontSize: 20 }}>Session Review</p>
+        <div className="flex justify-center gap-1.5 my-5">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <Star key={n} size={24} fill={n <= (req.rating || 0) ? "#fbbf24" : "transparent"} color={n <= (req.rating || 0) ? "#fbbf24" : TS} />
+          ))}
+        </div>
+        <p className="text-center text-white font-black" style={{ fontSize: 14 }}>{req.rating || 0}/5 stars</p>
+        <div className="mt-5 rounded-2xl border p-4" style={{ background: SURF2, borderColor: BORDER }}>
+          <p className="font-black uppercase" style={{ color: TS, fontSize: 10 }}>Review</p>
+          <p className="mt-2" style={{ color: req.reviewComment ? TP : TS, fontSize: 13, lineHeight: 1.6 }}>
+            {req.reviewComment || "No written review was left."}
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
   const { user } = useUser();
-  const { requests, coaches, updateRequestStatus, findCoachByEmail, isLoading } = useCoaching();
+  const { requests, coaches, updateRequestStatus, submitCoachReview, findCoachByEmail, isLoading } = useCoaching();
   const [activeTab, setActiveTab] = useState<"student" | "coach">("student");
   const [ticketReq, setTicketReq] = useState<CoachingRequest | null>(null);
   const [decision, setDecision] = useState<{ req: CoachingRequest; action: "confirmed" | "rejected" } | null>(null);
+  const [reviewReq, setReviewReq] = useState<CoachingRequest | null>(null);
+  const [reviewDetailsReq, setReviewDetailsReq] = useState<CoachingRequest | null>(null);
+  const [showClearModal, setShowClearModal] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CoachingRequest["status"]>("all");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [hiddenCompletedIds, setHiddenCompletedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("sportsync_hidden_completed_coaching") || "[]"); } catch { return []; }
+  });
   const coachDefaultTabApplied = useRef(false);
 
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
@@ -420,18 +656,14 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
     }
   }, [isLoading, isCoach, coachSessions.length, studentSessions.length]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center" style={{ background: BG }}>
-        <SectionLoader label="Loading coaching dashboard..." accentColor={ORANGE} />
-      </div>
-    );
-  }
-
   const currentList = activeTab === "coach" ? coachSessions : studentSessions;
+  useEffect(() => {
+    localStorage.setItem("sportsync_hidden_completed_coaching", JSON.stringify(hiddenCompletedIds));
+  }, [hiddenCompletedIds]);
   const visibleList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return currentList
+      .filter((r) => !hiddenCompletedIds.includes(r.id))
       .filter((r) => statusFilter === "all" || r.status === statusFilter)
       .filter((r) => {
         if (!q) return true;
@@ -445,14 +677,14 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
         const bv = new Date(`${b.requestedDate}T${b.requestedTime || "00:00"}`).getTime();
         return sortOrder === "newest" ? bv - av : av - bv;
       });
-  }, [currentList, query, sortOrder, statusFilter]);
+  }, [currentList, hiddenCompletedIds, query, sortOrder, statusFilter]);
   const pendingCount = coachSessions.filter((r) => r.status === "pending").length;
-  const confirmedCount = [...studentSessions, ...coachSessions].filter((r) => r.status === "confirmed").length;
+  const confirmedCount = [...studentSessions, ...coachSessions].filter((r) => r.status === "confirmed" || r.status === "completed").length;
 
   return (
     <div className="h-full overflow-y-auto pb-24 md:pb-8" style={{ background: BG }}>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] gap-5 items-start">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-5 items-start">
           <div className="rounded-3xl border p-5 md:p-6" style={{ background: SURF, borderColor: BORDER }}>
             <div className="flex flex-col md:flex-row md:items-center gap-4">
               <div className="w-13 h-13 rounded-2xl flex items-center justify-center" style={{ background: `${ORANGE}18`, border: `1px solid ${ORANGE}35` }}>
@@ -461,7 +693,7 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
               <div className="flex-1 min-w-0">
                 <h2 className="text-white font-black" style={{ fontSize: 26 }}>My Coaching</h2>
                 <p style={{ color: TS, fontSize: 13 }}>
-                  {isCoach ? "Manage booked lessons, student requests, and coach actions in one workspace." : "Track coaching bookings and tickets from here."}
+                  {isCoach ? "Manage coaching requests and tickets." : "Track coaching requests, approvals, and tickets."}
                 </p>
               </div>
               <button onClick={() => onNavigate("coaches")} className="px-4 py-2.5 rounded-2xl text-white font-black flex items-center gap-2" style={{ background: `linear-gradient(135deg,${ORANGE},#EA580C)`, fontSize: 13 }}>
@@ -517,13 +749,51 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
           </div>
         )}
 
-        <div className="grid xl:grid-cols-[minmax(0,1fr)_300px] gap-5 items-start">
+        <div className="grid gap-5 items-start">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-white font-black" style={{ fontSize: 17 }}>{activeTab === "coach" ? "Coach Inbox" : "My Sessions"}</h3>
-              <p style={{ color: TS, fontSize: 12 }}>{visibleList.length} item{visibleList.length === 1 ? "" : "s"}</p>
+              <div className="flex items-center gap-2">
+                <p style={{ color: TS, fontSize: 12 }}>{visibleList.length} item{visibleList.length === 1 ? "" : "s"}</p>
+                {currentList.some((r) => r.status === "completed" && !hiddenCompletedIds.includes(r.id)) && (
+                  <button onClick={() => setShowClearModal(true)} className="px-3 py-1.5 rounded-xl font-black border flex items-center gap-1.5"
+                    style={{ color: "#cbd5e1", borderColor: BORDER, background: SURF2, fontSize: 11 }}>
+                    <Trash2 size={12} /> Clear
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="grid md:grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {([
+                { id: "all", label: "All", count: currentList.length, color: TS },
+                { id: "pending", label: "Awaiting", count: currentList.filter((item) => item.status === "pending").length, color: "#eab308" },
+                { id: "confirmed", label: "Confirmed", count: currentList.filter((item) => item.status === "confirmed").length, color: GREEN },
+                { id: "rejected", label: "Declined", count: currentList.filter((item) => item.status === "rejected").length, color: RED },
+                { id: "completed", label: "Completed", count: currentList.filter((item) => item.status === "completed").length, color: BLUE },
+              ] as const).map((chip) => {
+                const active = statusFilter === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => setStatusFilter(chip.id)}
+                    className="flex items-center gap-2 rounded-2xl border px-3 py-2 font-black whitespace-nowrap"
+                    style={{
+                      background: active ? `${chip.color}20` : SURF,
+                      borderColor: active ? `${chip.color}55` : BORDER,
+                      color: active ? chip.color : TS,
+                      fontSize: 12,
+                    }}
+                  >
+                    {chip.label}
+                    <span className="rounded-full px-1.5 py-0.5" style={{ background: "rgba(255,255,255,0.08)", color: TP, fontSize: 10 }}>
+                      {chip.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid md:grid-cols-[minmax(0,1fr)_auto] gap-2">
               <label className="rounded-xl border flex items-center gap-2 px-3 py-2" style={{ background: SURF2, borderColor: BORDER }}>
                 <Search size={14} color={TS} />
                 <input
@@ -534,28 +804,20 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
                   style={{ fontSize: 12 }}
                 />
               </label>
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-                className="rounded-xl px-3 py-2 text-white font-black outline-none"
-                style={{ background: SURF2, border: `1px solid ${BORDER}`, fontSize: 12 }}
-              >
-                <option value="all">All status</option>
-                <option value="pending">Pending</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="rejected">Declined</option>
-              </select>
-              <select
+              <CompactMenu
                 value={sortOrder}
-                onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}
-                className="rounded-xl px-3 py-2 text-white font-black outline-none"
-                style={{ background: SURF2, border: `1px solid ${BORDER}`, fontSize: 12 }}
-              >
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-              </select>
+                onChange={setSortOrder}
+                options={[
+                  { value: "newest", label: "Newest first" },
+                  { value: "oldest", label: "Oldest first" },
+                ]}
+              />
             </div>
-            {currentList.length === 0 ? (
+            {isLoading ? (
+              <div className="grid gap-3">
+                {[0, 1, 2, 3].map((i) => <SessionCardSkeleton key={i} />)}
+              </div>
+            ) : currentList.length === 0 ? (
               <EmptyState isCoach={activeTab === "coach"} onBrowse={() => onNavigate("coaches")} />
             ) : visibleList.length === 0 ? (
               <div className="rounded-3xl border p-8 text-center" style={{ background: SURF, borderColor: BORDER }}>
@@ -578,18 +840,9 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
                       req={enrichedReq}
                       mode={activeTab === "coach" ? "coach" : "student"}
                       onTicket={setTicketReq}
-                      onBookCourt={(r) => onNavigate("book_court", {
-                        sport: r.sport,
-                        date: r.requestedDate,
-                        time: r.requestedTime,
-                        coachingSessionId: r.id,
-                        coachingStudentName: r.userName,
-                        coachingStudentId: r.userId,
-                        coachName: r.coachName,
-                        coachHourlyRate: coachForReq?.hourlyRate || myCoachProfile?.hourlyRate || (computedCoachFee / Math.max(1, r.durationHours || 1)),
-                        durationHours: r.durationHours || 1,
-                      })}
                       onDecision={(r, action) => setDecision({ req: r, action })}
+                      onReview={setReviewReq}
+                      onReviewDetails={setReviewDetailsReq}
                     />
                   );
                 })}
@@ -597,24 +850,6 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
             )}
           </div>
 
-          <aside className="rounded-2xl border p-4 space-y-3 xl:sticky xl:top-4" style={{ background: SURF, borderColor: BORDER }}>
-            <div>
-              <p className="text-white font-black" style={{ fontSize: 15 }}>Session Guide</p>
-              <p style={{ color: TS, fontSize: 12, lineHeight: 1.55 }}>Coaching is request-first. The coach reserves and pays for the court while accepting. The student pays only the coaching fee through JRC staff or the official GCash QR.</p>
-            </div>
-            <div className="space-y-2">
-              {[
-                ["Pending", "Waiting for coach action", "#eab308"],
-                ["Confirmed", "Court reserved and coaching fee ticket available", GREEN],
-                ["Declined", "Session will not proceed", RED],
-              ].map(([label, desc, color]) => (
-                <div key={label} className="rounded-xl p-3" style={{ background: SURF2 }}>
-                  <p className="font-black" style={{ color, fontSize: 12 }}>{label}</p>
-                  <p style={{ color: TS, fontSize: 11 }}>{desc}</p>
-                </div>
-              ))}
-            </div>
-          </aside>
         </div>
       </div>
 
@@ -627,6 +862,31 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
             onClose={() => setDecision(null)}
             onConfirm={() => updateRequestStatus(decision.req.id, decision.action)}
           />
+        )}
+        {reviewReq && (
+          <ReviewModal
+            req={reviewReq}
+            onClose={() => setReviewReq(null)}
+            onSubmit={(rating, comment) => submitCoachReview(reviewReq.id, rating, comment)}
+          />
+        )}
+        {reviewDetailsReq && <ReviewDetailsModal req={reviewDetailsReq} onClose={() => setReviewDetailsReq(null)} />}
+        {showClearModal && (
+          <div className="fixed inset-0 z-[230] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/85 backdrop-blur-md" onClick={() => setShowClearModal(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              className="relative w-full max-w-sm rounded-3xl border p-6" style={{ background: SURF, borderColor: BORDER }}>
+              <h3 className="text-white font-black" style={{ fontSize: 18 }}>Clear completed sessions?</h3>
+              <p className="mt-2" style={{ color: TS, fontSize: 13, lineHeight: 1.5 }}>Completed coaching sessions will be hidden from this tab only.</p>
+              <div className="mt-5 flex gap-3">
+                <button onClick={() => setShowClearModal(false)} className="flex-1 py-3 rounded-xl font-black text-gray-300" style={{ background: "rgba(255,255,255,0.07)", fontSize: 13 }}>Cancel</button>
+                <button onClick={() => {
+                  setHiddenCompletedIds((prev) => [...new Set([...prev, ...currentList.filter((r) => r.status === "completed").map((r) => r.id)])]);
+                  setShowClearModal(false);
+                }} className="flex-1 py-3 rounded-xl text-white font-black" style={{ background: "linear-gradient(135deg,#ef4444,#dc2626)", fontSize: 13 }}>Clear</button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

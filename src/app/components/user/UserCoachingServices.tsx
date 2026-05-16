@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Search, Clock, CalendarDays, CheckCircle, ChevronRight, ChevronLeft,
-  X, Star, Filter, Users, Zap, Award,
+  X, Star, Filter, Users, Zap, Award, AlertCircle,
 } from "lucide-react";
 import {
   format, startOfToday, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -236,7 +236,7 @@ const DUMMY_RATINGS: Record<string, { rating: number; reviews: number; specialti
 };
 
 /* ─── Main Component ──────────────────────────────────────────────── */
-export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) => void }) {
+export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
   const { coaches, requests, addRequest, setActiveRequestId, findCoachByEmail, isLoading: coachesLoading } = useCoaching();
   const { user } = useUser();
   
@@ -261,6 +261,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
   const [message, setMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdRequest, setCreatedRequest] = useState<CoachingRequest | null>(null);
+  const [requestError, setRequestError] = useState("");
 
   /* Derived sport list */
   const allSports = useMemo(() => {
@@ -285,10 +286,48 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
 
   const pendingRequest = useMemo(() => {
     if (!user?.id) return null;
-    return requests.find((r) => r.userId === user.id && r.status === "pending") || null;
+    const isDemoUser = (user.email || "").trim().toLowerCase() === "user@jrc.com";
+    if (isDemoUser) return null;
+    return requests.find((r) => {
+      if (r.status !== "pending") return false;
+      return r.viewerIsStudent === true || r.userId === user.id;
+    }) || null;
+  }, [requests, user?.email, user?.id]);
+
+  const pendingCoachIds = useMemo(() => {
+    if (!user?.id) return new Set<string>();
+    return new Set(
+      requests
+        .filter((r) => r.status === "pending" && (r.viewerIsStudent === true || r.userId === user.id))
+        .map((r) => String(r.coachId))
+    );
   }, [requests, user?.id]);
 
-  const hasPendingRequest = !!pendingRequest;
+  const nextBookableTime = () => {
+    const d = new Date();
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+    const hour = Math.max(7, Math.min(22, d.getHours()));
+    return `${String(hour).padStart(2, "0")}:00`;
+  };
+
+  const startCoachBooking = (coach: Coach) => {
+    if (!user?.id || pendingCoachIds.has(String(coach.id)) || myCoachProfile?.id === coach.id || !coach.isAvailable) return;
+    const date = format(startOfToday(), "yyyy-MM-dd");
+    setSelectedCoach(null);
+    onNavigate("book_court", {
+      sport: coach.sport,
+      date,
+      time: nextBookableTime(),
+      coachId: coach.id,
+      coachName: coach.name,
+      coachHourlyRate: coach.hourlyRate,
+      coachingStudentName: user?.name || "Student",
+      coachingStudentId: user.id,
+      durationHours: 1,
+    });
+  };
+
+  const hasPendingRequest = selectedCoach ? pendingCoachIds.has(String(selectedCoach.id)) : !!pendingRequest;
 
   const handleRequestSubmit = async () => {
     if (!selectedCoach || !selectedDateObj || !time || hasPendingRequest) return;
@@ -318,7 +357,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
       }, 2000);
     } catch (error) {
       console.error('Error submitting request:', error);
-      alert(error instanceof Error ? error.message : 'Failed to submit coaching request');
+      setRequestError(error instanceof Error ? error.message : 'Failed to submit coaching request');
       setIsRequesting(false);
     }
   };
@@ -467,26 +506,26 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ delay: idx * 0.05 }}
                     whileHover={{ y: -3 }}
-                    className="bg-[#1E1E1F] rounded-2xl border border-white/5 shadow-lg overflow-hidden flex flex-col group"
-                    style={{ transition: 'box-shadow 0.2s' }}
+                    className="bg-[#1E1E1F] rounded-2xl border border-white/5 shadow-lg overflow-hidden flex flex-col group transform-gpu"
+                    style={{ transition: 'box-shadow 0.2s', backfaceVisibility: 'hidden' }}
                   >
                     {/* Image banner */}
-                    <div className="relative h-32 overflow-hidden bg-[#1E1E1F]">
+                    <div className="relative h-32 overflow-hidden bg-[#1E1E1F] isolate">
                       {coach.image ? (
-                        <div className="absolute -inset-px overflow-hidden">
+                        <div className="absolute inset-0 overflow-hidden bg-[#1E1E1F]">
                           <img
                             src={coach.image}
                             alt={coach.name}
-                            className="block w-full h-full object-cover"
-                            style={{ backfaceVisibility: "hidden", transformOrigin: "center" }}
+                            className="block w-full h-full object-cover transform-gpu"
+                            style={{ backfaceVisibility: "hidden", transformOrigin: "center", willChange: "transform" }}
                           />
                         </div>
                       ) : (
-                        <div className="absolute -inset-px flex items-center justify-center" style={{ background: `${color}15` }}>
+                        <div className="absolute inset-0 flex items-center justify-center" style={{ background: `${color}15` }}>
                           <SportIcon sport={coach.sport} size={40} color={color} />
                         </div>
                       )}
-                      <div className="absolute -inset-px bg-gradient-to-t from-[#1E1E1F] via-[#1E1E1F]/20 to-transparent" />
+                      <div className="absolute inset-[-1px] bg-gradient-to-t from-[#1E1E1F] via-[#1E1E1F]/35 to-transparent pointer-events-none" />
 
                       {/* Available badge */}
                       <div className={`absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full backdrop-blur-sm ${
@@ -700,10 +739,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
 
                 <button
                   onClick={() => {
-                    setSelectedDateObj(null);
-                    setTime("");
-                    setMessage("");
-                    setIsRequesting(true);
+                    startCoachBooking(selectedCoach);
                   }}
                   disabled={!selectedCoach.isAvailable || (myCoachProfile?.id === selectedCoach.id) || hasPendingRequest}
                   className="w-full py-3.5 rounded-2xl font-black flex items-center justify-center gap-2 transition-all"
@@ -731,6 +767,40 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
       </AnimatePresence>
 
       {/* ── Request Form Modal ── */}
+      <AnimatePresence>
+        {requestError && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[140] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setRequestError("")}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 12 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border border-red-500/25 bg-[#1E1E1F] p-6 shadow-2xl"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-red-500/12 border border-red-500/25 flex items-center justify-center mb-4">
+                <AlertCircle size={26} className="text-red-400" />
+              </div>
+              <h3 className="text-white font-black mb-2" style={{ fontSize: 19 }}>Request not sent</h3>
+              <p className="text-gray-400 leading-relaxed" style={{ fontSize: 13 }}>{requestError}</p>
+              <button
+                type="button"
+                onClick={() => setRequestError("")}
+                className="w-full mt-5 py-3 rounded-2xl text-white font-black"
+                style={{ background: "linear-gradient(135deg,#ef4444,#dc2626)", fontSize: 13 }}
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isRequesting && selectedCoach && !createdRequest && (
           <motion.div
@@ -763,7 +833,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     <p className="text-gray-400 mt-2" style={{ fontSize: 14 }}>
                       Your session request has been sent to{" "}
                       <span className="text-white font-black">{selectedCoach.name}</span>.
-                      <br />Your coach will review it first. If accepted, My Coaching will show the manual payment instructions and ticket.
+                      <br />Your court is reserved. If accepted, My Coaching will show the coaching ticket.
                     </p>
                   </div>
                 </div>
@@ -880,10 +950,10 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                     <div className="rounded-2xl p-4 border" style={{ background: "rgba(37,99,235,0.08)", borderColor: "rgba(37,99,235,0.24)" }}>
                       <p className="text-blue-300 font-black mb-2" style={{ fontSize: 12 }}>How coaching payment works</p>
                       <div className="space-y-1.5" style={{ color: "#9CA0AD", fontSize: 12, lineHeight: 1.5 }}>
-                        <p>1. Send this session request to the coach.</p>
-                        <p>2. The coach accepts or declines based on availability.</p>
-                        <p>3. If accepted, your coach reserves and pays for the court.</p>
-                        <p>4. You pay only the coaching fee manually, then use the coaching ticket at check-in.</p>
+                        <p>1. Choose a coach, then reserve a matching court.</p>
+                        <p>2. Review the court fee plus coaching fee in one breakdown.</p>
+                        <p>3. The coach accepts or declines the reserved session.</p>
+                        <p>4. If accepted, use your coaching ticket at check-in.</p>
                       </div>
                     </div>
                   </div>
@@ -909,7 +979,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any) =>
                       {hasPendingRequest ? 'You already have a pending request' : 'Send Coaching Request'}
                     </button>
                     <p className="text-center text-gray-500 mt-2" style={{ fontSize: 11 }}>
-                      Payment is manual and only happens after the coach accepts.
+                      You reserve the court and coaching total before the coach reviews it.
                     </p>
                   </div>
                 </>

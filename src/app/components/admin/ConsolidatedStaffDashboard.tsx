@@ -63,6 +63,17 @@ function getManilaTimeKey(date: Date = new Date()): string {
   }).format(date);
 }
 
+function formatLiveOpsTime(value: string | Date): string {
+  const ms = value instanceof Date ? value.getTime() : parseActivityUtcMillis(value);
+  if (Number.isNaN(ms)) return '—';
+  return new Intl.DateTimeFormat('en-PH', {
+    timeZone: LIVE_OPERATIONS_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(ms));
+}
+
 /* ─── Confirm Dialog ─────────────────────────────────────────────── */
 interface ConfirmOptions {
   title: string; body: string; confirmLabel: string;
@@ -330,7 +341,7 @@ function TicketVerification() {
   const [checkingIn, setCheckingIn] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{type: 'check_in' | 'check_out' | 'reject' | 'coaching_check_in', title: string, desc: string} | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{type: 'check_in' | 'check_out' | 'reject' | 'coaching_check_in' | 'coaching_check_out' | 'coaching_reject', title: string, desc: string} | null>(null);
   const [scanMode, setScanMode] = useState<'check_in' | 'check_out'>('check_in');
   const [actionError, setActionError] = useState<string | null>(null);
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
@@ -374,7 +385,7 @@ function TicketVerification() {
           r.id.toUpperCase() === coachingPayload.reqId.toUpperCase() ||
           r.id.slice(0, 8).toUpperCase() === shortId
         );
-        if (coaching) return { found: buildCoachingTicket(coaching), norm, kind: 'coaching_json' as TicketPayloadKind };
+        if (coaching) return { found: buildCoachingTicket(coaching), norm: `COACH-${coaching.id.slice(0, 8).toUpperCase()}`, kind: 'coaching_json' as TicketPayloadKind };
       }
       let found =
         bookings.find(
@@ -415,7 +426,8 @@ function TicketVerification() {
     setNotFoundHint(null);
     const display = raw.trim().length > 56 ? `${raw.trim().slice(0, 56)}…` : raw.trim();
     setQuery(display || raw.trim());
-    const { found, kind } = await resolveTicket(raw);
+    const { found, norm, kind } = await resolveTicket(raw);
+    if (norm) setQuery(norm.length > 56 ? `${norm.slice(0, 56)}...` : norm);
     if (!found) {
       setResult('notfound');
       setNotFoundHint(ticketNotFoundMessage(kind));
@@ -469,6 +481,29 @@ function TicketVerification() {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
         if (cancelled) return;
+        if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+          setCameraError('Camera scanning requires HTTPS. Use the deployed HTTPS site or type the reference code manually.');
+          return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCameraError('This browser does not expose camera access. Try Chrome/Safari on a phone, or type the reference code manually.');
+          return;
+        }
+        try {
+          await navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+            stream.getTracks().forEach((track) => track.stop());
+          });
+        } catch (permissionErr: any) {
+          const msg = String(permissionErr?.name || permissionErr?.message || permissionErr);
+          if (/NotAllowed|Permission|Security/i.test(msg)) {
+            setCameraError('Camera permission is blocked. Allow camera access for this site, then tap Scan QR again.');
+          } else if (/NotFound|DevicesNotFound|Overconstrained/i.test(msg)) {
+            setCameraError('No usable camera was found. Try another device or type the reference code manually.');
+          } else {
+            setCameraError('Camera could not start. Close other camera apps, then tap Scan QR again.');
+          }
+          return;
+        }
         h = new Html5Qrcode(readerId, { verbose: false });
         scannerRef.current = h;
         const config = {
@@ -483,8 +518,8 @@ function TicketVerification() {
         const onOk = async (decodedText: string) => {
           if (decodeLock.current || cancelled) return;
           decodeLock.current = true;
+          const scanner = h;
           scannerRef.current = null;
-          await safeDisposeHtml5Scanner(h);
           h = null;
           if (cancelled) return;
           setCameraOpen(false);
@@ -496,6 +531,7 @@ function TicketVerification() {
             setNotFoundHint('Something went wrong after the scan. Try again or type the reference code.');
           } finally {
             decodeLock.current = false;
+            void safeDisposeHtml5Scanner(scanner);
           }
         };
         const onFail = () => {};
@@ -540,12 +576,14 @@ function TicketVerification() {
     const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
     const t = new Date().toISOString();
     try {
-      await checkInBooking(result.id, staffId);
-    } catch {
-      /* still mark locally if API unavailable */
+      const updated = await checkInBooking(result.id, staffId);
+      updateBooking(result.id, updated);
+      setResult({ ...result, ...updated, checkInStatus: 'checked_in', checkInTime: updated.checkInTime || t, status: 'checked_in' as any });
+    } catch (e: any) {
+      setActionError(e?.message || 'Check-in failed. Please try again.');
+      setCheckingIn(false);
+      return;
     }
-    updateBooking(result.id, { checkInStatus: 'checked_in', checkInTime: t, status: 'checked_in' as any });
-    setResult({ ...result, checkInStatus: 'checked_in', checkInTime: t, status: 'checked_in' as any });
     setCheckingIn(false);
   };
 
@@ -573,14 +611,14 @@ function TicketVerification() {
     const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
     const t = new Date().toISOString();
     try {
-      await checkOutBooking(result.id, staffId);
+      const updated = await checkOutBooking(result.id, staffId);
+      updateBooking(result.id, updated);
+      setResult({ ...result, ...updated, checkOutStatus: 'checked_out', checkOutTime: updated.checkOutTime || t, status: 'completed' } as any);
     } catch (e: any) {
       setActionError(e?.message || 'Check-out failed. Please try again.');
       setCheckingOut(false);
       return;
     }
-    updateBooking(result.id, { checkOutStatus: 'checked_out', checkOutTime: t, status: 'completed' });
-    setResult({ ...result, checkOutStatus: 'checked_out', checkOutTime: t, status: 'completed' } as any);
     setCheckingOut(false);
   };
 
@@ -592,9 +630,10 @@ function TicketVerification() {
     const staffName = user?.name || user?.email || 'Front desk';
     const note = [
       'PAYMENT_VERIFIED_MANUAL',
+      'COACHING_CHECKED_IN',
       `checked_in:${t}`,
       `staff:${staffName}`,
-      'Manual coaching payment verified at the front desk or official GCash QR before session check-in.',
+      'Coaching payment verified at the front desk before session check-in.',
     ].join('\n');
     try {
       await updateRequestStatus(result.id, 'confirmed', note);
@@ -606,6 +645,48 @@ function TicketVerification() {
     }
   };
 
+  const performCoachingCheckOut = async () => {
+    if (!isCoachingResult(result)) return;
+    setActionError(null);
+    setCheckingOut(true);
+    const t = new Date().toISOString();
+    const note = [
+      result.adminNotes || '',
+      'COACHING_CHECKED_OUT',
+      `checked_out:${t}`,
+    ].filter(Boolean).join('\n');
+    try {
+      await updateRequestStatus(result.id, 'completed' as any, note);
+      setResult({ ...result, status: 'completed' as any, adminNotes: note, req: { ...result.req, status: 'completed' as any, adminNotes: note } });
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
+    } catch (e: any) {
+      setActionError(e?.message || 'Could not check out this coaching ticket. Please try again.');
+    } finally {
+      setCheckingOut(false);
+    }
+  };
+
+  const performCoachingReject = async () => {
+    if (!isCoachingResult(result)) return;
+    setActionError(null);
+    setRejecting(true);
+    const t = new Date().toISOString();
+    const note = [
+      result.adminNotes || '',
+      'COACHING_REJECTED_AT_DESK',
+      `rejected_at:${t}`,
+      'Front desk rejected this coaching ticket.',
+    ].filter(Boolean).join('\n');
+    try {
+      await updateRequestStatus(result.id, 'rejected', note);
+      setResult({ ...result, status: 'rejected', adminNotes: note, req: { ...result.req, status: 'rejected', adminNotes: note } });
+    } catch (e: any) {
+      setActionError(e?.message || 'Could not reject this coaching ticket. Please try again.');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   const executeConfirmAction = async () => {
     if (!confirmAction) return;
     const { type } = confirmAction;
@@ -614,15 +695,19 @@ function TicketVerification() {
     if (type === 'reject') await performReject();
     if (type === 'check_out') await performCheckOut();
     if (type === 'coaching_check_in') await performCoachingCheckIn();
+    if (type === 'coaching_check_out') await performCoachingCheckOut();
+    if (type === 'coaching_reject') await performCoachingReject();
   };
 
   const bookingStatus = (result && result !== 'notfound' ? (result as any).status : null) as string | null;
-  const coachingPaymentVerified = isCoachingResult(result) && /PAYMENT_VERIFIED|Manual coaching payment verified/i.test(result.adminNotes || '');
+  const coachingPaymentVerified = isCoachingResult(result) && /PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(result.adminNotes || '');
+  const coachingCheckedOut = isCoachingResult(result) && (/COACHING_CHECKED_OUT|checked_out:/i.test(result.adminNotes || '') || result.status === 'completed');
   const isCompleted = bookingStatus === 'completed';
   const isCheckedIn = bookingStatus === 'checked_in' || coachingPaymentVerified || (result && result !== 'notfound' && (result as any).checkInStatus === 'checked_in');
 
   const canCheckIn = !!result && result !== 'notfound' && !isCoachingResult(result) && !isCompleted && !isCheckedIn && bookingStatus !== 'cancelled';
   const canCheckOut = !!result && result !== 'notfound' && !isCoachingResult(result) && !isCompleted && isCheckedIn;
+  const canCoachingCheckOut = isCoachingResult(result) && coachingPaymentVerified && !coachingCheckedOut;
 
   const formatTime = (t: string) => {
     const raw = String(t || '').trim();
@@ -767,7 +852,7 @@ function TicketVerification() {
               )}
               <span className="text-white font-black" style={{ fontSize: 13 }}>
                 {isCoachingResult(result)
-                  ? (coachingPaymentVerified ? 'Coaching payment verified' : 'Coaching ticket verified')
+                  ? 'Coaching Ticket Verification'
                   : scanMode === 'check_out'
                   ? (result as any).checkOutStatus === 'checked_out'
                     ? 'Already Checked Out'
@@ -786,7 +871,7 @@ function TicketVerification() {
                 { label: 'SPORT', value: result.sport },
                 { label: 'DATE', value: result.date },
                 { label: 'TIME', value: `${formatTime(result.time)}${result.endTime ? ` - ${formatTime(result.endTime)}` : ''}` },
-                { label: 'PAYMENT', value: coachingPaymentVerified ? 'Verified manually' : 'Manual verification needed' },
+                { label: 'STATUS', value: coachingCheckedOut ? 'Checked out' : coachingPaymentVerified ? 'Checked in' : 'Ready for payment' },
               ].map((f) => (
                 <div key={f.label}>
                   <p className="text-gray-600 font-black" style={{ fontSize: 9, letterSpacing: 0.5 }}>{f.label}</p>
@@ -821,38 +906,68 @@ function TicketVerification() {
 
             {isCoachingResult(result) && (
               <div className="px-4 pb-4 space-y-3">
-                {result.status !== 'confirmed' ? (
+                {result.status !== 'confirmed' && result.status !== 'completed' ? (
                   <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2">
                     <p className="text-amber-200 font-black" style={{ fontSize: 12 }}>Coach has not accepted this session yet.</p>
                     <p className="text-amber-100/80 mt-1" style={{ fontSize: 11, lineHeight: 1.45 }}>Do not collect payment or check in until the coach confirms the request.</p>
                   </div>
-                ) : coachingPaymentVerified ? (
-                  <div className="rounded-xl border border-green-500/25 bg-green-500/10 px-3 py-2 text-center">
-                    <p className="text-green-300 font-black" style={{ fontSize: 12 }}>Manual payment verified and coaching ticket checked in.</p>
-                    <p className="text-green-100/75 mt-1" style={{ fontSize: 11 }}>The student and coach can now treat this session as cleared by front desk.</p>
+                ) : coachingCheckedOut ? (
+                  <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-center">
+                    <p className="text-blue-300 font-black" style={{ fontSize: 12 }}>Coaching session checked out.</p>
+                    <p className="text-blue-100/75 mt-1" style={{ fontSize: 11 }}>This coaching ticket is completed.</p>
                   </div>
+                ) : coachingPaymentVerified && scanMode === 'check_in' ? (
+                  <div className="rounded-xl border border-green-500/25 bg-green-500/10 px-3 py-2 text-center">
+                    <p className="text-green-300 font-black" style={{ fontSize: 12 }}>Coaching ticket checked in.</p>
+                    <p className="text-green-100/75 mt-1" style={{ fontSize: 11 }}>Switch to Check-out when the coaching session ends.</p>
+                  </div>
+                ) : coachingPaymentVerified && scanMode === 'check_out' ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAction({
+                      type: 'coaching_check_out',
+                      title: 'Confirm Coaching Check-out',
+                      desc: `Mark ${result.customerName || 'the student'}'s ${result.sport} coaching session as completed?`
+                    })}
+                    disabled={checkingOut || !canCoachingCheckOut}
+                    className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(135deg,#3b82f6,#2563eb)', fontSize: 14, opacity: (checkingOut || !canCoachingCheckOut) ? 0.55 : 1 }}
+                  >
+                    {checkingOut ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing...</> : <><ShieldCheck size={16} /> Mark as Checked-Out</>}
+                  </button>
                 ) : (
                   <>
                     <p className="text-gray-500 text-center leading-relaxed" style={{ fontSize: 11 }}>
-                      Confirm the student paid manually through the front desk or official GCash QR before allowing coaching check-in.
+                      Confirm the student paid at the front desk before allowing coaching check-in.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmAction({
-                        type: 'coaching_check_in',
-                        title: 'Verify Coaching Payment',
-                        desc: `Mark ${result.customerName || 'the student'}'s ${result.sport} coaching session as manually paid and checked in?`
-                      })}
-                      disabled={checkingIn}
-                      className="w-full py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
-                      style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: checkingIn ? 0.55 : 1 }}
-                    >
-                      {checkingIn ? (
-                        <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Verifying...</>
-                      ) : (
-                        <><ShieldCheck size={16} /> Verify Manual Payment</>
-                      )}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction({
+                          type: 'coaching_check_in',
+                          title: 'Verify & Check In',
+                          desc: `Mark ${result.customerName || 'the student'}'s ${result.sport} coaching session as paid and checked in?`
+                        })}
+                        disabled={checkingIn || scanMode === 'check_out'}
+                        className="flex-1 py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
+                        style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: 14, opacity: (checkingIn || scanMode === 'check_out') ? 0.55 : 1 }}
+                      >
+                        {checkingIn ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Verifying...</> : <><ShieldCheck size={16} /> Verify & Check In</>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction({
+                          type: 'coaching_reject',
+                          title: 'Reject Coaching Ticket',
+                          desc: `Reject this coaching ticket for ${result.customerName || 'the student'}?`
+                        })}
+                        disabled={checkingIn || rejecting || scanMode === 'check_out'}
+                        className="px-4 py-3 rounded-xl text-red-300 font-black bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
+                        style={{ fontSize: 14, opacity: (checkingIn || rejecting || scanMode === 'check_out') ? 0.55 : 1 }}
+                      >
+                        {rejecting ? <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> : <><XCircle size={16} /> Reject</>}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -958,7 +1073,7 @@ function TicketVerification() {
               <div className="px-4 pb-4 space-y-3">
                 <p className="text-green-400 font-black text-center" style={{ fontSize: 12 }}>
                   Checked in at{' '}
-                  {new Date(result.checkInTime).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+                  {formatLiveOpsTime(result.checkInTime)}
                 </p>
                 <button
                   type="button"
@@ -974,7 +1089,7 @@ function TicketVerification() {
               <div className="px-4 pb-4 space-y-3">
                 <p className="text-blue-400 font-black text-center" style={{ fontSize: 12 }}>
                   Checked out at{' '}
-                  {new Date((result as any).checkOutTime).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}
+                  {formatLiveOpsTime((result as any).checkOutTime)}
                 </p>
                 <button
                   type="button"
@@ -1074,12 +1189,12 @@ function TicketVerification() {
                 <div className="w-12 h-12 rounded-full flex items-center justify-center mb-4"
                   style={{
                     background: (confirmAction.type === 'check_in' || confirmAction.type === 'coaching_check_in') ? 'rgba(34,197,94,0.1)' :
-                                confirmAction.type === 'reject' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)',
+                                (confirmAction.type === 'reject' || confirmAction.type === 'coaching_reject') ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)',
                   }}
                 >
                   <AlertCircle size={24} className={
                     (confirmAction.type === 'check_in' || confirmAction.type === 'coaching_check_in') ? 'text-green-400' :
-                    confirmAction.type === 'reject' ? 'text-red-400' : 'text-blue-400'
+                    (confirmAction.type === 'reject' || confirmAction.type === 'coaching_reject') ? 'text-red-400' : 'text-blue-400'
                   } />
                 </div>
                 <h3 className="text-white font-black text-lg mb-2">{confirmAction.title}</h3>
@@ -1096,7 +1211,7 @@ function TicketVerification() {
                     className="flex-1 py-3 rounded-xl font-black text-white transition-colors"
                     style={{
                       background: (confirmAction.type === 'check_in' || confirmAction.type === 'coaching_check_in') ? 'linear-gradient(135deg,#22c55e,#16a34a)' :
-                                  confirmAction.type === 'reject' ? 'linear-gradient(135deg,#ef4444,#dc2626)' :
+                                  (confirmAction.type === 'reject' || confirmAction.type === 'coaching_reject') ? 'linear-gradient(135deg,#ef4444,#dc2626)' :
                                   'linear-gradient(135deg,#3b82f6,#2563eb)'
                     }}
                   >
@@ -1315,9 +1430,11 @@ function formatActivityAction(action: string | undefined): string {
 function humanizeBookingStatus(s: string | undefined): string {
   if (!s) return '—';
   const m: Record<string, string> = {
-    confirmed: 'Confirmed',
+    confirmed: 'Reserved',
     checked_in: 'Checked in',
     pending: 'Pending payment',
+    pending_payment: 'Pending',
+    pending_verification: 'Pending review',
     cancelled: 'Cancelled',
     completed: 'Completed',
   };
@@ -1329,12 +1446,22 @@ function formatSourceChannel(raw: unknown): string {
   if (s.includes('walk')) return 'Walk-in (desk)';
   if (s.includes('map_staff')) return 'Facility map (staff)';
   if (s.includes('map_customer')) return 'Facility map (customer app)';
+  if (s.includes('ai') || s.includes('concierge')) return 'Customer app';
   if (s.includes('desk')) return 'Desk';
+  if (s.includes('staff')) return 'Staff dashboard';
   return s ? s.replace(/_/g, ' ') : '—';
 }
 
 type ActivitySortKey = 'loggedAt' | 'action' | 'customer' | 'court' | 'ref';
 type ActivityPeriod = 'today' | '7d' | '30d' | 'all';
+
+function activityTone(actionKey: string) {
+  if (actionKey.includes('check_in')) return { fg: '#86efac', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' };
+  if (actionKey.includes('check_out')) return { fg: '#93c5fd', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.24)' };
+  if (actionKey.includes('reject') || actionKey.includes('cancel')) return { fg: '#fca5a5', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' };
+  if (actionKey.includes('approved')) return { fg: '#c4b5fd', bg: 'rgba(139,92,246,0.12)', border: 'rgba(139,92,246,0.24)' };
+  return { fg: '#fdba74', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.24)' };
+}
 
 function flattenActivityRow(row: any) {
   const b = row.bookings;
@@ -1771,11 +1898,13 @@ function StaffActivityLog() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
-                {filteredRows.map((r, idx) => (
+                {filteredRows.map((r, idx) => {
+                  const tone = activityTone(r.actionKey);
+                  return (
                   <tr
                     key={r.id}
                     onClick={() => setDetailRow(r.raw)}
-                    className={`cursor-pointer transition-colors group ${idx % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'} hover:bg-white/[0.06]`}
+                    className={`cursor-pointer transition-colors group ${idx % 2 === 0 ? 'bg-white/[0.025]' : 'bg-transparent'} hover:bg-blue-500/[0.07]`}
                   >
                     <td className="px-4 py-3 text-gray-600 align-middle">
                       <Eye size={14} className="opacity-0 group-hover:opacity-100 text-blue-400 transition-opacity" />
@@ -1788,22 +1917,23 @@ function StaffActivityLog() {
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-blue-200 px-2.5 py-1.5 font-black" style={{ fontSize: 12 }}>
+                      <div className="rounded-full border px-2.5 py-1.5 font-black inline-flex" style={{ fontSize: 12, color: tone.fg, background: tone.bg, borderColor: tone.border }}>
                         {r.actionLabel}
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle max-w-[320px]">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2 leading-snug" style={{ fontSize: 11 }}>
+                      <div className="text-gray-200 leading-snug font-medium" style={{ fontSize: 12 }}>
                         {r.summaryLine}
                       </div>
+                      <div className="mt-1 text-gray-500 font-black" style={{ fontSize: 10 }}>{r.sourceChannel}</div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-100 px-2.5 py-2 font-black" style={{ fontSize: 12 }}>
+                      <div className="text-gray-100 font-black" style={{ fontSize: 12 }}>
                         {r.customer}
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2" style={{ fontSize: 12 }}>
+                      <div className="text-gray-300" style={{ fontSize: 12 }}>
                         {r.court}
                       </div>
                     </td>
@@ -1813,7 +1943,8 @@ function StaffActivityLog() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1888,7 +2019,7 @@ function StaffActivityLog() {
                           </div>
                         )}
                         <div className="py-2.5 flex justify-between gap-3">
-                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Channel</span>
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Recorded from</span>
                           <span className="text-gray-200 font-black text-right" style={{ fontSize: 12 }}>{detailFlat.sourceChannel}</span>
                         </div>
                         {detailFlat.paymentMethod && detailFlat.paymentMethod !== '—' && (
@@ -2556,7 +2687,7 @@ function FrontDeskInbox() {
   const [confirmAction, setConfirmAction] = useState<{ type: 'cancellation' | 'coaching'; id: string; approved: boolean } | null>(null);
 
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length + DUMMY_CANCELLATIONS.filter(d => d.status === 'pending').length;
-  const pendingCoaching = coachingRequests.filter(r => r.status === 'pending').length + DUMMY_COACHING.filter(d => d.status === 'pending').length;
+  const pendingCoaching = 0;
 
   const [verifyingRequest, setVerifyingRequest] = useState<any>(null);
 
@@ -2614,7 +2745,6 @@ function FrontDeskInbox() {
 
   const SUB_TABS = [
     { id: 'cancellations' as InboxSubTab, label: 'Cancellations',   icon: AlertTriangle, badge: pendingCancellations, color: '#fbbf24' },
-    { id: 'coaching'      as InboxSubTab, label: 'Coaching',        icon: GraduationCap, badge: pendingCoaching,       color: '#60a5fa' },
     { id: 'announcements' as InboxSubTab, label: 'Announcements',   icon: Megaphone,     badge: 0,                    color: '#FF8C00' },
   ];
 
@@ -2739,7 +2869,7 @@ function FrontDeskInbox() {
               const isPending = req.status === 'pending';
               const sportColor = SPORT_COLORS[req.sport] || '#60a5fa';
               const liveReq = coachingRequests.find((r) => r.id === req.id);
-              const paymentVerified = /PAYMENT_VERIFIED|Manual coaching payment verified/i.test(liveReq?.adminNotes || '');
+              const paymentVerified = /PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(liveReq?.adminNotes || '');
               return (
                 <motion.div key={req.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
                   className="rounded-2xl border overflow-hidden" style={{ background: '#111', borderColor: isPending ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.05)' }}>
@@ -2928,6 +3058,17 @@ export function ConsolidatedStaffDashboard({ onLogout }: { onLogout: () => void 
   const [activeTab, setActiveTab] = useState<StaffTab>('operations');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onOpenCalendar = () => setActiveTab('calendar');
+    const onOpenInbox = () => setActiveTab('inbox');
+    window.addEventListener('sportsync:open-master-calendar', onOpenCalendar);
+    window.addEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    return () => {
+      window.removeEventListener('sportsync:open-master-calendar', onOpenCalendar);
+      window.removeEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    };
+  }, []);
 
   const inboxBadge = cancellationRequests.filter(r => r.status === 'pending').length +
     coachingRequests.filter(r => r.status === 'pending').length;

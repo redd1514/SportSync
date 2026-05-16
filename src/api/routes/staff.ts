@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
-import { listStaffOperationsRecent } from '../services/deskBookingService.ts';
+import { listStaffOperationsRecent, refundLoyaltyRedemptionForUnstartedBooking } from '../services/deskBookingService.ts';
 import { RealtimeEventEmitter } from '../services/realtimeEventEmitter.ts';
 
 const staffRouter = new Hono();
@@ -36,9 +36,37 @@ async function sendCoachingNotification(sessionId: string, title: string, desc: 
         sessionId,
       });
     }
+    if (s?.coach_id) {
+      const { data: coach } = await supabase.from('coaches').select('user_id').eq('id', s.coach_id).maybeSingle();
+      if (coach?.user_id) {
+        await RealtimeEventEmitter.notifyUser(String(coach.user_id), 'coaching_front_desk_update', {
+          title,
+          message: desc,
+          type,
+          sessionId,
+        });
+      }
+    }
   } catch (e) {
     console.error('[sendCoachingNotification] error:', e);
   }
+}
+
+async function countActionableBookingRequests() {
+  const { data: reqRows } = await supabase
+    .from('booking_requests')
+    .select('id, booking_id')
+    .eq('status', 'pending')
+    .limit(500);
+  const bookingIds = [...new Set((reqRows || []).map((r: any) => r.booking_id).filter(Boolean))];
+  if (!bookingIds.length) return 0;
+  const { data: bookRows } = await supabase
+    .from('bookings')
+    .select('id,status')
+    .in('id', bookingIds)
+    .in('status', ['confirmed', 'pending', 'pending_verification', 'rescheduled']);
+  const active = new Set((bookRows || []).map((b: any) => b.id));
+  return (reqRows || []).filter((r: any) => active.has(r.booking_id)).length;
 }
 
 /** KPIs for Live Operations + raw staff_operations rows for Activity tab */
@@ -46,14 +74,14 @@ staffRouter.get('/operations', async (c) => {
   const date = c.req.query('date') || new Date().toISOString().split('T')[0];
 
   try {
-    const [{ data: payRows }, { data: bookRows }, { data: pendingReqRows }, ops] = await Promise.all([
+    const [{ data: payRows }, { data: bookRows }, pendingRequests, ops] = await Promise.all([
       supabase.from('payments').select('amount, created_at, completed_at').eq('status', 'completed').limit(800),
       supabase
         .from('bookings')
         .select('id')
         .eq('booking_date', date)
         .not('status', 'eq', 'cancelled'),
-      supabase.from('booking_requests').select('id').eq('status', 'pending').limit(500),
+      countActionableBookingRequests(),
       listStaffOperationsRecent(100),
     ]);
 
@@ -68,8 +96,6 @@ staffRouter.get('/operations', async (c) => {
     }
 
     const bookingsCount = bookRows?.length ?? 0;
-    const pendingRequests = pendingReqRows?.length ?? 0;
-
     return c.json({
       date,
       bookingsCount,
@@ -96,7 +122,7 @@ staffRouter.get('/requests/pending', async (c) => {
   try {
     const { data: reqs, error: reqErr } = await supabase
       .from('booking_requests')
-      .select('id, booking_id, reason, status, request_type, requested_new_date, requested_new_start_time')
+      .select('id, booking_id, reason, status, request_type, requested_new_date, requested_new_start_time, requested_new_end_time')
       .eq('status', 'pending')
       .limit(300);
     if (reqErr) throw reqErr;
@@ -106,7 +132,7 @@ staffRouter.get('/requests/pending', async (c) => {
     if (bookingIds.length) {
       const { data: bookings } = await supabase
         .from('bookings')
-        .select('id, booking_date, start_time, end_time, court_id, user_id')
+        .select('id, booking_date, start_time, end_time, court_id, user_id, status')
         .in('id', bookingIds);
       for (const b of bookings || []) bookingsMap[b.id] = b;
     }
@@ -130,6 +156,7 @@ staffRouter.get('/requests/pending', async (c) => {
 
     for (const r of reqs || []) {
       const b = bookingsMap[r.booking_id];
+      if (!b || ['cancelled', 'checked_in', 'completed', 'rejected'].includes(String(b.status || ''))) continue;
       const u = b ? usersMap[b.user_id] : null;
       const court = b ? courtsMap[b.court_id] : null;
       const base = {
@@ -138,14 +165,40 @@ staffRouter.get('/requests/pending', async (c) => {
         customerName: u?.full_name || u?.email || 'Customer',
         date: b?.booking_date || '',
         time: b?.start_time || '',
+        endTime: b?.end_time || '',
         court: court?.name || b?.court_id || 'Court',
         reason: r.reason || '',
         status: r.status,
         requestType: r.request_type,
         requestedNewDate: r.requested_new_date || null,
         requestedNewStartTime: r.requested_new_start_time || null,
+        requestedNewEndTime: r.requested_new_end_time || null,
+        availabilityStatus: 'not_checked',
+        availabilityMessage: '',
       };
-      if (r.request_type === 'reschedule') reschedules.push(base);
+      if (r.request_type === 'reschedule') {
+        if (b?.court_id && r.requested_new_date && r.requested_new_start_time && r.requested_new_end_time) {
+          const { data: conflicts } = await supabase
+            .from('bookings')
+            .select('id, start_time, end_time, status')
+            .eq('court_id', b.court_id)
+            .eq('booking_date', r.requested_new_date)
+            .neq('id', r.booking_id)
+            .in('status', ['confirmed', 'checked_in', 'pending', 'pending_verification', 'rescheduled']);
+          const overlap = (conflicts || []).some((row: any) =>
+            String(row.start_time) < String(r.requested_new_end_time) &&
+            String(row.end_time) > String(r.requested_new_start_time),
+          );
+          base.availabilityStatus = overlap ? 'conflict' : 'available';
+          base.availabilityMessage = overlap
+            ? 'Requested slot conflicts with another booking on this court.'
+            : 'Requested slot is available on this court.';
+        } else if (r.request_type === 'reschedule') {
+          base.availabilityStatus = 'incomplete';
+          base.availabilityMessage = 'Requested schedule is incomplete.';
+        }
+        reschedules.push(base);
+      }
       else cancellations.push(base);
     }
 
@@ -168,7 +221,7 @@ staffRouter.get('/requests/pending', async (c) => {
       for (const coach of coaches || []) coachingCoaches[coach.id] = coach;
     }
     const coaching = (coachingRows || [])
-      .filter((row: any) => !/PAYMENT_VERIFIED|Manual coaching payment verified/i.test(String(row.admin_notes || row.notes || '')))
+      .filter((row: any) => !/PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(String(row.admin_notes || row.notes || '')))
       .map((row: any) => {
         const coach = coachingCoaches[row.coach_id];
         const student = coachingUsers[row.user_id];
@@ -217,6 +270,7 @@ staffRouter.put('/requests/:id/cancel/approve', async (c) => {
       .eq('id', id);
 
     if (br.booking_id) {
+      await refundLoyaltyRedemptionForUnstartedBooking(br.booking_id);
       await supabase.from('bookings').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', br.booking_id);
       if (isUuid(staffId)) {
         await supabase.from('staff_operations').insert({
@@ -294,6 +348,13 @@ staffRouter.put('/requests/:id/reschedule/approve', async (c) => {
     if (br.status !== 'pending') return c.json({ error: 'Request already processed' }, 400);
     if (!br.requested_new_date || !br.requested_new_start_time || !br.requested_new_end_time) {
       return c.json({ error: 'Requested schedule is incomplete.' }, 400);
+    }
+    const toMinutes = (value: string) => {
+      const [h = '0', m = '0'] = String(value || '').slice(0, 5).split(':');
+      return Number(h) * 60 + Number(m);
+    };
+    if (toMinutes(br.requested_new_start_time) < 7 * 60 || toMinutes(br.requested_new_end_time) > 23 * 60) {
+      return c.json({ error: 'Requested schedule must fit within facility hours: 7:00 AM to 11:00 PM.' }, 400);
     }
 
     const { data: currentBooking, error: currentErr } = await supabase
@@ -413,7 +474,7 @@ staffRouter.put('/requests/:id/coaching/verify', async (c) => {
     if (!session) return c.json({ error: 'Coaching session not found' }, 404);
     if (session.status !== 'approved') return c.json({ error: 'Coach has not accepted this request yet.' }, 400);
 
-    const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nManual coaching payment verified at the front desk or official GCash QR before session check-in.`.trim();
+    const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nCOACHING_CHECKED_IN\nCoaching payment verified at the front desk before session check-in.`.trim();
     const { error } = await supabase
       .from('coaching_sessions')
       .update({ admin_notes: note, updated_at: new Date().toISOString() })

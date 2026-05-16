@@ -63,6 +63,11 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
       customerName: b.customerName || b.customer_name || 'Customer',
       customerPhone: b.customerPhone || b.customer_phone || '',
       cancellationReason: b.cancellationReason || b.cancellation_reason || '',
+      checkInStatus: b.checkInStatus || b.check_in_status || (b.status === 'checked_in' ? 'checked_in' : 'none'),
+      checkOutStatus: b.checkOutStatus || b.check_out_status || (b.status === 'completed' ? 'checked_out' : 'none'),
+      checkInTime: b.checkInTime || b.check_in_time,
+      checkOutTime: b.checkOutTime || b.check_out_time,
+      facilityMapId: b.facilityMapId || b.facility_map_id,
       userId: b.user_id || b.userId || '',
     };
   }, []);
@@ -182,6 +187,15 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
   }, [userId, options?.invalidateOnUnmount]);
 
   const normalizedRealtime = (Array.isArray(realtimeBookings) ? realtimeBookings : []).map(normalizeBooking);
+  const mergedById = new Map<string, any>();
+  apiBookings.forEach((booking) => {
+    if (booking?.id) mergedById.set(String(booking.id), booking);
+  });
+  normalizedRealtime.forEach((booking) => {
+    if (!booking?.id) return;
+    const existing = mergedById.get(String(booking.id));
+    mergedById.set(String(booking.id), { ...existing, ...booking });
+  });
   const bookings = useMemo(() => {
     const byId = new Map<string, ReturnType<typeof normalizeBooking>>();
     normalizedRealtime.forEach((b) => {

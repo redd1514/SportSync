@@ -61,6 +61,27 @@ notificationsRouter.put('/:userId/mark-all-read', async (c) => {
   }
 });
 
+notificationsRouter.delete('/:userId', async (c) => {
+  try {
+    const rawUserId = c.req.param('userId');
+    const userId = await resolveRecipientId(rawUserId);
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('recipient_id', userId);
+    if (error) throw error;
+
+    await supabase
+      .from('app_kv_store')
+      .delete()
+      .in('key', Array.from(new Set([`notifications:${userId}`, `notifications:${rawUserId}`])));
+
+    return c.json({ success: true });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to clear notifications' }, 400);
+  }
+});
+
 notificationsRouter.put('/:notificationId', async (c) => {
   try {
     const id = c.req.param('notificationId');

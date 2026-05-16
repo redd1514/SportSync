@@ -21,6 +21,15 @@ function notesFromProofAndLinked(paymentProofUrl?: string, linkedBookingId?: str
   return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
+function linkedBookingIdFromNotes(notes?: string | null): string | undefined {
+  const match = String(notes || '').match(/linked_booking:([0-9a-f-]+)/i);
+  return match?.[1];
+}
+
+function isValidUuid(value: string | undefined | null): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
 async function notifyUser(userId: string | undefined, eventType: string, title: string, message: string, extra?: Record<string, unknown>) {
   if (!userId) return;
   await RealtimeEventEmitter.notifyUser(userId, eventType, {
@@ -165,11 +174,12 @@ export const coachingSessionService = {
       .from('coaching_sessions')
       .select('id')
       .eq('user_id', user_id)
+      .eq('coach_id', coach_id)
       .eq('status', 'pending')
       .limit(1);
     if (pendingErr) throw pendingErr;
     if ((activePending || []).length > 0) {
-      throw new Error('You already have a pending coaching request. Please wait for the coach to accept or decline before requesting another session.');
+      throw new Error('You already have a pending request with this coach. Please wait for the coach to accept or decline before requesting them again.');
     }
 
     const { data: coachRow, error: coachErr } = await supabase
@@ -271,21 +281,22 @@ export const coachingSessionService = {
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
 
-    if (dbStatus === 'approved') {
+    const nextStatus = typeof update.status === 'string' ? String(update.status) : undefined;
+    if (nextStatus === 'approved' || nextStatus === 'confirmed') {
       await notifyUser(
         data?.user_id,
         'coaching_request_approved',
         'Coach accepted your session',
-        'Your coach reserved the court. Open My Coaching to view your coaching fee and ticket.',
-        { sessionId: data.id, status: dbStatus },
+        'Your coach accepted your reserved coaching booking. Open My Coaching to view your ticket.',
+        { sessionId: data.id, status: nextStatus },
       );
-    } else if (dbStatus === 'rejected') {
+    } else if (nextStatus === 'rejected') {
       await notifyUser(
         data?.user_id,
         'coaching_request_rejected',
         'Coach declined your session',
         'Your coaching request was declined. You can request another coach or choose a different time.',
-        { sessionId: data.id, status: dbStatus },
+        { sessionId: data.id, status: nextStatus },
       );
     }
     
@@ -294,13 +305,14 @@ export const coachingSessionService = {
 
   async updateSessionStatus(
     id: string,
-    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved',
+    status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'approved' | 'completed',
     adminNotes?: string,
+    staffId?: string,
   ): Promise<CoachingSessionRow> {
     // Map UI status → DB status
     // DB only knows: pending | approved | rejected | cancelled
     const dbStatus =
-      status === 'confirmed' || status === 'approved'
+      status === 'confirmed' || status === 'approved' || status === 'completed'
         ? 'approved'
         : status === 'cancelled'
           ? 'cancelled'
@@ -308,8 +320,13 @@ export const coachingSessionService = {
             ? 'rejected'
             : 'pending';
 
+    let nextAdminNotes = adminNotes;
+    if (status === 'completed' && !/COACHING_CHECKED_OUT|checked_out:/i.test(String(nextAdminNotes || ''))) {
+      nextAdminNotes = `${nextAdminNotes || ''}\nCOACHING_CHECKED_OUT\nchecked_out:${new Date().toISOString()}`.trim();
+    }
+
     const update: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
-    if (adminNotes !== undefined) update.admin_notes = adminNotes;
+    if (nextAdminNotes !== undefined) update.admin_notes = nextAdminNotes;
     
     const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase
@@ -323,7 +340,134 @@ export const coachingSessionService = {
     
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
+
+    const linkedBookingId = linkedBookingIdFromNotes(data?.notes || oldData?.notes);
+    if (dbStatus === 'approved') {
+      if (linkedBookingId) {
+        const linkedStatus = status === 'completed'
+          ? 'completed'
+          : /COACHING_CHECKED_IN|checked_in:/i.test(String(nextAdminNotes || data?.admin_notes || ''))
+            ? 'checked_in'
+            : 'confirmed';
+        await supabase
+          .from('bookings')
+          .update({ status: linkedStatus, updated_at: new Date().toISOString() })
+          .eq('id', linkedBookingId)
+          .in('status', ['pending', 'confirmed', 'pending_verification', 'checked_in']);
+      }
+      if (oldData?.status !== 'approved') {
+        const { data: coachRow } = await supabase.from('coaches').select('name, user_id').eq('id', data?.coach_id).maybeSingle();
+        const facility = linkedBookingId ? await supabase
+          .from('bookings')
+          .select('courts(name)')
+          .eq('id', linkedBookingId)
+          .maybeSingle() : null;
+        const facilityName = (facility as any)?.data?.courts?.name || 'the reserved facility';
+        await notifyUser(
+          data?.user_id,
+          'coaching_request_approved',
+          'Coach accepted your session',
+          `Your coach accepted your session at ${facilityName}. Please pay at the front desk before check-in.`,
+          { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+        await notifyUser(
+          coachRow?.user_id,
+          'coaching_request_approved_coach',
+          'Session accepted',
+          `You accepted the coaching session at ${facilityName}. Please wait for the student to pay at the front desk.`,
+          { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+      }
+      if (status === 'completed') {
+        const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', data?.coach_id).maybeSingle();
+        await notifyUser(
+          data?.user_id,
+          'coaching_session_completed',
+          'Coaching session completed',
+          'Your coaching session has been checked out by the front desk. You can now rate your coach.',
+          { sessionId: data.id, status: 'completed', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+        await notifyUser(
+          coachRow?.user_id,
+          'coaching_session_completed_coach',
+          'Coaching session completed',
+          'Front desk marked your coaching session as completed. Any student review will appear in My Coaching.',
+          { sessionId: data.id, status: 'completed', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+        if (linkedBookingId && isValidUuid(staffId)) {
+          await supabase.from('staff_operations').insert({
+            staff_id: staffId,
+            booking_id: linkedBookingId,
+            action: 'coaching_check_out',
+            notes: `Coaching session checked out at ${new Date().toISOString()}`,
+          });
+        }
+      }
+    } else if (dbStatus === 'rejected' || dbStatus === 'cancelled') {
+      if (linkedBookingId) {
+        await supabase
+          .from('bookings')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', linkedBookingId)
+          .in('status', ['pending', 'confirmed', 'pending_verification']);
+      }
+      await notifyUser(
+        data?.user_id,
+        'coaching_request_rejected',
+        dbStatus === 'cancelled' ? 'Coaching session cancelled' : 'Coach declined your session',
+        dbStatus === 'cancelled'
+          ? 'Your coaching session was cancelled.'
+          : 'Your coaching request was declined. The linked court reservation was released.',
+        { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+      );
+    }
     
+    return data as CoachingSessionRow;
+  },
+
+  async submitReview(id: string, userId: string, rating: number, comment?: string): Promise<CoachingSessionRow> {
+    const reviewer_id = await resolveUserRowId(String(userId));
+    const { data: session, error: sErr } = await supabase
+      .from('coaching_sessions')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (sErr) throw sErr;
+    if (!session) throw new Error('Coaching session not found');
+    if (String(session.user_id) !== reviewer_id) throw new Error('Only the student can review this coach.');
+    if (!/COACHING_CHECKED_OUT|checked_out:/i.test(String(session.admin_notes || ''))) {
+      throw new Error('Reviews open after front desk checkout.');
+    }
+    const cleanRating = Math.max(1, Math.min(5, Math.round(Number(rating || 0))));
+    const linkedBookingId = linkedBookingIdFromNotes(session.notes);
+    await supabase.from('reviews').insert({
+      reviewer_id,
+      coach_id: session.coach_id,
+      booking_id: linkedBookingId || null,
+      rating: cleanRating,
+      comment: String(comment || '').trim() || null,
+    });
+    const reviewedAt = new Date().toISOString();
+    const reviewNote = `COACHING_REVIEW:${JSON.stringify({ rating: cleanRating, comment: String(comment || '').trim(), reviewedAt })}`;
+    const adminNotes = `${session.admin_notes || ''}\n${reviewNote}`.trim();
+    const { data, error } = await supabase
+      .from('coaching_sessions')
+      .update({ admin_notes: adminNotes, updated_at: reviewedAt })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', session.coach_id).maybeSingle();
+    await notifyUser(
+      coachRow?.user_id,
+      'coaching_review_received',
+      'New coaching review',
+      `A student rated your coaching session ${cleanRating}/5.`,
+      { sessionId: id, rating: cleanRating, targetTab: 'coaching', targetSub: 'mycoaching' },
+    );
+
+    await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, session);
     return data as CoachingSessionRow;
   },
 

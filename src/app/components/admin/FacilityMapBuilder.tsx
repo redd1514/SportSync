@@ -12,7 +12,10 @@ import {
 } from 'lucide-react';
 import {
   useFacilityMap, CourtBlock, FacilityMap, getSportMapColor,
+  resolveCourtSportColor, FACILITY_COURT_FILL_OPACITY,
+  FACILITY_COURT_SHEEN_OPACITY, FACILITY_COURT_SELECTED_FILL_OPACITY,
 } from '../../contexts/FacilityMapContext';
+import { FacilityMapCourtMarkings, FACILITY_COURT_SHEEN_GRADIENT } from '../shared/facilityMapCourtMarkings';
 import { useAddons } from '../../contexts/AddonsContext';
 import { SportIcon } from '../SportIcons';
 import { ConfirmDialog, ConfirmDialogOptions } from '../shared/ConfirmDialog';
@@ -52,6 +55,7 @@ const HANDLE_CURSORS: Record<HandleId,string> = {
 
 const snap  = (v: number) => Math.round(v / GRID) * GRID;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const clipIdFor = (id: string) => `clip-${String(id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
 function handlePositions(b: CourtBlock) {
   return [
@@ -484,7 +488,7 @@ function InspectorPanel({ block, canvasW, canvasH, allBlocks, onUpdate, onDelete
 }) {
   const isBuiltIn = SPORTS.some(s => s.sport === block.sport);
   const isCustom  = !isBuiltIn;
-  const color = isCustom ? (customSports.find(c=>c.name===block.sport)?.color ?? '#6b7280') : getSportMapColor(block.sport);
+  const color = resolveCourtSportColor(block, customSports);
   const [localName, setLocalName] = useState(block.name);
   const [localSport, setLocalSport] = useState(block.sport);
   useEffect(()=>{ setLocalName(block.name); setLocalSport(block.sport); },[block.id, block.name, block.sport]);
@@ -1335,8 +1339,9 @@ export function FacilityMapBuilder() {
             onClick={(e)=>{ e.stopPropagation(); setSelectedId(null); setCtxMenu(null); }}
           >
             <defs>
+              {FACILITY_COURT_SHEEN_GRADIENT}
               {blocks.map(b=>(
-                <clipPath key={`clip-${b.id}`} id={`clip-${b.id}`}>
+                <clipPath key={clipIdFor(b.id)} id={clipIdFor(b.id)}>
                   <rect x={b.x+4} y={b.y+4} width={Math.max(0,b.width-8)} height={Math.max(0,b.height-8)}/>
                 </clipPath>
               ))}
@@ -1388,39 +1393,53 @@ export function FacilityMapBuilder() {
 
             {/* Courts */}
             {blocks.map(b=>{
-              // Use customColor if set, or look up from customSports, else default sport color
-              const color = b.customColor
-                || customSports.find(cs=>cs.name===b.sport)?.color
-                || getSportMapColor(b.sport);
+              const color = resolveCourtSportColor(b, customSports);
               const isSel=selectedId===b.id;
               const isDrag=dragState?.id===b.id;
               const isMaint=b.status==='maintenance';
               const handles=isSel?handlePositions(b):[];
               const showText=b.width>=50&&b.height>=36;
               const showSub=b.width>=70&&b.height>=60;
+              const clipId = clipIdFor(b.id);
+              const nameFont = Math.max(7, Math.min(11, (b.width - 12) / Math.max(7, b.name.length) * 1.55));
+              const sportFont = Math.max(6, Math.min(9, (b.width - 12) / Math.max(7, b.sport.length) * 1.35));
+              const fillOpacity = isMaint ? 0.22 : isDrag ? 0.6 : isSel ? FACILITY_COURT_SELECTED_FILL_OPACITY : FACILITY_COURT_FILL_OPACITY;
 
               return (
                 <g key={b.id} style={{cursor:isDrag?'grabbing':isSel?'grab':'pointer'}}
                   onClick={e=>e.stopPropagation()}>
-                  {isSel&&<rect x={b.x-4} y={b.y-4} width={b.width+8} height={b.height+8} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5/zoom} rx="13"/>}
+                  {isSel && (
+                    <rect x={b.x-6} y={b.y-6} width={b.width+12} height={b.height+12}
+                      fill={`${color}25`} stroke={color} strokeWidth={1.5/zoom} rx="13" opacity="0.7"
+                      style={{ pointerEvents: 'none' }} />
+                  )}
                   <rect x={b.x} y={b.y} width={b.width} height={b.height}
-                    fill={isMaint?'#374151':color} opacity={isDrag?.6:isMaint?.35:.82}
-                    stroke={isSel?'white':`${color}55`} strokeWidth={isSel?2/zoom:1/zoom} rx="8"
+                    fill={isMaint ? '#374151' : color}
+                    opacity={fillOpacity}
+                    stroke={color}
+                    strokeWidth={isSel ? 2.5/zoom : 1.5/zoom}
+                    rx="8"
                     onPointerDown={e=>handleCourtPointerDown(e,b.id)}
                     onContextMenu={e=>{ e.preventDefault(); e.stopPropagation(); setSelectedId(b.id); setCtxMenu({id:b.id,px:e.clientX,py:e.clientY}); }}
                   />
-                  {b.width>=180&&!isMaint&&(
-                    <>
-                      <line x1={b.x+b.width/2} y1={b.y+12} x2={b.x+b.width/2} y2={b.y+b.height-12} stroke="white" strokeWidth={1.5/zoom} opacity="0.09"/>
-                      <circle cx={b.x+b.width/2} cy={b.y+b.height/2} r={Math.min(b.width,b.height)*0.2} fill="none" stroke="white" strokeWidth={1.5/zoom} opacity="0.09"/>
-                    </>
+                  {!isMaint && (
+                    <g clipPath={`url(#${clipId})`} style={{ pointerEvents: 'none' }}>
+                      <rect x={b.x} y={b.y} width={b.width} height={b.height} fill="url(#facilityCourtSheen)" opacity={FACILITY_COURT_SHEEN_OPACITY} />
+                      <FacilityMapCourtMarkings block={b} />
+                    </g>
+                  )}
+                  {isMaint&&(
+                    <g clipPath={`url(#${clipId})`} style={{ pointerEvents: 'none' }}>
+                      <path d={`M ${b.x} ${b.y + b.height} L ${b.x + b.width} ${b.y}`} stroke="rgba(255,255,255,0.14)" strokeWidth={1.5/zoom} />
+                      <path d={`M ${b.x} ${b.y} L ${b.x + b.width} ${b.y + b.height}`} stroke="rgba(255,255,255,0.14)" strokeWidth={1.5/zoom} />
+                    </g>
                   )}
                   {/* Clipped text – never overflows court */}
                   {showText&&(
                     <text x={b.x+b.width/2} y={b.y+b.height/2-(showSub?8:0)}
                       textAnchor="middle" dominantBaseline="middle"
-                      fill="white" fontSize={11} fontWeight="800"
-                      clipPath={`url(#clip-${b.id})`}
+                      fill="white" fontSize={nameFont} fontWeight="800"
+                      clipPath={`url(#${clipId})`}
                       style={{userSelect:'none',pointerEvents:'none'}}>
                       {b.name}
                     </text>
@@ -1428,8 +1447,8 @@ export function FacilityMapBuilder() {
                   {showSub&&(
                     <text x={b.x+b.width/2} y={b.y+b.height/2+9}
                       textAnchor="middle" dominantBaseline="middle"
-                      fill="white" fontSize={9} opacity="0.5"
-                      clipPath={`url(#clip-${b.id})`}
+                      fill="white" fontSize={sportFont} opacity="0.5"
+                      clipPath={`url(#${clipId})`}
                       style={{userSelect:'none',pointerEvents:'none'}}>
                       {isMaint?'MAINTENANCE':b.sport}
                     </text>

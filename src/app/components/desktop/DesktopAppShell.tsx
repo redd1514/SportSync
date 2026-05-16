@@ -24,7 +24,9 @@ import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
-import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
+import { useUserAPI } from "../../hooks/useUserAPI";
+import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
+import { LOYALTY_DISCOUNT_PERCENT, loyaltyRewardsAvailable } from "../../constants/loyalty";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -253,12 +255,19 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
               </div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-gray-400" style={{ fontSize: 12 }}>Points</span>
-                <span className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{user.loyaltyPoints}/10</span>
+                <motion.span key={loyaltyPoints} initial={{ scale: 0.82 }} animate={{ scale: 1 }} className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{loyaltyPoints}/10</motion.span>
               </div>
-              <div className="w-full h-2 bg-[#252525] rounded-full overflow-hidden">
-                <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min((user.loyaltyPoints / 10) * 100, 100)}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg,#FFD700,#FF8C00)" }} />
+              <LoyaltyProgressBar points={loyaltyPoints} height={8} />
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className={loyaltyRewards > 0 ? "text-yellow-300" : "text-gray-600"} style={{ fontSize: 11 }}>
+                  {loyaltyRewards > 0
+                    ? `${loyaltyRewards} reward · ${LOYALTY_DISCOUNT_PERCENT}% off court`
+                    : `${10 - (loyaltyPoints % 10 || 10)} more for ${LOYALTY_DISCOUNT_PERCENT}% off`}
+                </p>
+                <button type="button" onClick={resetMyLoyalty} className="rounded-lg px-2 py-1 text-gray-500 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
+                  Reset
+                </button>
               </div>
-              <p className="text-gray-600 mt-2" style={{ fontSize: 11 }}>{user.loyaltyPoints >= 10 ? "🎉 Eligible for a FREE session!" : `${10 - user.loyaltyPoints} more to earn a free session`}</p>
             </div>
           )}
         </div>
@@ -271,32 +280,51 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
 /* ─── Main shell ─── */
 interface DesktopAppShellProps { onLogout: () => void; }
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
-  const { user, logout, isAdmin, isStaff } = useUser();
+  const { user, logout, isAdmin, isStaff, updateUser } = useUser();
+  const { resetLoyaltyPoints } = useUserAPI();
   const { findCoachByEmail } = useCoaching();
+  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : null;
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [clearingNotifs, setClearingNotifs] = useState(false);
+  const [notifClearError, setNotifClearError] = useState("");
+  const [showClearNotifConfirm, setShowClearNotifConfirm] = useState(false);
 
   // From Incoming: Announcement and Booking logic
-  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
+  const { announcements, dismissAnnouncement, clearUserNotifications, undismissedCount } = useAnnouncements();
   const [bookingPrefill, setBookingPrefill] = useState<{
     sport: string;
     date: string;
     time: string;
+    coachId?: string;
     coachingSessionId?: string;
     coachingStudentName?: string;
     coachingStudentId?: string;
     coachName?: string;
     coachHourlyRate?: number;
     durationHours?: number;
+    coachingMessage?: string;
   } | undefined>(undefined);
 
   // From Incoming: Profile Photo logic
   const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
+  const loyaltyPoints = user?.loyaltyPoints || 0;
+  const loyaltyRewards = Math.floor(loyaltyPoints / 10);
+  const loyaltyProgress = loyaltyRewards > 0 ? 100 : Math.min((loyaltyPoints / 10) * 100, 100);
+  const resetMyLoyalty = async () => {
+    if (!user) return;
+    try {
+      await resetLoyaltyPoints(user.id);
+    } catch {
+      /* demo fallback */
+    }
+    updateUser(user.id, { loyaltyPoints: 0 });
+  };
 
   useEffect(() => {
     setProfilePhoto(loadProfilePhoto(user?.id));
@@ -322,6 +350,14 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
     setActiveTab(t);
     if (typeof sub === "string") setActiveSub(prev => ({ ...prev, [t]: sub }));
     setMobileOpen(false);
+  };
+
+  const openNotification = (ann: (typeof announcements)[number]) => {
+    if (!ann.dismissed) dismissAnnouncement(ann.id);
+    if (ann.actionTab === "coaching") navigate("coaching", ann.actionSub || "mycoaching");
+    else if (ann.actionTab === "booking") navigate("booking", ann.actionSub || "mybookings");
+    else navigate("home");
+    setShowNotifs(false);
   };
 
   const getCurrentSub = () => activeSub[activeTab] || "";
@@ -358,7 +394,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                     mode="customer"
                     compact
                     prefill={bookingPrefill}
-                    onExitCoachingReservation={bookingPrefill?.coachingSessionId ? () => {
+                    onExitCoachingReservation={bookingPrefill?.coachingSessionId || bookingPrefill?.coachId ? () => {
                       setBookingPrefill(undefined);
                       setActiveTab("coaching");
                       setActiveSub(prev => ({ ...prev, coaching: "mycoaching" }));
@@ -381,7 +417,10 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
               transition={{ duration: 0.15 }}
               className="h-full overflow-y-auto custom-scrollbar"
             >
-              {sub === "services" && <UserCoachingServices onNavigate={(t) => { if (t === "mycoaching") navigate("coaching", "mycoaching"); }} />}
+              {sub === "services" && <UserCoachingServices onNavigate={(t, params) => {
+                if (t === "mycoaching") navigate("coaching", "mycoaching");
+                else if (t === "book_court") navigate("book_court", params);
+              }} />}
               {sub === "mycoaching" && <UserMyCoaching onNavigate={(t, params) => { 
                 if (t === "coaches") navigate("coaching", "services"); 
                 else if (t === "book_court") navigate("book_court", params);
@@ -686,59 +725,41 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                   style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)", position: 'fixed', top: '60px', right: '16px' }}
                   onClick={e => e.stopPropagation()}
                 >
-                  <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between">
+                  <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between gap-3">
                     <p className="text-white font-black" style={{ fontSize: 14 }}>Notifications</p>
-                    <button onClick={() => setShowNotifs(false)} className="text-gray-600 hover:text-white">
-                      <X size={14} />
-                    </button>
-                  </div>
-                  {announcements.length === 0 ? (
-                    <div className="px-4 py-10 text-center">
-                      <Megaphone size={28} className="mx-auto mb-2 text-gray-700" />
-                      <p className="text-gray-500" style={{ fontSize: 12 }}>No announcements yet</p>
-                    </div>
-                  ) : (
-                    announcements.map((ann) => {
-                      const accent = ANNOUNCEMENT_COLORS[ann.type]?.text || "#FF8C00";
-                      return (
+                    <div className="flex items-center gap-2">
+                      {announcements.length > 0 && (
                         <button
-                          key={ann.id}
+                          disabled={clearingNotifs}
                           onClick={() => {
-                            if (!ann.dismissed) dismissAnnouncement(ann.id);
-                            navigate("home");
-                            setShowNotifs(false);
+                            setNotifClearError("");
+                            setShowClearNotifConfirm(true);
                           }}
-                          className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
+                          className="px-2.5 py-1 rounded-lg border border-white/10 text-gray-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10 font-black"
+                          style={{ fontSize: 10 }}
                         >
-                          <div
-                            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                            style={{ backgroundColor: `${accent}18` }}
-                          >
-                            <Megaphone size={14} style={{ color: accent }} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white font-black" style={{ fontSize: 12 }}>{ann.title}</p>
-                            {ann.message ? (
-                              <p className="text-gray-500 line-clamp-2" style={{ fontSize: 11 }}>{ann.message}</p>
-                            ) : null}
-                            <p className="text-gray-700" style={{ fontSize: 10 }}>{formatRelativeTime(ann.createdAt)}</p>
-                          </div>
-                          {!ann.dismissed && (
-                            <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: accent }} />
-                          )}
+                          {clearingNotifs ? "Clearing..." : "Clear"}
                         </button>
-                      );
-                    })
-                  )}
+                      )}
+                      <button onClick={() => setShowNotifs(false)} className="text-gray-600 hover:text-white">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {notifClearError && (
+                      <div className="mx-4 mt-3 rounded-xl px-3 py-2 text-red-200 font-black border border-red-500/25 bg-red-500/10" style={{ fontSize: 11 }}>
+                        {notifClearError}
+                      </div>
+                    )}
                     {announcements.length === 0 ? (
                       <div className="py-8 text-center text-gray-500" style={{ fontSize: 13 }}>No notifications</div>
                     ) : announcements.map(n => (
-                      <button key={n.id} onClick={() => { dismissAnnouncement(n.id); setShowNotifs(false); }}
+                      <button key={n.id} onClick={() => openNotification(n)}
                         className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
                       >
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `rgba(255,140,0,0.15)` }}>
-                          <Bell size={14} style={{ color: '#FF8C00' }} />
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `${(ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00')}18` }}>
+                          {n.id.startsWith("notif:") ? <Bell size={14} style={{ color: ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00' }} /> : <Megaphone size={14} style={{ color: ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00' }} />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
@@ -762,6 +783,64 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
       </div>
 
       {/* Floating AI Chat — Customer only (admin/staff return early above) */}
+      <AnimatePresence>
+        {showClearNotifConfirm && (
+          <div className="fixed inset-0 z-[220] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+              onClick={() => setShowClearNotifConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-[#171717] p-6 shadow-2xl"
+            >
+              <p className="text-white font-black" style={{ fontSize: 18 }}>Clear notifications?</p>
+              <p className="mt-2 text-gray-400" style={{ fontSize: 13, lineHeight: 1.5 }}>
+                This removes all visible notifications and clears the Supabase notification records for your account.
+              </p>
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  disabled={clearingNotifs}
+                  onClick={() => setShowClearNotifConfirm(false)}
+                  className="flex-1 rounded-2xl bg-white/8 py-3 text-gray-300 font-black"
+                  style={{ fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={clearingNotifs}
+                  onClick={async () => {
+                    setClearingNotifs(true);
+                    setNotifClearError("");
+                    try {
+                      await clearUserNotifications();
+                      setShowClearNotifConfirm(false);
+                      setShowNotifs(false);
+                    } catch (error: any) {
+                      setNotifClearError(error?.message || "Could not clear notifications.");
+                    } finally {
+                      setClearingNotifs(false);
+                    }
+                  }}
+                  className="flex-1 rounded-2xl py-3 text-white font-black disabled:opacity-60"
+                  style={{ fontSize: 13, background: "linear-gradient(135deg,#ef4444,#dc2626)" }}
+                >
+                  {clearingNotifs ? "Clearing..." : "Clear all"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <FloatingAIChat />
       <FloatingAIChat
         onNavigate={(dest) => {
           if (dest === 'mybookings') navigate('booking', 'mybookings');

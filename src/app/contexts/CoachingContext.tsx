@@ -36,9 +36,48 @@ function parseAcceptanceDetails(adminNotes?: string): Partial<CoachingRequest> {
   }
 }
 
+function parseReviewDetails(adminNotes?: string): Partial<CoachingRequest> {
+  if (!adminNotes) return {};
+  const match = adminNotes.match(/COACHING_REVIEW:(\{.*\})/s);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      rating: typeof parsed.rating === "number" ? parsed.rating : undefined,
+      reviewComment: typeof parsed.comment === "string" ? parsed.comment : undefined,
+      reviewedAt: typeof parsed.reviewedAt === "string" ? parsed.reviewedAt : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function parseLinkedBooking(notes?: string): Partial<CoachingRequest> {
+  if (!notes) return {};
+  const match = notes.match(/linked_booking:([0-9a-f-]+)/i);
+  return match ? { linkedBookingId: match[1] } : {};
+}
+
+function parseReservedBookingDetails(notes?: string): Partial<CoachingRequest> {
+  if (!notes) return {};
+  const match = notes.match(/COACHING_BOOKING:(\{.*\})/s);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      courtName: typeof parsed.court === "string" ? parsed.court : undefined,
+      courtAmount: typeof parsed.courtAmount === "number" ? parsed.courtAmount : undefined,
+      coachFee: typeof parsed.coachFee === "number" ? parsed.coachFee : undefined,
+      totalAmount: typeof parsed.totalDue === "number" ? parsed.totalDue : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape.
  * DB statuses: pending | approved | rejected | cancelled
- * UI statuses: pending | confirmed | rejected
+ * UI statuses: pending | confirmed | rejected | completed
  */
 export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>): CoachingRequest {
   const notes = typeof row.notes === "string" ? row.notes : "";
@@ -51,7 +90,9 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
 
   const dbStatus = String(row.status || "pending");
   let status: CoachingRequest["status"] = "pending";
-  if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled" || dbStatus === "completed") {
+  if (/COACHING_CHECKED_OUT|checked_out:/i.test(adminNotes || "") || dbStatus === "completed") {
+    status = "completed";
+  } else if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled") {
     status = "confirmed";
   } else if (dbStatus === "rejected" || dbStatus === "cancelled") {
     status = "rejected";
@@ -77,10 +118,16 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     requestedDate: String(row.session_date ?? row.requestedDate ?? ""),
     requestedTime: String(row.start_time ?? row.requestedTime ?? ""),
     endTime: row.end_time ? String(row.end_time) : undefined,
-    message: typeof row.message === "string" ? row.message : (notes || ""),
+    message: (typeof row.message === "string" ? row.message : notes)
+      .replace(/COACHING_BOOKING:\{.*\}/s, "")
+      .replace(/linked_booking:[0-9a-f-]+/i, "")
+      .trim(),
     adminNotes,
     durationHours,
+    ...parseLinkedBooking(notes),
+    ...parseReservedBookingDetails(notes),
     ...parseAcceptanceDetails(adminNotes),
+    ...parseReviewDetails(adminNotes),
     status,
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
     viewerIsCoachForThisSession: row.viewerIsCoachForThisSession as boolean | undefined,
@@ -134,8 +181,12 @@ export interface CoachingRequest {
   courtAmount?: number;
   coachFee?: number;
   totalAmount?: number;
-  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined */
-  status: "pending" | "confirmed" | "rejected";
+  coachingMessage?: string;
+  rating?: number;
+  reviewComment?: string;
+  reviewedAt?: string;
+  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined | completed = checked out */
+  status: "pending" | "confirmed" | "rejected" | "completed";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
   viewerIsStudent?: boolean;
   viewerIsCoachForThisSession?: boolean;
@@ -147,7 +198,8 @@ interface CoachingContextType {
   activeRequestId: string | null;
   setActiveRequestId: (id: string | null) => void;
   addRequest: (req: Omit<CoachingRequest, "id" | "status">) => Promise<string>;
-  updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled", adminNotes?: string) => Promise<void>;
+  updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled" | "completed", adminNotes?: string) => Promise<void>;
+  submitCoachReview: (id: string, rating: number, comment?: string) => Promise<void>;
   addCoach: (coach: Omit<Coach, "id">) => Promise<void>;
   updateCoach: (id: string, data: Partial<Coach>) => Promise<void>;
   deleteCoach: (id: string) => Promise<void>;
@@ -298,6 +350,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           start_time: startTime,
           end_time: endTime,
           status: 'pending',
+          linked_booking_id: req.linkedBookingId,
         }),
       });
 
@@ -330,14 +383,14 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 
   const updateRequestStatus = async (
     id: string,
-    status: "pending" | "confirmed" | "rejected" | "cancelled",
+    status: "pending" | "confirmed" | "rejected" | "cancelled" | "completed",
     adminNotes?: string,
   ): Promise<void> => {
     try {
       const res = await apiFetch(`/api/coaching-sessions/${encodeURIComponent(id)}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, admin_notes: adminNotes }),
+        body: JSON.stringify({ status, admin_notes: adminNotes, staff_id: user?.id }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -349,18 +402,59 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
           r.id === id
             ? {
                 ...r,
-                status: status === 'confirmed' ? 'confirmed' : status === 'cancelled' ? 'rejected' : status as CoachingRequest["status"],
+                status:
+                  status === 'completed'
+                    ? 'completed'
+                    : status === 'confirmed'
+                      ? 'confirmed'
+                      : status === 'cancelled'
+                        ? 'rejected'
+                        : status === 'rejected'
+                          ? 'rejected'
+                          : 'pending',
                 adminNotes: adminNotes ?? r.adminNotes,
                 ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
+                ...parseReviewDetails(adminNotes ?? r.adminNotes),
               }
             : r
         )
       );
       window.dispatchEvent(new Event('sportsync:notifications-refresh'));
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
     } catch (error) {
       console.error('Error updating request status:', error);
       throw error;
     }
+  };
+
+  const submitCoachReview = async (id: string, rating: number, comment?: string): Promise<void> => {
+    if (!user?.id) throw new Error("Please sign in again.");
+    const payload = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user.id, rating, comment }),
+    };
+    let res = await apiFetch(`/api/coaching-sessions/${encodeURIComponent(id)}/review`, payload);
+    let data = await res.json().catch(() => ({}));
+    if (res.status === 404) {
+      res = await apiFetch(`/api/coaching-sessions/review/${encodeURIComponent(id)}`, payload);
+      data = await res.json().catch(() => ({}));
+    }
+    if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to submit review");
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              rating,
+              reviewComment: comment || "",
+              reviewedAt: String((data as any).reviewed_at || new Date().toISOString()),
+              adminNotes: String((data as any).admin_notes || r.adminNotes || ""),
+            }
+          : r
+      )
+    );
+    window.dispatchEvent(new Event("sportsync:coaching-refresh"));
   };
 
   const addCoach = async (coach: Omit<Coach, "id">) => {
@@ -430,6 +524,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
         requests,
         addRequest,
         updateRequestStatus,
+        submitCoachReview,
         addCoach,
         updateCoach,
         deleteCoach,
@@ -450,7 +545,25 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 export function useCoaching() {
   const context = useContext(CoachingContext);
   if (context === undefined) {
-    throw new Error("useCoaching must be used within CoachingProvider");
+    console.error("useCoaching must be used within CoachingProvider. Returning fallback context.");
+    const fallback: CoachingContextType = {
+      coaches: [],
+      requests: [],
+      activeRequestId: null,
+      setActiveRequestId: () => {},
+      addRequest: async () => "",
+      updateRequestStatus: async () => {},
+      submitCoachReview: async () => {},
+      addCoach: async () => {},
+      updateCoach: async () => {},
+      deleteCoach: async () => {},
+      refreshCoaches: async () => {},
+      refreshRequests: async () => {},
+      findCoachByEmail: () => undefined,
+      isLoading: false,
+      error: null,
+    };
+    return fallback;
   }
   return context;
 }

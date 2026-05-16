@@ -504,7 +504,7 @@ export function MobileBooking() {
         start_time: startSlot,
         end_time: endLabel,
         addons: addonsArray,
-        status: "confirmed",
+        status: "pending",
       });
 
       // Simulate GCash Gateway Processing
@@ -519,9 +519,9 @@ export function MobileBooking() {
         time: startSlot,
         duration: selectedDuration,
         court: assignedCourt,
-        status: "confirmed" as const,
+        status: "pending_payment" as const,
         amount: response.total_price || confirmPrice,
-        paymentStatus: "paid" as const,
+        paymentStatus: "pending" as const,
         paymentProofUrl: transactionId,
         createdAt: new Date().toISOString(),
         customerName: user?.name,

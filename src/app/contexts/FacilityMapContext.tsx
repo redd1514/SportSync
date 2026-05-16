@@ -66,6 +66,22 @@ const SPORT_COLORS: Record<string, string> = {
 };
 export const getSportMapColor = (sport: string) => SPORT_COLORS[sport] || '#6b7280';
 
+/** Match staff/user map court fill & sheen (FacilityMapViewer). */
+export const FACILITY_COURT_FILL_OPACITY = 0.75;
+export const FACILITY_COURT_SHEEN_OPACITY = 0.55;
+export const FACILITY_COURT_SELECTED_FILL_OPACITY = 0.92;
+
+export function resolveCourtSportColor(
+  block: Pick<CourtBlock, 'sport' | 'customColor'>,
+  customSports: { name: string; color: string }[] = [],
+): string {
+  return (
+    block.customColor
+    || customSports.find(cs => cs.name === block.sport)?.color
+    || getSportMapColor(block.sport)
+  );
+}
+
 export const DEFAULT_LAYOUT: CourtBlock[] = [];
 
 /** Built-in demo layout — JRC Ballpark (same positions as original product demo). */

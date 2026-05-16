@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { useCoaching, Coach, CoachingRequest } from "../../contexts/CoachingContext";
+import { useCoaching, Coach, CoachingRequest, mapSessionApiRowToCoachingRequest } from "../../contexts/CoachingContext";
 import { useUser } from "../../contexts/UserContext";
 import { useAddons } from "../../contexts/AddonsContext";
 import {
@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { getSportColor } from "../SportIcons";
 import type { CoachApplication } from "../user/CoachApplicationForm";
 import { apiFetch } from "../../utils/authenticatedFetch";
+import { API_OFFLINE_HINT, isApiConnectionError } from "../../utils/apiConnection";
 import { ProfilePhotoPicker, PhotoAvatar } from "../shared/ProfilePhotoPicker";
 
 type Tab = "coaches" | "requests" | "applications";
@@ -122,7 +123,7 @@ function MiniDatePicker({ onSelect, selected }: { onSelect: (d: string) => void;
 }
 
 export function AdminCoachingManagement() {
-  const { coaches: coachesRaw, requests, updateRequestStatus, addCoach, updateCoach, deleteCoach } = useCoaching();
+  const { coaches: coachesRaw, requests, updateRequestStatus, addCoach, updateCoach, deleteCoach, refreshRequests } = useCoaching();
   const coaches = coachesRaw ?? [];
   const { updateBooking } = useUser();
   const { allSportNames } = useAddons();
@@ -132,7 +133,42 @@ export function AdminCoachingManagement() {
   const [verifyingRequest, setVerifyingRequest] = useState<CoachingRequest | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ req: CoachingRequest; action: 'confirmed' | 'rejected' } | null>(null);
   const [appConfirm, setAppConfirm] = useState<{ app: CoachApplication; action: 'approved' | 'rejected' } | null>(null);
+  const [deleteCoachTarget, setDeleteCoachTarget] = useState<Coach | null>(null);
+  const [notice, setNotice] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const [applications, setApplications] = useState<CoachApplication[]>([]);
+  const [adminRequests, setAdminRequests] = useState<CoachingRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestFilter, setRequestFilter] = useState<"all" | "pending" | "confirmed" | "completed" | "rejected">("all");
+  const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>([]);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+
+  const loadAdminRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    try {
+      const res = await apiFetch(`/api/coaching-sessions`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error || `Failed to load coaching sessions (${res.status})`);
+      }
+      const rows = Array.isArray(data) ? data.map(mapSessionApiRowToCoachingRequest) : [];
+      setAdminRequests(rows);
+      if (rows.length > 0) setNotice(null);
+    } catch (error) {
+      const fallback = requests.length > 0 ? requests : [];
+      setAdminRequests(fallback);
+      const message = isApiConnectionError(error)
+        ? API_OFFLINE_HINT
+        : error instanceof Error
+          ? error.message
+          : 'Could not load coaching sessions.';
+      setNotice({ type: 'error', message });
+      if (fallback.length === 0) {
+        void refreshRequests().catch(() => undefined);
+      }
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, [requests, refreshRequests]);
 
   const loadApplications = useCallback(async () => {
     try {
@@ -189,6 +225,23 @@ export function AdminCoachingManagement() {
   useEffect(() => {
     void loadApplications();
   }, [loadApplications]);
+
+  useEffect(() => {
+    void loadAdminRequests();
+    const onRefresh = () => void loadAdminRequests();
+    window.addEventListener("sportsync:coaching-refresh", onRefresh);
+    return () => window.removeEventListener("sportsync:coaching-refresh", onRefresh);
+  }, [loadAdminRequests]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = JSON.parse(localStorage.getItem("sportsync_admin_hidden_coaching_sessions") || "[]");
+      setHiddenSessionIds(Array.isArray(stored) ? stored.map(String) : []);
+    } catch {
+      setHiddenSessionIds([]);
+    }
+  }, []);
   const [appFilter, setAppFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   // Form state
@@ -261,9 +314,9 @@ export function AdminCoachingManagement() {
       if (editingCoach) await updateCoach(editingCoach.id, data);
       else await addCoach(data);
       setShowCoachModal(false);
+      setNotice({ type: 'success', message: editingCoach ? 'Coach updated.' : 'Coach added.' });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Could not save coach";
-      alert(msg);
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : "Could not save coach" });
     }
   };
 
@@ -275,9 +328,67 @@ export function AdminCoachingManagement() {
   };
 
   const INPUT = "w-full bg-[#131314] border border-white/10 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-[#F97316]";
+  const inactiveRequestIds = useMemo(
+    () => adminRequests.filter((request) => request.status === "completed" || request.status === "rejected").map((request) => request.id),
+    [adminRequests],
+  );
+  const clearableCount = inactiveRequestIds.filter((id) => !hiddenSessionIds.includes(id)).length;
+  const visibleRequests = useMemo(
+    () => adminRequests.filter((request) => !hiddenSessionIds.includes(request.id) && (requestFilter === "all" || request.status === requestFilter)),
+    [adminRequests, hiddenSessionIds, requestFilter],
+  );
+
+  const handleClearInactiveRequests = () => {
+    const next = Array.from(new Set([...hiddenSessionIds, ...inactiveRequestIds]));
+    setHiddenSessionIds(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sportsync_admin_hidden_coaching_sessions", JSON.stringify(next));
+    }
+    setClearConfirmOpen(false);
+    setNotice({ type: "success", message: "Inactive coaching rows cleared from this admin view." });
+  };
+
+  const runRequestAction = async (
+    req: CoachingRequest,
+    action: "confirmed" | "rejected" | "cancelled" | "completed",
+  ) => {
+    try {
+      await updateRequestStatus(req.id, action);
+      await Promise.all([loadAdminRequests(), refreshRequests()]);
+      setNotice({
+        type: "success",
+        message:
+          action === "confirmed"
+            ? "Coaching request confirmed and notifications sent."
+            : action === "completed"
+              ? "Coaching session marked completed."
+              : "Coaching request updated and the student was notified.",
+      });
+    } catch (error) {
+      setNotice({ type: "error", message: error instanceof Error ? error.message : "Could not update coaching request." });
+    }
+  };
 
   return (
     <div className="space-y-6">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="rounded-2xl border px-4 py-3 flex items-center justify-between gap-3"
+            style={{
+              background: notice.type === 'error' ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+              borderColor: notice.type === 'error' ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)',
+              color: notice.type === 'error' ? '#f87171' : '#4ade80',
+            }}
+          >
+            <span className="font-black" style={{ fontSize: 13 }}>{notice.message}</span>
+            <button onClick={() => setNotice(null)} className="text-white/60 hover:text-white"><X size={14} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -307,24 +418,64 @@ export function AdminCoachingManagement() {
       {/* ── SESSIONS OVERVIEW TAB (read-only — coaches manage accept/decline) ── */}
       {activeTab === "requests" && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+          {notice && (
+            <div
+              className="px-4 py-3 rounded-2xl border flex items-start gap-3"
+              style={{
+                background: notice.type === 'error' ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+                borderColor: notice.type === 'error' ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)',
+              }}
+            >
+              <p className="font-black flex-1" style={{ fontSize: 12, color: notice.type === 'error' ? '#fca5a5' : '#86efac', lineHeight: 1.5 }}>
+                {notice.message}
+              </p>
+              <button type="button" onClick={() => setNotice(null)} className="text-gray-500 hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl flex-wrap"
             style={{ background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)" }}>
-            <GraduationCap size={16} className="text-blue-400 flex-shrink-0" />
-            <p className="text-blue-400 font-black" style={{ fontSize: 12 }}>
-              Coaches accept or decline session requests from their "My Coaching" dashboard. This view is for monitoring only.
-            </p>
+            <div className="flex items-center gap-3 min-w-0">
+              <GraduationCap size={16} className="text-blue-400 flex-shrink-0" />
+              <p className="text-blue-400 font-black" style={{ fontSize: 12 }}>
+                Monitor all coaching sessions, assist coach decisions, and keep students notified.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => void loadAdminRequests()}
+                className="px-3 py-1.5 rounded-xl border border-blue-400/25 text-blue-200 font-black hover:bg-blue-500/10 transition-colors"
+                style={{ fontSize: 12 }}>
+                {requestsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+              <button type="button" onClick={() => setClearConfirmOpen(true)} disabled={clearableCount === 0}
+                className="px-3 py-1.5 rounded-xl border font-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                style={{ fontSize: 12, borderColor: "rgba(239,68,68,0.25)", color: clearableCount > 0 ? "#fca5a5" : "#64748b", background: clearableCount > 0 ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.03)" }}>
+                <Trash2 size={12} /> Clear {clearableCount > 0 ? `(${clearableCount})` : ""}
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: "Pending",   value: requests.filter(r => r.status === 'pending').length,   color: "#eab308" },
-              { label: "Confirmed", value: requests.filter(r => r.status === 'confirmed').length, color: "#22c55e" },
-              { label: "Total",     value: requests.length,                                        color: "#2563eb" },
+              { label: "Pending",   value: adminRequests.filter(r => r.status === 'pending').length,   color: "#eab308" },
+              { label: "Confirmed", value: adminRequests.filter(r => r.status === 'confirmed').length, color: "#22c55e" },
+              { label: "Completed", value: adminRequests.filter(r => r.status === 'completed').length, color: "#94a3b8" },
+              { label: "Total",     value: adminRequests.length,                                        color: "#2563eb" },
             ].map(stat => (
               <div key={stat.label} className="rounded-2xl p-4 text-center"
                 style={{ background: "#1E1E1F", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <p className="font-black" style={{ fontSize: 28, color: stat.color }}>{stat.value}</p>
                 <p style={{ color: "#666", fontSize: 11, fontWeight: 700 }}>{stat.label}</p>
               </div>
+            ))}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {(["all", "pending", "confirmed", "completed", "rejected"] as const).map((filter) => (
+              <button key={filter} type="button" onClick={() => setRequestFilter(filter)}
+                className="px-3 py-1.5 rounded-xl border font-black capitalize transition-all"
+                style={{ fontSize: 12, background: requestFilter === filter ? "#F97316" : "#1E1E1F", borderColor: requestFilter === filter ? "#F97316" : "rgba(255,255,255,0.1)", color: requestFilter === filter ? "white" : "#777" }}>
+                {filter}
+              </button>
             ))}
           </div>
           <div className="bg-[#1E1E1F] rounded-2xl border border-white/5 overflow-hidden">
@@ -334,14 +485,14 @@ export function AdminCoachingManagement() {
             <div className="overflow-x-auto">
               <table className="w-full text-left min-w-[600px]">
                 <thead className="bg-[#131314]">
-                  <tr>{['Student', 'Coach & Sport', 'Date', 'Time', 'Status'].map(h => (
+                  <tr>{['Student', 'Coach & Sport', 'Date', 'Time', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-5 py-3 text-gray-600 font-black uppercase" style={{ fontSize: 10 }}>{h}</th>
                   ))}</tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {requests.length === 0 ? (
-                    <tr><td colSpan={5} className="px-5 py-10 text-center text-gray-600" style={{ fontSize: 13 }}>No coaching sessions yet.</td></tr>
-                  ) : requests.map(req => (
+                  {visibleRequests.length === 0 ? (
+                    <tr><td colSpan={6} className="px-5 py-10 text-center text-gray-600" style={{ fontSize: 13 }}>{requestsLoading ? "Loading coaching sessions..." : "No matching coaching sessions."}</td></tr>
+                  ) : visibleRequests.map(req => (
                     <tr key={req.id} className="hover:bg-white/2 transition-colors">
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2.5">
@@ -369,9 +520,10 @@ export function AdminCoachingManagement() {
                         <span className={`px-2.5 py-1 rounded-lg font-black ${
                           req.status === 'pending'   ? 'bg-yellow-500/10 text-yellow-400' :
                           req.status === 'confirmed' ? 'bg-green-500/10 text-green-400' :
+                          req.status === 'completed' ? 'bg-gray-500/10 text-gray-300' :
                           'bg-red-500/10 text-red-400'
                         }`} style={{ fontSize: 10 }}>
-                          {req.status === 'pending' ? 'AWAITING COACH' : req.status === 'confirmed' ? 'CONFIRMED' : 'DECLINED'}
+                          {req.status === 'pending' ? 'AWAITING COACH' : req.status === 'confirmed' ? 'CONFIRMED' : req.status === 'completed' ? 'COMPLETED' : 'DECLINED'}
                         </span>
                         {req.status === 'confirmed' && (
                           <p className="mt-1 font-black" style={{
@@ -381,6 +533,38 @@ export function AdminCoachingManagement() {
                             {/PAYMENT_VERIFIED|Manual coaching payment verified/i.test(req.adminNotes || '') ? 'PAYMENT VERIFIED' : 'AWAITING MANUAL PAYMENT'}
                           </p>
                         )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex gap-1.5 flex-wrap">
+                          {req.status === 'pending' && (
+                            <>
+                              <button type="button" onClick={() => setConfirmAction({ req, action: 'confirmed' })}
+                                className="px-2.5 py-1.5 rounded-lg bg-green-500/10 text-green-300 font-black hover:bg-green-500/20"
+                                style={{ fontSize: 10 }}>
+                                Approve
+                              </button>
+                              <button type="button" onClick={() => setConfirmAction({ req, action: 'rejected' })}
+                                className="px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-300 font-black hover:bg-red-500/20"
+                                style={{ fontSize: 10 }}>
+                                Decline
+                              </button>
+                            </>
+                          )}
+                          {req.status === 'confirmed' && (
+                            <>
+                              <button type="button" onClick={() => void runRequestAction(req, 'completed')}
+                                className="px-2.5 py-1.5 rounded-lg bg-blue-500/10 text-blue-300 font-black hover:bg-blue-500/20"
+                                style={{ fontSize: 10 }}>
+                                Complete
+                              </button>
+                              <button type="button" onClick={() => void runRequestAction(req, 'cancelled')}
+                                className="px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-300 font-black hover:bg-red-500/20"
+                                style={{ fontSize: 10 }}>
+                                Cancel
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -407,14 +591,7 @@ export function AdminCoachingManagement() {
                     className="p-1.5 rounded-lg bg-[#252525] text-gray-400 hover:text-white hover:bg-[#333] transition-colors">
                     <Edit2 size={13} />
                   </button>
-                  <button onClick={async () => {
-                    if (!confirm("Remove this coach from the directory?")) return;
-                    try {
-                      await deleteCoach(coach.id);
-                    } catch (err: unknown) {
-                      alert(err instanceof Error ? err.message : "Delete failed");
-                    }
-                  }}
+                  <button onClick={() => setDeleteCoachTarget(coach)}
                     className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
                     <Trash2 size={13} />
                   </button>
@@ -607,7 +784,7 @@ export function AdminCoachingManagement() {
                   className="flex-1 py-2.5 rounded-xl bg-[#252525] text-gray-300 font-black hover:bg-[#303030] transition-colors"
                   style={{ fontSize: 13 }}>Cancel</button>
                 <button
-                  onClick={() => { updateRequestStatus(confirmAction.req.id, confirmAction.action); setConfirmAction(null); }}
+                  onClick={() => { void runRequestAction(confirmAction.req, confirmAction.action); setConfirmAction(null); }}
                   className={`flex-1 py-2.5 rounded-xl text-white font-black transition-colors ${confirmAction.action === 'confirmed' ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'}`}
                   style={{ fontSize: 13 }}>
                   {confirmAction.action === 'confirmed' ? 'Yes, Confirm' : 'Yes, Reject'}
@@ -619,6 +796,33 @@ export function AdminCoachingManagement() {
       </AnimatePresence>
 
       {/* ── Add/Edit Coach Modal ── */}
+      <AnimatePresence>
+        {clearConfirmOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1E1E1F] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-red-500/15 border border-red-500/25">
+                <Trash2 size={22} className="text-red-300" />
+              </div>
+              <h3 className="text-white font-black text-center mb-1" style={{ fontSize: 17 }}>Clear Inactive Requests?</h3>
+              <p className="text-gray-400 text-center mb-5" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                This hides completed and rejected coaching rows from your admin table. It does not delete coaching history or user notifications.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setClearConfirmOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-[#252525] text-gray-300 font-black hover:bg-[#303030] transition-colors"
+                  style={{ fontSize: 13 }}>Cancel</button>
+                <button onClick={handleClearInactiveRequests}
+                  className="flex-1 py-2.5 rounded-xl text-white font-black bg-red-500 hover:bg-red-600 transition-colors"
+                  style={{ fontSize: 13 }}>
+                  Clear {clearableCount}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showCoachModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -837,7 +1041,7 @@ export function AdminCoachingManagement() {
                     setApplications((prev) => prev.map((a) => (a.id === appConfirm.app.id ? mapped : a)));
                     setAppConfirm(null);
                   } catch (err: unknown) {
-                    alert(err instanceof Error ? err.message : 'Could not approve application');
+                    setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not approve application' });
                   }
                 }}
                   className="flex-1 py-3 rounded-xl text-white font-black transition-all hover:brightness-110"
@@ -847,6 +1051,38 @@ export function AdminCoachingManagement() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {deleteCoachTarget && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.94, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1A1A1A] p-5 shadow-2xl">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/12 border border-red-500/25">
+                  <Trash2 size={18} className="text-red-400" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-black" style={{ fontSize: 16 }}>Remove coach?</h3>
+                  <p className="text-gray-400 mt-1" style={{ fontSize: 13 }}>{deleteCoachTarget.name} will be removed from the coaching directory.</p>
+                </div>
+              </div>
+              <div className="mt-5 flex gap-2">
+                <button onClick={() => setDeleteCoachTarget(null)} className="flex-1 rounded-xl px-4 py-2.5 text-gray-300 hover:bg-white/8" style={{ fontSize: 13, fontWeight: 800 }}>Cancel</button>
+                <button onClick={async () => {
+                  try {
+                    await deleteCoach(deleteCoachTarget.id);
+                    setNotice({ type: 'success', message: 'Coach removed.' });
+                  } catch (err: unknown) {
+                    setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Delete failed' });
+                  } finally {
+                    setDeleteCoachTarget(null);
+                  }
+                }} className="flex-1 rounded-xl px-4 py-2.5 bg-red-500 text-white hover:bg-red-600" style={{ fontSize: 13, fontWeight: 800 }}>Remove</button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { supabase } from './supabaseClient.ts';
+import { RealtimeEventEmitter } from './realtimeEventEmitter.ts';
 
 function toStableUuid(input: string): string {
   const hex = createHash('sha256').update(input).digest('hex').slice(0, 32);
@@ -204,6 +205,19 @@ export const coachApplicationService = {
       .maybeSingle();
     if (error) throw error;
     if (!data) throw new Error('Application not found');
+    if ((status === 'approved' || status === 'rejected') && data.applicant_user_id) {
+      const row = data as CoachApplicationRow;
+      await RealtimeEventEmitter.notifyUser(String(row.applicant_user_id || ''), 'coach_application_update', {
+        title: status === 'approved' ? 'Coach application approved' : 'Coach application declined',
+        message: status === 'approved'
+          ? 'Admin approved your coach application. Your coach profile is now available for coaching requests.'
+          : 'Admin declined your coach application. You can review your details and submit again later.',
+        type: status === 'approved' ? 'update' : 'alert',
+        targetTab: 'coaching',
+        targetSub: 'apply',
+        applicationId: row.id,
+      });
+    }
     return rowToClient(data as CoachApplicationRow);
   },
 };

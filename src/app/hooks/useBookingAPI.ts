@@ -26,10 +26,11 @@ export const useBookingAPI = () => {
     }
   };
 
-  const checkAvailability = async (courtId: string, date: string, startTime: string, endTime: string) => {
+  const checkAvailability = async (courtId: string, date: string, startTime: string, endTime: string, excludeBookingId?: string) => {
     try {
+      const exclude = excludeBookingId ? `&excludeBookingId=${encodeURIComponent(excludeBookingId)}` : '';
       const response = await apiFetch(
-        `/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}`
+        `/api/bookings/${courtId}/availability?date=${date}&startTime=${startTime}&endTime=${endTime}${exclude}`
       );
       const data = await response.json();
       return data.available;

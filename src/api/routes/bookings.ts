@@ -27,6 +27,11 @@ function addHoursToTime(time: string, hours: number): string {
   return `${String(outH).padStart(2, '0')}:${String(outM).padStart(2, '0')}:${String(outS).padStart(2, '0')}`;
 }
 
+function timeToMinutes(time: string): number {
+  const [h = '0', m = '0'] = String(time || '').slice(0, 5).split(':');
+  return Number(h) * 60 + Number(m);
+}
+
 // --- Specific paths first (avoid :param shadowing) ---
 
 bookingsRouter.get('/calendar', async (c) => {
@@ -68,6 +73,8 @@ bookingsRouter.post('/desk', async (c) => {
       total_price?: number;
       payment_method?: string;
       source?: string;
+      loyalty_points_redeemed?: number;
+      loyalty_discount?: number;
     };
 
     if (!body.court || !body.sport || !body.booking_date || !body.start_time) {
@@ -91,7 +98,14 @@ bookingsRouter.post('/desk', async (c) => {
       source: body.source ?? 'desk_map',
       ref_code: body.ref_code,
       add_ons: body.add_ons,
+      loyalty_points_redeemed: body.loyalty_points_redeemed ?? 0,
+      loyalty_discount: body.loyalty_discount ?? 0,
       staff_id: staffRaw,
+      user_id:
+        (body as { user_id?: string; userId?: string }).user_id ??
+        (body as { userId?: string }).userId ??
+        (c.get('auth') as { userId?: string } | undefined)?.userId ??
+        null,
       facility_map_id: (body as { facility_map_id?: string }).facility_map_id ?? null,
     };
 
@@ -190,7 +204,7 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
 
     const { data: b, error: bErr } = await supabase
       .from('bookings')
-      .select('id,status,user_id,start_time,end_time')
+      .select('id,status,user_id,court_id,start_time,end_time')
       .eq('id', id)
       .maybeSingle();
     if (bErr) throw bErr;
@@ -217,13 +231,33 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
       if (diff > 0) durHours = diff / 60;
     } catch {}
 
+    const normalizedStart = newStart.length >= 5 ? newStart.slice(0, 5) : newStart;
+    const requestedStart = `${normalizedStart}:00`;
+    const requestedEnd = addHoursToTime(requestedStart, durHours);
+    const openMin = 7 * 60;
+    const closeMin = 23 * 60;
+    if (timeToMinutes(requestedStart) < openMin || timeToMinutes(requestedEnd) > closeMin) {
+      return c.json({ error: 'Requested schedule must fit within facility hours: 7:00 AM to 11:00 PM.' }, 400);
+    }
+
+    const available = await bookingService.checkAvailability(
+      b.court_id,
+      newDate,
+      requestedStart,
+      requestedEnd,
+      id
+    );
+    if (!available) {
+      return c.json({ error: 'Requested time conflicts with another booking on the same court.' }, 409);
+    }
+
     const row = {
       booking_id: id,
       request_type: 'reschedule',
       reason: reason || null,
       requested_new_date: newDate,
-      requested_new_start_time: `${newStart}:00`,
-      requested_new_end_time: addHoursToTime(`${newStart}:00`, durHours),
+      requested_new_start_time: requestedStart,
+      requested_new_end_time: requestedEnd,
       status: 'pending',
       created_at: new Date().toISOString(),
     };
@@ -268,14 +302,15 @@ bookingsRouter.get('/:userId', async (c) => {
 // GET /api/bookings/:courtId/availability - Check availability
 bookingsRouter.get('/:courtId/availability', async (c) => {
   try {
-    const { date, startTime, endTime } = c.req.query() as Record<string, string>;
+    const { date, startTime, endTime, excludeBookingId } = c.req.query() as Record<string, string>;
     const courtId = c.req.param('courtId');
 
     const available = await bookingService.checkAvailability(
       courtId,
       date,
       startTime,
-      endTime
+      endTime,
+      excludeBookingId
     );
 
     return c.json({ available });

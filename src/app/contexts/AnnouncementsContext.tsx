@@ -10,6 +10,8 @@ export interface Announcement {
   type: 'promotion' | 'maintenance' | 'reminder' | 'update' | 'alert' | 'general';
   createdAt: string;
   dismissed?: boolean;
+  actionTab?: 'home' | 'booking' | 'coaching' | string;
+  actionSub?: string;
 }
 
 interface AnnouncementsContextType {
@@ -21,11 +23,13 @@ interface AnnouncementsContextType {
   error: string | null;
   refresh: () => Promise<void>;
   clearAnnouncements: () => Promise<void>;
+  clearUserNotifications: () => Promise<void>;
 }
 
 const AnnouncementsContext = createContext<AnnouncementsContextType | null>(null);
 
 const INITIAL: Announcement[] = [];
+const clearedKeyForUser = (userId?: string) => `sportsync_cleared_notifications:${userId || 'guest'}`;
 
 export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const { user } = useUser();
@@ -35,8 +39,60 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
 
   // Added from image_8390be.jpg (Current side)
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const knownNotificationIdsRef = useRef<Set<string>>(new Set());
+  const notificationBootstrappedRef = useRef(false);
+  const currentUserIdRef = useRef<string | undefined>(user?.id);
+  const clearedLocalIdsRef = useRef<Set<string>>(new Set());
+
+  const persistClearedIds = useCallback((ids: Iterable<string>) => {
+    try {
+      const key = clearedKeyForUser(currentUserIdRef.current);
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      const merged = Array.from(new Set([...(Array.isArray(existing) ? existing : []), ...Array.from(ids)]));
+      localStorage.setItem(key, JSON.stringify(merged.slice(-500)));
+    } catch {}
+  }, []);
+
+  const playNotificationSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+      gain.connect(ctx.destination);
+
+      [740, 980].forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        const start = ctx.currentTime + index * 0.08;
+        osc.start(start);
+        osc.stop(start + 0.16);
+      });
+      window.setTimeout(() => void ctx.close().catch(() => {}), 360);
+    } catch {
+      /* Browsers can block audio before user interaction; notification UI still updates. */
+    }
+  }, []);
+
+  useEffect(() => {
+    currentUserIdRef.current = user?.id;
+    knownNotificationIdsRef.current.clear();
+    notificationBootstrappedRef.current = false;
+    try {
+      clearedLocalIdsRef.current = new Set(JSON.parse(localStorage.getItem(clearedKeyForUser(user?.id)) || '[]'));
+    } catch {
+      clearedLocalIdsRef.current = new Set();
+    }
+    setAnnouncements((prev) => prev.filter((a) => !a.id.startsWith('notif:')));
+  }, [user?.id]);
 
   const refresh = useCallback(async () => {
+    const activeUserId = user?.id;
     setIsLoading(true);
     setError(null);
     try {
@@ -60,22 +116,47 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
         if (notifRes.ok && Array.isArray(notifData)) {
           userNotifications = notifData.map((r: any) => {
             const data = r.data && typeof r.data === 'object' ? r.data : {};
+            const eventType = String(r.event_type || data.eventType || data.type || '').toLowerCase();
+            const title = String(data.title || 'Notification');
+            const message = String(data.message || '');
+            const actionTab = data.targetTab
+              || (/coaching/.test(eventType) || /coach/i.test(`${title} ${message}`) ? 'coaching'
+              : /booking|reschedule|cancel|front_desk|ticket/.test(eventType) ? 'booking'
+              : 'home');
+            const actionSub = data.targetSub
+              || (actionTab === 'coaching' ? 'mycoaching' : actionTab === 'booking' ? 'mybookings' : undefined);
             return {
               id: `notif:${String(r.id)}`,
-              title: String(data.title || 'Notification'),
-              message: String(data.message || ''),
+              title,
+              message,
               type: (String(data.type || 'update') as Announcement['type']),
               createdAt: String(r.created_at || new Date().toISOString()),
               dismissed: Boolean(r.read_at),
+              actionTab,
+              actionSub,
             };
           });
+          const nextUnreadIds = new Set(
+            notifData
+              .filter((r: any) => !r.read_at)
+              .map((r: any) => `notif:${String(r.id)}`)
+          );
+          if (notificationBootstrappedRef.current) {
+            const hasNewUnread = Array.from(nextUnreadIds).some((id) => !knownNotificationIdsRef.current.has(id));
+            if (hasNewUnread) playNotificationSound();
+          } else {
+            notificationBootstrappedRef.current = true;
+          }
+          knownNotificationIdsRef.current = nextUnreadIds;
         }
       }
       
+      if (currentUserIdRef.current !== activeUserId) return;
       setAnnouncements((prev) => {
         const dismissed = new Set(prev.filter((p) => p.dismissed).map((p) => p.id));
         return [...userNotifications, ...mapped]
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .filter((m) => !clearedLocalIdsRef.current.has(m.id))
           .map((m) => ({ ...m, dismissed: m.dismissed || dismissed.has(m.id) }));
       });
     } catch (e: any) {
@@ -187,10 +268,30 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     setAnnouncements([]);
   };
 
+  const clearUserNotifications = async () => {
+    if (!user?.id) {
+      setAnnouncements(prev => {
+        prev.forEach((a) => clearedLocalIdsRef.current.add(a.id));
+        persistClearedIds(clearedLocalIdsRef.current);
+        return [];
+      });
+      return;
+    }
+    const res = await apiFetch(`/api/notifications/${encodeURIComponent(user.id)}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string })?.error || 'Failed to clear notifications');
+    knownNotificationIdsRef.current.clear();
+    setAnnouncements(prev => {
+      prev.forEach((a) => clearedLocalIdsRef.current.add(a.id));
+      persistClearedIds(clearedLocalIdsRef.current);
+      return [];
+    });
+  };
+
   const undismissedCount = useMemo(() => announcements.filter(a => !a.dismissed).length, [announcements]);
 
   return (
-    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, clearAnnouncements, undismissedCount, isLoading, error, refresh }}>
+    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, clearAnnouncements, clearUserNotifications, undismissedCount, isLoading, error, refresh }}>
       {children}
     </AnnouncementsContext.Provider>
   );

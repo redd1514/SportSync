@@ -326,6 +326,8 @@ export function RoleManagementAdmin() {
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
+                      name="new-staff-password"
+                      autoComplete="new-password"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00] pr-10"

@@ -4,16 +4,27 @@ import type { ReactNode } from "react";
 import {
   LogOut, User, CalendarDays, Trophy, ChevronRight, ChevronLeft, Shield, Bell,
   HelpCircle, Star, CheckCircle, Clock, XCircle,
-  X, Phone, Mail, QrCode, RefreshCw, AlertTriangle, Download, Camera,
+  X, QrCode, RefreshCw, AlertTriangle, Download, Camera,
 } from "lucide-react";
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
+import { useRealtimeBookingAPI } from "../../hooks/useRealtimeAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
-import { downloadTicketQrPng } from "../../../shared/qrDownload";
+import { BookingTicketModal } from "../shared/BookingTicketModal";
 import { toast } from "sonner";
 import { PhotoAvatar, PhotoCropperModal, loadProfilePhoto, saveProfilePhoto } from "../shared/ProfilePhotoPicker";
+import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
+import { LoyaltyCelebrationModal } from "../shared/loyalty/LoyaltyCelebrationModal";
+import { useLoyaltyMilestone } from "../../hooks/useLoyaltyMilestone";
+import { getLoyaltyCelebrationsEnabled, setLoyaltyCelebrationsEnabled } from "../../utils/loyaltyPreferences";
+import {
+  LOYALTY_DISCOUNT_PERCENT,
+  LOYALTY_REWARD_THRESHOLD,
+  loyaltyPointsToNextReward,
+  loyaltyRewardsAvailable,
+} from "../../constants/loyalty";
 import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
 
 interface MobileProfileScreenProps {
@@ -22,7 +33,12 @@ interface MobileProfileScreenProps {
 
 const statusConfig = {
   upcoming: { color: "#3b82f6", bg: "#3b82f620", label: "Upcoming", icon: Clock },
-  confirmed: { color: "#FF8C00", bg: "#FF8C0020", label: "Confirmed", icon: CheckCircle },
+  pending: { color: "#FF8C00", bg: "#FF8C0020", label: "Pending", icon: Clock },
+  pending_payment: { color: "#FF8C00", bg: "#FF8C0020", label: "Pending", icon: Clock },
+  pending_verification: { color: "#eab308", bg: "#eab30820", label: "Review", icon: AlertTriangle },
+  confirmed: { color: "#FF8C00", bg: "#FF8C0020", label: "Reserved", icon: Clock },
+  checked_in: { color: "#22c55e", bg: "#22c55e20", label: "Ongoing", icon: CheckCircle },
+  rescheduled: { color: "#3b82f6", bg: "#3b82f620", label: "Rescheduled", icon: RefreshCw },
   completed: { color: "#22c55e", bg: "#22c55e20", label: "Done", icon: CheckCircle },
   cancelled: { color: "#ef4444", bg: "#ef444420", label: "Cancelled", icon: XCircle },
 };
@@ -235,135 +251,12 @@ function RescheduleDialog({ booking, onClose, onConfirm }: {
   );
 }
 
-/* ── QR Ticket Viewer (Styled) ── */
-function QRTicketDialog({ booking, onClose }: {
-  booking: { id?: string; refCode?: string; sport: string; court: string; date: string; time: string; duration: number; amount: number; status?: string };
-  onClose: () => void;
-}) {
-  const qrValue = (booking.refCode || booking.id || '').toString();
-  const displayToken = qrValue.startsWith('JRC-') ? qrValue : `JRC-${qrValue.slice(0, 6).toUpperCase()}`;
-  const color = getSportColor(booking.sport);
-  const ticketId = 'jrc-ticket-canvas-mobile';
-
-  const downloadTicket = async () => {
-    const ticketEl = document.getElementById(ticketId);
-    if (!ticketEl) return;
-    try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(ticketEl, { scale: 3, backgroundColor: null, useCORS: true });
-      const a = document.createElement('a');
-      a.download = `${displayToken}-JRC-Ticket.png`;
-      a.href = canvas.toDataURL('image/png');
-      a.click();
-      toast.success('Ticket downloaded!');
-    } catch {
-      // fallback
-      const svg = ticketEl.querySelector('svg');
-      if (!svg) return;
-      const svgData = new XMLSerializer().serializeToString(svg);
-      const a = document.createElement('a');
-      a.download = `${displayToken}-Ticket.svg`;
-      a.href = 'data:image/svg+xml;base64,' + btoa(svgData);
-      a.click();
-      toast.success('QR downloaded!');
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-6 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()}
-        className="flex flex-col items-center gap-4 w-full max-w-xs"
-      >
-        <div
-          id={ticketId}
-          className="w-full rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)]"
-          style={{ background: '#111' }}
-        >
-          <div className="px-6 pt-6 pb-4" style={{ background: `linear-gradient(135deg, ${color}22, ${color}08)`, borderBottom: `1px solid ${color}30` }}>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${color}20`, border: `1px solid ${color}40` }}>
-                <SportIcon sport={booking.sport} size={20} color={color} strokeWidth={2.5} />
-              </div>
-              <div>
-                <p className="text-white font-black" style={{ fontSize: 18 }}>{booking.sport || 'Court Booking'}</p>
-                <p className="text-gray-400 font-medium" style={{ fontSize: 12 }}>{booking.court} · JRC Facility</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-              <span className="font-black uppercase" style={{ fontSize: 9, letterSpacing: 1, color }}>{booking.status?.toUpperCase() || 'RESERVED'}</span>
-            </div>
-          </div>
-
-          <div className="px-6 py-4 space-y-3 border-b border-white/5">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Date</span>
-              <span className="text-white font-black" style={{ fontSize: 13 }}>
-                {booking.date ? new Date(booking.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Time</span>
-              <span className="text-white font-black" style={{ fontSize: 13 }}>
-                {booking.time ? (() => { const [h] = booking.time.split(':').map(Number); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; })() : '—'} · {booking.duration || 1}hr
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Amount</span>
-              <span className="font-black" style={{ fontSize: 13, color: '#FF8C00' }}>₱{(booking.amount || 0).toLocaleString()}</span>
-            </div>
-          </div>
-
-          <div className="relative flex items-center px-0 py-0">
-            <div className="w-6 h-6 rounded-full bg-black/95 -ml-3 flex-shrink-0" />
-            <div className="flex-1 border-t-2 border-dashed border-white/10" />
-            <div className="w-6 h-6 rounded-full bg-black/95 -mr-3 flex-shrink-0" />
-          </div>
-
-          <div className="px-6 pt-4 pb-6 flex flex-col items-center">
-            <div className="p-3 bg-white rounded-2xl shadow-lg mb-3">
-              <QRCodeSVG value={qrValue} size={140} />
-            </div>
-            <p className="text-gray-500 font-bold uppercase mb-1" style={{ fontSize: 9, letterSpacing: 1 }}>Show at front desk</p>
-            <p className="text-white font-black" style={{ fontSize: 15, letterSpacing: 1 }}>{displayToken}</p>
-          </div>
-
-          <div className="px-6 py-3 text-center" style={{ background: 'rgba(255,255,255,0.02)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-            <p className="text-gray-700 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 1.5 }}>JRC Sports Complex · Valenzuela City</p>
-          </div>
-        </div>
-
-        <div className="flex gap-3 w-full">
-          <button
-            onClick={downloadTicket}
-            className="flex-1 bg-white text-black py-3.5 rounded-2xl font-black text-sm hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
-          >
-            Download Ticket
-          </button>
-          <button
-            onClick={onClose}
-            className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-white hover:bg-white/20 transition-colors flex-shrink-0"
-          >
-            <X size={20} />
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const { user, bookings, logout, updateBooking, addCancellationRequest, updateUser } = useUser();
+  const { bookings: liveUserBookings } = useRealtimeBookingAPI(user?.id || "", { autoFetch: true });
   const { findCoachByEmail } = useCoaching();
   const { getUserProfile, getUserLoyaltyPoints, updateUserProfile } = useUserAPI();
-  const [activeTab, setActiveTab] = useState<"upcoming" | "completed">("upcoming");
+  const [activeTab, setActiveTab] = useState<"upcoming" | "pending" | "completed">("upcoming");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<typeof bookings[0] | null>(null);
@@ -380,6 +273,17 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [accountName, setAccountName] = useState(user?.name || "");
   const [accountPhone, setAccountPhone] = useState(user?.phone || "");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [celebrationsEnabled, setCelebrationsEnabled] = useState(() =>
+    getLoyaltyCelebrationsEnabled(user?.id)
+  );
+  const { celebrationOpen, closeCelebration, rewardsUnlocked } = useLoyaltyMilestone(
+    user?.id,
+    user?.loyaltyPoints || 0
+  );
+
+  useEffect(() => {
+    if (user?.id) setCelebrationsEnabled(getLoyaltyCelebrationsEnabled(user.id));
+  }, [user?.id]);
 
   const isAdmin = user?.email === "admin@jrc.com";
   const coachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
@@ -422,7 +326,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     setAccountPhone(user?.phone || "");
   }, [user?.id]);
 
-  const userBookings = bookings;
+  const userBookings = liveUserBookings.length > 0 ? liveUserBookings : bookings;
 
   const localPendingRequests = (() => {
     try {
@@ -447,12 +351,15 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
     
     if (activeTab === "upcoming") {
-      if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      if (b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
       if (isPendingReq) return false;
       return true;
+    } else if (activeTab === "pending") {
+      if (b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
+      return isPendingReq;
     } else {
       if (hiddenCompletedIds.includes(b.id)) return false;
-      return isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
+      return b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected';
     }
   });
 
@@ -602,18 +509,11 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             </div>
             <span className="text-[#FFD700] font-black" style={{ fontSize: 13 }}>{user.loyaltyPoints}/10 pts</span>
           </div>
-          <div className="w-full h-2.5 bg-[#252525] rounded-full overflow-hidden mb-2">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min((user.loyaltyPoints / 10) * 100, 100)}%` }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="h-full bg-gradient-to-r from-[#FFD700] to-[#FF8C00] rounded-full"
-            />
-          </div>
+          <LoyaltyProgressBar points={user.loyaltyPoints} height={10} className="mb-2" />
           <p className="text-gray-500" style={{ fontSize: 12 }}>
-            {user.loyaltyPoints >= 10
-              ? "You're eligible for a FREE booking!"
-              : `${10 - user.loyaltyPoints} more bookings for a free session`}
+            {loyaltyRewardsAvailable(user.loyaltyPoints) > 0
+              ? `${loyaltyRewardsAvailable(user.loyaltyPoints)} reward ready — ${LOYALTY_DISCOUNT_PERCENT}% off court fees`
+              : `${loyaltyPointsToNextReward(user.loyaltyPoints)} more completed booking(s) for ${LOYALTY_DISCOUNT_PERCENT}% off`}
           </p>
         </div>
       </div>
@@ -624,7 +524,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
         {/* Tabs */}
         <div className="flex bg-[#1A1A1A] rounded-xl p-1 mb-4">
-          {(["upcoming", "completed"] as const).map((tab) => (
+          {(["upcoming", "pending", "completed"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -648,11 +548,14 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             </div>
           ) : (
             filteredBookings.map((booking) => {
-              const status = (statusConfig as any)[booking.status] || statusConfig.completed;
+              const normalizedStatus = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in' ? 'checked_in' : booking.status;
+              const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id);
+              const status = isPendingReq ? statusConfig.pending_verification : ((statusConfig as any)[normalizedStatus] || statusConfig.pending_payment);
               const StatusIcon = status.icon;
               const sportColor = getSportColor(booking.sport);
-              const isUpcoming = ["confirmed", "pending_payment", "pending_verification", "rescheduled"].includes(booking.status);
+              const isUpcoming = ["confirmed", "pending", "pending_payment", "pending_verification", "rescheduled", "checked_in"].includes(normalizedStatus);
               const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
+              const pendingReq = (booking as any).pendingChangeRequest;
               const endH = parseInt(booking.time) + (booking.duration || 1);
               return (
                 <motion.div
@@ -686,6 +589,22 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                         )}
                         <p className="text-[#FF8C00] font-black ml-auto" style={{ fontSize: 15 }}>₱{booking.amount.toLocaleString()}</p>
                       </div>
+                      {isPendingReq && pendingReq?.type === 'reschedule' && (
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <div className="rounded-xl border border-white/8 bg-black/20 p-2">
+                            <p className="text-gray-500 font-black uppercase" style={{ fontSize: 8 }}>Before</p>
+                            <p className="text-gray-300 font-black mt-0.5" style={{ fontSize: 10 }}>
+                              {new Date(booking.date + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })} · {fmt12(booking.time)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-2">
+                            <p className="text-yellow-200 font-black uppercase" style={{ fontSize: 8 }}>Requested</p>
+                            <p className="text-white font-black mt-0.5" style={{ fontSize: 10 }}>
+                              {pendingReq.requestedDate ? new Date(pendingReq.requestedDate + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : 'Date missing'} · {pendingReq.requestedStartTime ? fmt12(pendingReq.requestedStartTime) : 'Time missing'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -718,59 +637,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
         </div>
       </div>
 
-      {/* Contact Info */}
-      <div className="px-5 mb-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Contact Info</h3>
-          <button
-            type="button"
-            onClick={() => {
-              setIsEditingAccount(false);
-              setActiveModal("settings");
-            }}
-            className="px-3 py-1.5 rounded-xl text-[#FF8C00] font-black"
-            style={{ fontSize: 12, background: "rgba(255,140,0,0.1)", border: "1px solid rgba(255,140,0,0.22)" }}
-          >
-            Edit
-          </button>
-        </div>
-        <div className="bg-[#1A1A1A] rounded-2xl p-4 border border-white/5 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#FF8C00]/20 flex items-center justify-center flex-shrink-0">
-              <Phone size={15} className="text-[#FF8C00]" />
-            </div>
-            <div>
-              <p className="text-gray-500" style={{ fontSize: 11 }}>Phone</p>
-              <p className="text-white font-black" style={{ fontSize: 14 }}>{user.phone}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#0047AB]/20 flex items-center justify-center flex-shrink-0">
-              <Mail size={15} className="text-[#0047AB]" />
-            </div>
-            <div>
-              <p className="text-gray-500" style={{ fontSize: 11 }}>Email</p>
-              <p className="text-white font-black" style={{ fontSize: 14 }}>{user.email}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Account Menu */}
       <div className="px-5 mb-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white" style={{ fontSize: 16, fontWeight: 900 }}>Account</h3>
-          <button
-            type="button"
-            onClick={() => {
-              setIsEditingAccount(false);
-              setActiveModal("settings");
-            }}
-            className="px-3 py-1.5 rounded-xl text-gray-300 font-black"
-            style={{ fontSize: 12, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-          >
-            Account Info
-          </button>
         </div>
         <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden divide-y divide-white/5">
           {[
@@ -941,23 +811,40 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
               {[
                 { label: "Booking Reminders", desc: "1 hour before your session", enabled: true },
                 { label: "Promotions & Deals", desc: "Weekly offers and discounts", enabled: false },
-                { label: "Loyalty Rewards", desc: "When you earn points", enabled: true },
+                {
+                  label: "Loyalty level-up celebration",
+                  desc: `Full-screen reward popup at ${LOYALTY_REWARD_THRESHOLD} points`,
+                  enabled: celebrationsEnabled,
+                  onToggle: user?.id
+                    ? () => {
+                        const next = !celebrationsEnabled;
+                        setCelebrationsEnabled(next);
+                        setLoyaltyCelebrationsEnabled(user.id, next);
+                      }
+                    : undefined,
+                },
               ].map((notif) => (
-                <div key={notif.label} className="flex items-center justify-between py-3 border-b border-white/5">
+                <button
+                  key={notif.label}
+                  type="button"
+                  disabled={!("onToggle" in notif) || !notif.onToggle}
+                  onClick={"onToggle" in notif ? notif.onToggle : undefined}
+                  className="w-full flex items-center justify-between py-3 border-b border-white/5 text-left disabled:cursor-default"
+                >
                   <div>
                     <p className="text-white font-black" style={{ fontSize: 14 }}>{notif.label}</p>
                     <p className="text-gray-500" style={{ fontSize: 12 }}>{notif.desc}</p>
                   </div>
                   <div
-                    className="w-12 h-6 rounded-full flex items-center px-1 transition-all"
+                    className="w-12 h-6 rounded-full flex items-center px-1 transition-all flex-shrink-0"
                     style={{ backgroundColor: notif.enabled ? "#FF8C00" : "#333" }}
                   >
-                    <div
+                    <motion.div
                       className="w-4 h-4 bg-white rounded-full shadow transition-transform"
                       style={{ transform: notif.enabled ? "translateX(24px)" : "translateX(0)" }}
                     />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </SettingsModal>
@@ -1053,9 +940,15 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             }} />
         )}
         {qrTarget && (
-          <QRTicketDialog booking={qrTarget} onClose={() => setQrTarget(null)} />
+          <BookingTicketModal booking={qrTarget} onClose={() => setQrTarget(null)} />
         )}
       </AnimatePresence>
+
+      <LoyaltyCelebrationModal
+        open={celebrationOpen}
+        onClose={closeCelebration}
+        rewardsUnlocked={rewardsUnlocked}
+      />
     </div>
   );
 }
