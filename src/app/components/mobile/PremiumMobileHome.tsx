@@ -153,8 +153,11 @@ interface MobileHomeProps {
 
 export function PremiumMobileHome({ onNavigate, onOpenAI }: MobileHomeProps) {
   const { user, bookings } = useUser();
-  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
+  const { announcements, dismissAnnouncement, clearUserNotifications, undismissedCount } = useAnnouncements();
   const [showNotifications, setShowNotifications] = useState(false);
+  const [confirmClearNotifications, setConfirmClearNotifications] = useState(false);
+  const [clearingNotifications, setClearingNotifications] = useState(false);
+  const [clearNotificationsError, setClearNotificationsError] = useState("");
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -218,11 +221,25 @@ export function PremiumMobileHome({ onNavigate, onOpenAI }: MobileHomeProps) {
               className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl overflow-hidden"
               style={{ background: SURF, border: "1px solid " + BORDER, borderBottom: "none", maxHeight: "70vh" }}>
               <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 rounded-full bg-white/20" /></div>
-              <div className="px-5 py-3 flex items-center justify-between border-b" style={{ borderColor: BORDER }}>
+              <div className="px-5 py-3 flex items-center justify-between border-b gap-3" style={{ borderColor: BORDER }}>
                 <p className="font-black" style={{ color: TP, fontSize: 17 }}>Notifications</p>
-                <button onClick={() => setShowNotifications(false)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.07)" }}>
-                  <X size={15} style={{ color: TS }} />
-                </button>
+                <div className="flex items-center gap-2">
+                  {announcements.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setClearNotificationsError("");
+                        setConfirmClearNotifications(true);
+                      }}
+                      className="px-3 h-8 rounded-xl font-black border"
+                      style={{ color: "#fca5a5", borderColor: "rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.08)", fontSize: 11 }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button onClick={() => setShowNotifications(false)} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.07)" }}>
+                    <X size={15} style={{ color: TS }} />
+                  </button>
+                </div>
               </div>
               <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: "55vh" }}>
                 {announcements.length === 0 ? (
@@ -245,6 +262,60 @@ export function PremiumMobileHome({ onNavigate, onOpenAI }: MobileHomeProps) {
                   </div>
                 ))}
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {confirmClearNotifications && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 z-[70]" onClick={() => setConfirmClearNotifications(false)} />
+            <motion.div initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 16 }}
+              className="fixed left-5 right-5 top-1/2 -translate-y-1/2 z-[80] rounded-3xl p-5 border shadow-2xl"
+              style={{ background: SURF, borderColor: BORDER }}>
+              <p className="font-black" style={{ color: TP, fontSize: 18 }}>Clear notifications?</p>
+              <p className="mt-2" style={{ color: TS, fontSize: 13, lineHeight: 1.5 }}>
+                This removes all account notifications from this device and the server.
+              </p>
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  disabled={clearingNotifications}
+                  onClick={() => setConfirmClearNotifications(false)}
+                  className="flex-1 h-11 rounded-2xl font-black"
+                  style={{ background: "rgba(255,255,255,0.07)", color: TP, fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={clearingNotifications}
+                  onClick={async () => {
+                    setClearingNotifications(true);
+                    try {
+                      await clearUserNotifications();
+                      setConfirmClearNotifications(false);
+                      setShowNotifications(false);
+                    } catch (error: any) {
+                      setClearNotificationsError(error?.message || "Could not clear notifications.");
+                    } finally {
+                      setClearingNotifications(false);
+                    }
+                  }}
+                  className="flex-1 h-11 rounded-2xl text-white font-black disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg,#ef4444,#dc2626)", fontSize: 13 }}
+                >
+                  {clearingNotifications ? "Clearing..." : "Clear all"}
+                </button>
+              </div>
+              {clearNotificationsError && (
+                <p className="mt-3 rounded-xl px-3 py-2 font-black"
+                  style={{ color: "#fecaca", background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)", fontSize: 12 }}>
+                  {clearNotificationsError}
+                </p>
+              )}
             </motion.div>
           </>
         )}

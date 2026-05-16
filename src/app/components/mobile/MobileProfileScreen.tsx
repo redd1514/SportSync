@@ -560,6 +560,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
               const sportColor = getSportColor(booking.sport);
               const isUpcoming = ["confirmed", "pending", "pending_payment", "pending_verification", "rescheduled", "checked_in"].includes(normalizedStatus);
               const fmt12 = (t: string) => { const h = parseInt(t); return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`; };
+              const pendingReq = (booking as any).pendingChangeRequest;
               const endH = parseInt(booking.time) + (booking.duration || 1);
               return (
                 <motion.div
@@ -593,6 +594,22 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
                         )}
                         <p className="text-[#FF8C00] font-black ml-auto" style={{ fontSize: 15 }}>₱{booking.amount.toLocaleString()}</p>
                       </div>
+                      {isPendingReq && pendingReq?.type === 'reschedule' && (
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <div className="rounded-xl border border-white/8 bg-black/20 p-2">
+                            <p className="text-gray-500 font-black uppercase" style={{ fontSize: 8 }}>Before</p>
+                            <p className="text-gray-300 font-black mt-0.5" style={{ fontSize: 10 }}>
+                              {new Date(booking.date + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })} · {fmt12(booking.time)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-2">
+                            <p className="text-yellow-200 font-black uppercase" style={{ fontSize: 8 }}>Requested</p>
+                            <p className="text-white font-black mt-0.5" style={{ fontSize: 10 }}>
+                              {pendingReq.requestedDate ? new Date(pendingReq.requestedDate + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : 'Date missing'} · {pendingReq.requestedStartTime ? fmt12(pendingReq.requestedStartTime) : 'Time missing'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 

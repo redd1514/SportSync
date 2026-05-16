@@ -102,6 +102,28 @@ app.post('/api/coaches', async (c) => {
 
 app.route('/api/coaches', coachesRouter);
 
+async function submitCoachingReview(c: any) {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const session = await coachingSessionService.submitReview(
+      id,
+      String(body.user_id || body.userId || ''),
+      Number(body.rating),
+      body.comment,
+    );
+    return c.json({
+      success: true,
+      admin_notes: (session as any).admin_notes,
+      reviewed_at: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to submit review' }, 400);
+  }
+}
+
+app.post('/api/coaching-sessions/:id/review', submitCoachingReview);
+app.post('/api/coaching-sessions/review/:id', submitCoachingReview);
 app.route('/api/coaching-sessions', coachingSessionsRouter);
 
 app.get('/api/coach-applications', async (c) => {

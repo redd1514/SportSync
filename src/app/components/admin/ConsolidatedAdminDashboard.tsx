@@ -28,6 +28,7 @@ import { useAddons } from '../../contexts/AddonsContext';
 import { useFacilityMap, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import { useAnnouncements, type Announcement } from '../../contexts/AnnouncementsContext';
 import { useAdminAPI } from '../../hooks/useAdminAPI';
+import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { parseBookingNotes } from '../../../api/utils/bookingMap.ts';
 
 type AdminTab = 'executive' | 'facility' | 'calendar' | 'coaching' | 'settings';
@@ -980,18 +981,23 @@ function FacilityMapBuilderTab() {
 
 // ── Master Calendar ──────────────────────────────────────────────────────────
 function MasterCalendarTab() {
-  const { addBooking, cancellationRequests, updateCancellationRequest, updateBooking, bookings } = useUser();
+  const { addBooking, cancellationRequests, updateCancellationRequest, updateBooking, bookings, user, calcCourtPrice } = useUser();
   const { requests, updateRequestStatus } = useCoaching();
+  const { createDeskBooking } = (useBookingAPI as any)();
   const [showManualBooking, setShowManualBooking] = useState(false);
   const [showBulkBooking, setShowBulkBooking] = useState(false);
   const [manualForm, setManualForm] = useState({ customerName: '', contactNumber: '09', sport: 'Basketball', court: '', date: '', time: '', duration: 1 });
-  const [bulkForm, setBulkForm] = useState({ sport: 'Basketball', court: '', time: '', startDate: '', endDate: '', recurringPattern: 'weekly' });
+  const [bulkForm, setBulkForm] = useState({ sport: 'Basketball', court: '', time: '', startDate: '', endDate: '', recurringPattern: 'weekly', duration: 2 });
   const [bulkEndTime, setBulkEndTime] = useState('00:00');
   const [bulkSuccess, setBulkSuccess] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState('');
   const [manualSuccess, setManualSuccess] = useState('');
   const [pendingAction, setPendingAction] = useState<{ id: string; approved: boolean } | null>(null);
 
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length;
+  const sportOptions = ['Basketball', 'Volleyball', 'Badminton', 'Pickleball', 'Billiards', 'Table Tennis'];
+  const courtOptions = ALL_COURTS.filter((court) => court.sport === bulkForm.sport);
 
   const handleManualBooking = () => {
     const name = manualForm.customerName || 'Walk-in Customer';
@@ -1000,6 +1006,60 @@ function MasterCalendarTab() {
     setManualForm({ customerName: '', contactNumber: '09', sport: 'Basketball', court: '', date: '', time: '', duration: 1 });
     setManualSuccess(`✓ Manual booking confirmed for ${name} — ${manualForm.sport} on ${manualForm.date} at ${manualForm.time}.`);
     setTimeout(() => setManualSuccess(''), 6000);
+  };
+
+  const handleBulkBooking = async () => {
+    if (!bulkForm.startDate || !bulkForm.endDate || !bulkForm.time || !bulkForm.court) {
+      setBulkError('Choose a court, start date, end date, and start time.');
+      return;
+    }
+    const start = new Date(`${bulkForm.startDate}T00:00:00`);
+    const end = new Date(`${bulkForm.endDate}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      setBulkError('Use a valid date range.');
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkError('');
+    let current = new Date(start);
+    let count = 0;
+    const inc = bulkForm.recurringPattern === 'weekly' ? 7 : 14;
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
+
+    try {
+      while (current <= end && count < 20) {
+        const date = current.toISOString().split('T')[0];
+        const amount = Math.round(calcCourtPrice(bulkForm.sport, date, bulkForm.time.slice(0, 5)) * bulkForm.duration);
+        try {
+          const out = await createDeskBooking({
+            court: bulkForm.court,
+            sport: bulkForm.sport,
+            booking_date: date,
+            start_time: bulkForm.time,
+            duration_hours: bulkForm.duration,
+            total_price: amount,
+            customer_name: 'Liga Booking',
+            payment_method: 'cash',
+            source: 'bulk_liga',
+            add_ons: `Bulk/Liga booking (${bulkForm.recurringPattern})`,
+            staff_id: staffId,
+          });
+          if (out?.booking) addBooking(out.booking as any);
+        } catch (err) {
+          console.error('[AdminCalendar] bulk desk booking failed, local fallback', err);
+          addBooking({ id: `BK${Date.now()}_${count}`, sport: bulkForm.sport, date, time: bulkForm.time, duration: bulkForm.duration, court: bulkForm.court, status: 'confirmed', amount, paymentStatus: 'paid', createdAt: new Date().toISOString(), customerName: 'Liga Booking', addOns: 'Bulk/Liga booking' });
+        }
+        current = new Date(current.setDate(current.getDate() + inc));
+        count++;
+      }
+      setShowBulkBooking(false);
+      setBulkSuccess(`Created ${count} recurring booking${count !== 1 ? 's' : ''} for ${bulkForm.sport}.`);
+      setTimeout(() => setBulkSuccess(''), 6000);
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const executeCancellation = (id: string, approved: boolean) => {
@@ -1026,10 +1086,11 @@ function MasterCalendarTab() {
           <p className="text-gray-500" style={{ fontSize: 13 }}>Manage all bookings and schedules</p>
         </div>
         <div className="flex gap-3 flex-wrap">
-          <button onClick={() => setShowManualBooking(true)} className="flex items-center gap-2 text-white px-4 py-2 rounded-xl transition-colors font-black" style={{ fontSize: 13, background: 'linear-gradient(135deg,#FF8C00,#e67e00)' }}>
-            <Plus size={16} /> Manual Booking
-          </button>
-          <button onClick={() => setShowBulkBooking(true)} className="flex items-center gap-2 bg-[#FF8C00] text-white px-4 py-2 rounded-xl hover:bg-[#e67e00] transition-colors font-black" style={{ fontSize: 13 }}>
+          <button onClick={() => {
+            setBulkError('');
+            setBulkForm(f => ({ ...f, court: f.court || courtOptions[0]?.name || '' }));
+            setShowBulkBooking(true);
+          }} className="flex items-center gap-2 bg-[#FF8C00] text-white px-4 py-2 rounded-xl hover:bg-[#e67e00] transition-colors font-black" style={{ fontSize: 13 }}>
             <Calendar size={16} /> Liga/Bulk Booking
           </button>
         </div>
@@ -1179,8 +1240,42 @@ function MasterCalendarTab() {
             </div>
             <div className="space-y-4">
               <div>
+                <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Sport</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {sportOptions.map(s => {
+                    const active = bulkForm.sport === s;
+                    const color = getSportColor(s);
+                    return (
+                      <button key={s} type="button"
+                        onClick={() => {
+                          const firstCourt = ALL_COURTS.find(court => court.sport === s)?.name || '';
+                          setBulkForm(f => ({ ...f, sport: s, court: firstCourt }));
+                        }}
+                        className="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all"
+                        style={{ background: active ? `${color}18` : 'rgba(255,255,255,0.04)', borderColor: active ? `${color}70` : 'rgba(255,255,255,0.08)' }}>
+                        <SportIcon sport={s} size={14} color={active ? color : '#777'} />
+                        <span className="font-black truncate" style={{ fontSize: 12, color: active ? '#fff' : '#888' }}>{s}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Court</label>
-                <input type="text" placeholder="e.g. Basketball 1" value={bulkForm.court} onChange={e => setBulkForm({ ...bulkForm, court: e.target.value })} className={INPUT} style={{ fontSize: 13 }} />
+                <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                  {courtOptions.map(court => {
+                    const active = bulkForm.court === court.name;
+                    const color = getSportColor(bulkForm.sport);
+                    return (
+                      <button key={court.id || court.name} type="button" onClick={() => setBulkForm(f => ({ ...f, court: court.name }))}
+                        className="rounded-xl border px-3 py-2 text-left transition-all"
+                        style={{ background: active ? `${color}18` : 'rgba(255,255,255,0.04)', borderColor: active ? `${color}70` : 'rgba(255,255,255,0.08)' }}>
+                        <span className="block text-white font-black truncate" style={{ fontSize: 12 }}>{court.name}</span>
+                        <span className="block text-gray-600" style={{ fontSize: 10 }}>{bulkForm.sport}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div>
                 <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>START DATE & TIME</p>
@@ -1205,38 +1300,32 @@ function MasterCalendarTab() {
                 />
               </div>
               <div>
-                <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Sport</label>
-                <select value={bulkForm.sport} onChange={e => setBulkForm({ ...bulkForm, sport: e.target.value })} className={INPUT} style={{ fontSize: 13 }}>
-                  {['Basketball', 'Volleyball', 'Badminton', 'Pickleball', 'Billiards', 'Table Tennis'].map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Pattern</label>
-                <select value={bulkForm.recurringPattern} onChange={e => setBulkForm({ ...bulkForm, recurringPattern: e.target.value })} className={INPUT} style={{ fontSize: 13 }}>
-                  <option value="weekly">Weekly</option>
-                  <option value="biweekly">Bi-weekly</option>
-                </select>
+                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#101010] p-1 border border-white/8">
+                  {[
+                    { value: 'weekly', label: 'Weekly', desc: 'Every 7 days' },
+                    { value: 'biweekly', label: 'Bi-weekly', desc: 'Every 14 days' },
+                  ].map(pattern => {
+                    const active = bulkForm.recurringPattern === pattern.value;
+                    return (
+                      <button key={pattern.value} type="button" onClick={() => setBulkForm(f => ({ ...f, recurringPattern: pattern.value }))}
+                        className="rounded-xl px-3 py-2 text-left transition-all"
+                        style={{ background: active ? 'linear-gradient(135deg,#FF8C00,#e67e00)' : 'transparent' }}>
+                        <span className="block font-black" style={{ fontSize: 12, color: active ? '#fff' : '#aaa' }}>{pattern.label}</span>
+                        <span className="block" style={{ fontSize: 10, color: active ? 'rgba(255,255,255,0.75)' : '#555' }}>{pattern.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+              {bulkError && <p className="text-red-400 font-black" style={{ fontSize: 12 }}>{bulkError}</p>}
               <button
-                onClick={() => {
-                  const start = new Date(bulkForm.startDate);
-                  const end = new Date(bulkForm.endDate);
-                  let current = new Date(start);
-                  let count = 0;
-                  while (current <= end && count < 20) {
-                    addBooking({ id: `BK${Date.now()}_${count}`, sport: bulkForm.sport, date: current.toISOString().split('T')[0], time: bulkForm.time, duration: 2, court: bulkForm.court, status: 'confirmed', amount: 1000, paymentStatus: 'paid', createdAt: new Date().toISOString(), customerName: 'Liga Booking', addOns: 'Bulk/Liga booking' });
-                    const inc = bulkForm.recurringPattern === 'weekly' ? 7 : 14;
-                    current = new Date(current.setDate(current.getDate() + inc));
-                    count++;
-                  }
-                  setShowBulkBooking(false);
-                  setBulkSuccess(`✓ ${count} recurring booking${count !== 1 ? 's' : ''} created for ${bulkForm.sport}!`);
-                  setTimeout(() => setBulkSuccess(''), 6000);
-                }}
-                className="w-full bg-[#FF8C00] text-white py-3 rounded-xl font-black hover:bg-[#e67e00] transition-colors"
+                onClick={() => void handleBulkBooking()}
+                disabled={bulkBusy}
+                className="w-full bg-[#FF8C00] text-white py-3 rounded-xl font-black hover:bg-[#e67e00] transition-colors disabled:opacity-60 disabled:cursor-wait flex items-center justify-center gap-2"
                 style={{ fontSize: 14 }}
               >
-                Create Bulk Bookings
+                {bulkBusy ? <><Loader2 size={16} className="animate-spin" /> Creating...</> : 'Create Bulk Bookings'}
               </button>
             </div>
           </div>
@@ -1346,6 +1435,8 @@ function PricingRatesTab() {
   const { systemSettings, updateSystemSettings } = useUser();
   const { addonsBySport, updateAddon, customSports } = useAddons();
   const [saved, setSaved] = useState(false);
+  const [pricingConfirmOpen, setPricingConfirmOpen] = useState(false);
+  const [pricingSaving, setPricingSaving] = useState(false);
 
   const updateCourtRate = (sport: string, field: string, val: number) => {
     updateSystemSettings({
@@ -1483,13 +1574,34 @@ function PricingRatesTab() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2500); }}
-          className="px-6 py-2.5 rounded-xl text-white font-black transition-all flex items-center gap-2"
+        <button onClick={() => setPricingConfirmOpen(true)} disabled={pricingSaving}
+          className="px-6 py-2.5 rounded-xl text-white font-black transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait"
           style={{ background: saved ? '#22c55e' : 'linear-gradient(135deg,#FF8C00,#e67e00)', fontSize: 14 }}>
-          {saved ? <><Check size={15} /> Saved!</> : 'Save All Pricing'}
+          {pricingSaving ? <><Loader2 size={15} className="animate-spin" /> Saving...</> : saved ? <><Check size={15} /> Saved!</> : 'Save All Pricing'}
         </button>
         {saved && <p className="text-green-400" style={{ fontSize: 12 }}>Changes apply to all new bookings immediately.</p>}
       </div>
+      <AnimatePresence>
+        {pricingConfirmOpen && (
+          <ConfirmModal opts={{
+            title: 'Save Pricing?',
+            body: 'Apply these rates to new bookings, add-ons, and admin pricing tools.',
+            confirmLabel: pricingSaving ? 'Saving...' : 'Save Pricing',
+            confirmColor: '#FF8C00',
+            icon: pricingSaving ? <Loader2 size={24} className="text-white animate-spin" /> : <DollarSign size={24} className="text-white" />,
+            onCancel: () => setPricingConfirmOpen(false),
+            onConfirm: () => {
+              setPricingSaving(true);
+              setTimeout(() => {
+                setPricingConfirmOpen(false);
+                setPricingSaving(false);
+                setSaved(true);
+                setTimeout(() => setSaved(false), 2500);
+              }, 700);
+            },
+          }} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1502,6 +1614,8 @@ function SystemSettingsTab() {
   const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '', type: 'promotion' as Announcement['type'] });
   const [announceSent, setAnnounceSent] = useState('');
   const [savedBiz, setSavedBiz] = useState(false);
+  const [bizConfirmOpen, setBizConfirmOpen] = useState(false);
+  const [bizSaving, setBizSaving] = useState(false);
 
   const SETTINGS_TABS: { id: SettingsSubTab; icon: any; label: string; desc: string }[] = [
     { id: 'business',      icon: Building,   label: 'Business Config', desc: 'Hours & policies'       },
@@ -1585,32 +1699,42 @@ function SystemSettingsTab() {
           </div>
           <div className="bg-[#1A1A1A] rounded-2xl p-6 border border-white/5">
             <div className="flex items-center gap-2 mb-4">
-              <DollarSign size={14} className="text-green-400" />
-              <h4 className="text-white font-black" style={{ fontSize: 15 }}>Payment Settings</h4>
-            </div>
-            <div>
-              <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Downpayment %</label>
-              <input type="number" min={0} max={100} value={systemSettings.downpaymentPercentage} onChange={e => updateSystemSettings({ downpaymentPercentage: parseInt(e.target.value) })} className={INPUT} style={{ fontSize: 13 }} />
-              <p className="text-gray-500 mt-2" style={{ fontSize: 12 }}>{systemSettings.downpaymentPercentage}% required upfront</p>
-            </div>
-          </div>
-          <div className="bg-[#1A1A1A] rounded-2xl p-6 border border-white/5">
-            <div className="flex items-center gap-2 mb-4">
               <AlertTriangle size={14} className="text-amber-400" />
               <h4 className="text-white font-black" style={{ fontSize: 15 }}>Cancellation Policy</h4>
             </div>
             <textarea value={systemSettings.cancellationPolicy} onChange={e => updateSystemSettings({ cancellationPolicy: e.target.value })} rows={4} className={INPUT} style={{ fontSize: 13 }} />
           </div>
           <div className="lg:col-span-2 flex items-center gap-3">
-            <button onClick={() => { setSavedBiz(true); setTimeout(() => setSavedBiz(false), 2500); }}
-              className="px-6 py-2.5 rounded-xl text-white font-black transition-all flex items-center gap-2"
+            <button onClick={() => setBizConfirmOpen(true)} disabled={bizSaving}
+              className="px-6 py-2.5 rounded-xl text-white font-black transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait"
               style={{ background: savedBiz ? '#22c55e' : 'linear-gradient(135deg,#FF8C00,#e67e00)', fontSize: 14 }}>
-              {savedBiz ? <><Check size={15} /> Saved!</> : 'Save Configuration'}
+              {bizSaving ? <><Loader2 size={15} className="animate-spin" /> Saving...</> : savedBiz ? <><Check size={15} /> Saved!</> : 'Save Configuration'}
             </button>
             {savedBiz && <p className="text-green-400" style={{ fontSize: 12 }}>Settings saved successfully.</p>}
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {bizConfirmOpen && (
+          <ConfirmModal opts={{
+            title: 'Save Business Config?',
+            body: 'Opening hours and booking limits affect the dates and times users can book.',
+            confirmLabel: bizSaving ? 'Saving...' : 'Save Config',
+            confirmColor: '#FF8C00',
+            icon: bizSaving ? <Loader2 size={24} className="text-white animate-spin" /> : <Settings size={24} className="text-white" />,
+            onCancel: () => setBizConfirmOpen(false),
+            onConfirm: () => {
+              setBizSaving(true);
+              setTimeout(() => {
+                setBizConfirmOpen(false);
+                setBizSaving(false);
+                setSavedBiz(true);
+                setTimeout(() => setSavedBiz(false), 2500);
+              }, 700);
+            },
+          }} />
+        )}
+      </AnimatePresence>
 
       {sub === 'roles' && <RoleManagementAdmin />}
 
@@ -1712,6 +1836,17 @@ export function ConsolidatedAdminDashboard({ onLogout }: { onLogout: () => void 
   const [activeTab, setActiveTab] = useState<AdminTab>('executive');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onOpenCalendar = () => setActiveTab('calendar');
+    const onOpenInbox = () => setActiveTab('calendar');
+    window.addEventListener('sportsync:open-master-calendar', onOpenCalendar);
+    window.addEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    return () => {
+      window.removeEventListener('sportsync:open-master-calendar', onOpenCalendar);
+      window.removeEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    };
+  }, []);
 
   const renderContent = () => {
     switch (activeTab) {

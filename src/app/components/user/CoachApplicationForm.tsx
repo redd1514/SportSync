@@ -85,7 +85,7 @@ export function CoachApplicationForm() {
     return sameEmail || sameId;
   });
   const activeNewApplication = myApplications.find((app) =>
-    (app.applicationType || "new") === "new" && app.status === "pending"
+    (app.applicationType || "new") === "new" && (app.status === "pending" || app.status === "approved")
   );
   const pendingCoachRequest = myApplications.find((app) =>
     app.applicationType !== "new" && app.status === "pending"
@@ -129,6 +129,7 @@ export function CoachApplicationForm() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as { error?: string }).error || "Could not submit application");
+      if ((data as any)?.id) setApplications((prev) => [data as CoachApplication, ...prev]);
       setSubmitted(true);
       setStep(3);
     } catch (e) {
@@ -324,10 +325,10 @@ export function CoachApplicationForm() {
           <div className="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)" }}>
             <CheckCircle size={40} className="text-green-400" />
           </div>
-          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Application Submitted!</h2>
+          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Waiting for Admin Approval</h2>
           <p style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
             Your coaching application for <strong style={{ color: TEXT_PRIMARY }}>{sport}</strong> has been received. 
-            Our admin team will review it and respond within 24 hours via your account notifications.
+            You will be notified when admin accepts or rejects it. If accepted, your coach badge will appear on your profile.
           </p>
           <div className="rounded-2xl p-4 border mb-6" style={{ background: SURFACE2, borderColor: BORDER }}>
             <div className="grid grid-cols-2 gap-3 text-left">
@@ -349,14 +350,6 @@ export function CoachApplicationForm() {
               </div>
             </div>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-            onClick={() => { setStep(0); setSubmitted(false); setSport(""); setBio(""); setAvailability([]); setPhotoUrl(""); }}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-black transition-all"
-            style={{ fontSize: 14, background: `${ACCENT_BLUE}18`, border: `1px solid ${ACCENT_BLUE}40`, color: "#60a5fa" }}
-          >
-            <RefreshCw size={15} /> Submit Another Application
-          </motion.button>
         </motion.div>
       </div>
     );

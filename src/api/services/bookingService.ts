@@ -292,16 +292,25 @@ export const bookingService = {
         const bookingIds = data.map((b: any) => b.id);
         const { data: requests } = await supabase
           .from('booking_requests')
-          .select('booking_id')
+          .select('id, booking_id, request_type, reason, requested_new_date, requested_new_start_time, requested_new_end_time, created_at')
           .in('booking_id', bookingIds)
           .eq('status', 'pending');
           
         const mapped = data.map((b: any) => {
-           const hasPendingReq = requests?.some(r => r.booking_id === b.id);
+           const pendingReq = requests?.find(r => r.booking_id === b.id);
            return {
              ...deskAdminRowToClientBooking(mapBookingRowToAdmin(b)),
-             cancellationRequested: hasPendingReq || false,
-             cancellation_requested: hasPendingReq || false
+             cancellationRequested: !!pendingReq,
+             cancellation_requested: !!pendingReq,
+             pendingChangeRequest: pendingReq ? {
+               id: pendingReq.id,
+               type: pendingReq.request_type,
+               reason: pendingReq.reason || '',
+               requestedDate: pendingReq.requested_new_date || null,
+               requestedStartTime: pendingReq.requested_new_start_time || null,
+               requestedEndTime: pendingReq.requested_new_end_time || null,
+               createdAt: pendingReq.created_at || null,
+             } : null,
            };
         });
         return mapped as BookingResponse[];

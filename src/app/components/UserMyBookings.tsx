@@ -115,6 +115,7 @@ export function UserMyBookings() {
   const [cancellationReason, setCancellationReason] = useState('');
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [checkingTimes, setCheckingTimes] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -300,7 +301,7 @@ export function UserMyBookings() {
       if (!user?.id) throw new Error('Please sign in again.');
       await requestBookingCancellation(selectedBooking, user.id, cancellationReason);
       const latest = await fetchBookings();
-      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested));
+      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested || b.pendingChangeRequest));
       if (!serverHasPending) setLocalPendingRequests(prev => [...prev, selectedBooking]);
       setShowCancelModal(false);
       setSelectedBooking(null);
@@ -324,15 +325,16 @@ export function UserMyBookings() {
     setIsSubmitting(true);
     try {
       if (!user?.id) throw new Error('Please sign in again.');
-      await requestBookingReschedule(selectedBooking, user.id, 'Reschedule request', rescheduleDate, rescheduleTime);
+      await requestBookingReschedule(selectedBooking, user.id, rescheduleReason.trim() || 'No reason provided', rescheduleDate, rescheduleTime);
 
       const latest = await fetchBookings();
-      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested));
+      const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested || b.pendingChangeRequest));
       if (!serverHasPending) setLocalPendingRequests(prev => [...prev, selectedBooking]);
       setShowRescheduleModal(false);
       setSelectedBooking(null);
       setRescheduleDate('');
       setRescheduleTime('');
+      setRescheduleReason('');
       
       toast.success('Reschedule request submitted! Admin will review your request.');
     } catch (e: any) {
@@ -342,7 +344,42 @@ export function UserMyBookings() {
     }
   };
 
-  const StatusBadge = ({ booking }: { booking: any }) => {
+  const BookingGridSkeleton = ({ count = 6 }: { count?: number }) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="bg-[#141414] rounded-3xl border border-white/5 p-6 animate-pulse">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="w-12 h-12 bg-white/8 rounded-2xl flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="w-28 h-5 bg-white/8 rounded-lg" />
+              <div className="w-40 h-3 bg-white/5 rounded" />
+            </div>
+            <div className="w-16 h-5 bg-white/5 rounded-full" />
+          </div>
+          <div className="flex gap-6">
+            <div className="flex-1 space-y-4">
+              {[0, 1, 2].map(j => (
+                <div key={j} className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-white/5 rounded-xl flex-shrink-0" />
+                  <div className="space-y-1">
+                    <div className="w-10 h-2 bg-white/5 rounded" />
+                    <div className="w-24 h-4 bg-white/8 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="w-28 h-28 bg-white/5 rounded-2xl flex-shrink-0" />
+          </div>
+          <div className="border-t border-white/5 mt-5 pt-5 flex gap-3">
+            <div className="flex-1 h-10 bg-white/5 rounded-xl" />
+            <div className="flex-1 h-10 bg-white/5 rounded-xl" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const StatusBadge = ({ booking, pendingOverride = false }: { booking: any; pendingOverride?: boolean }) => {
     let label = 'PENDING';
     let bg = 'bg-gray-500/15';
     let text = 'text-gray-400';
@@ -351,7 +388,13 @@ export function UserMyBookings() {
 
     const isCheckedIn = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in';
 
-    if (isCheckedIn) {
+    if (pendingOverride) {
+      label = 'PENDING';
+      bg = 'bg-yellow-500/10';
+      text = 'text-yellow-400';
+      border = 'border-yellow-500/25';
+      dot = 'bg-yellow-400';
+    } else if (isCheckedIn) {
       label = 'ONGOING';
       bg = 'bg-emerald-500/10';
       text = 'text-emerald-400';
@@ -412,11 +455,16 @@ export function UserMyBookings() {
     return `${hour}:${m} ${ampm}`;
   };
 
+  const formatDateShort = (date: string) => (
+    date?.includes('-') ? format(parseBookingDate(date), 'MMM d, yyyy') : date
+  );
+
   const BookingCard = ({ booking }: { booking: any }) => {
     const color = getSportColor(booking.sport);
     const isPast = booking.status === 'completed' || booking.status === 'cancelled';
-    const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id);
+    const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id) || !!booking.pendingChangeRequest;
     const canModify = !isPast && !isPendingReq && booking.status !== 'pending' && booking.status !== 'pending_verification' && booking.status !== 'checked_in';
+    const pendingReq = booking.pendingChangeRequest;
 
     const { scanValue, displayCode } = resolveBookingTicketToken(booking.refCode, booking.id);
 
@@ -446,7 +494,7 @@ export function UserMyBookings() {
                 </p>
               </div>
             </div>
-            <StatusBadge booking={booking} />
+            <StatusBadge booking={booking} pendingOverride={isPendingReq} />
           </div>
 
           <div className="flex flex-col sm:flex-row gap-6 mb-6 flex-1">
@@ -510,11 +558,29 @@ export function UserMyBookings() {
 
           <div className="mt-auto border-t border-white/5 pt-5">
             {isPendingReq && (
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-2 flex items-center gap-2">
-                <AlertCircle size={14} className="text-yellow-400 flex-shrink-0" />
-                <p className="text-yellow-400 font-bold" style={{ fontSize: 11 }}>
-                  Change request pending review by Admin
-                </p>
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={14} className="text-yellow-400 flex-shrink-0" />
+                  <p className="text-yellow-400 font-bold" style={{ fontSize: 11 }}>
+                    {pendingReq?.type === 'reschedule' ? 'Reschedule request pending review' : 'Change request pending review by Admin'}
+                  </p>
+                </div>
+                {pendingReq?.type === 'reschedule' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                    <div className="rounded-lg border border-white/8 bg-black/20 p-2.5">
+                      <p className="text-gray-500 font-black uppercase" style={{ fontSize: 8 }}>Before</p>
+                      <p className="text-gray-200 font-black mt-1" style={{ fontSize: 11 }}>
+                        {formatDateShort(booking.date)} · {formatTimeAMPM(booking.time)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 p-2.5">
+                      <p className="text-yellow-200 font-black uppercase" style={{ fontSize: 8 }}>Requested</p>
+                      <p className="text-white font-black mt-1" style={{ fontSize: 11 }}>
+                        {pendingReq.requestedDate ? formatDateShort(pendingReq.requestedDate) : 'Date missing'} · {pendingReq.requestedStartTime ? formatTimeAMPM(pendingReq.requestedStartTime) : 'Time missing'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -643,18 +709,7 @@ export function UserMyBookings() {
             </div>
           </div>
         )}
-        {userBookings.length === 0 ? (
-          <div className="text-center py-16">
-            <Calendar size={48} className="text-gray-600 mx-auto mb-4" />
-            <h3 className="text-white font-black mb-2" style={{ fontSize: 18 }}>
-              No bookings yet
-            </h3>
-            <p className="text-gray-500" style={{ fontSize: 14 }}>
-              Start by booking a court to see your reservations here
-            </p>
-          </div>
-        ) : isRefreshing ? (
-          /* ── Facebook-style skeleton loader ── */
+        {(isRefreshing || loading) ? (
           <div className="space-y-5">
             <div className="grid grid-cols-3 gap-4 mb-8">
               {[0,1,2].map(i => (
@@ -665,38 +720,17 @@ export function UserMyBookings() {
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-              {[0,1,2,3,4,5].map(i => (
-                <div key={i} className="bg-[#141414] rounded-3xl border border-white/5 p-6 animate-pulse">
-                  <div className="flex items-start gap-4 mb-6">
-                    <div className="w-12 h-12 bg-white/8 rounded-2xl flex-shrink-0" />
-                    <div className="flex-1 space-y-2">
-                      <div className="w-28 h-5 bg-white/8 rounded-lg" />
-                      <div className="w-40 h-3 bg-white/5 rounded" />
-                    </div>
-                    <div className="w-16 h-5 bg-white/5 rounded-full" />
-                  </div>
-                  <div className="flex gap-6">
-                    <div className="flex-1 space-y-4">
-                      {[0,1,2].map(j => (
-                        <div key={j} className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-white/5 rounded-xl flex-shrink-0" />
-                          <div className="space-y-1">
-                            <div className="w-10 h-2 bg-white/5 rounded" />
-                            <div className="w-24 h-4 bg-white/8 rounded" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="w-28 h-28 bg-white/5 rounded-2xl flex-shrink-0" />
-                  </div>
-                  <div className="border-t border-white/5 mt-5 pt-5 flex gap-3">
-                    <div className="flex-1 h-10 bg-white/5 rounded-xl" />
-                    <div className="flex-1 h-10 bg-white/5 rounded-xl" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <BookingGridSkeleton />
+          </div>
+        ) : userBookings.length === 0 ? (
+          <div className="text-center py-16">
+            <Calendar size={48} className="text-gray-600 mx-auto mb-4" />
+            <h3 className="text-white font-black mb-2" style={{ fontSize: 18 }}>
+              No bookings yet
+            </h3>
+            <p className="text-gray-500" style={{ fontSize: 14 }}>
+              Start by booking a court to see your reservations here
+            </p>
           </div>
         ) : (
           <>
@@ -924,6 +958,7 @@ export function UserMyBookings() {
                   setSelectedBooking(null);
                   setRescheduleDate('');
                   setRescheduleTime('');
+                  setRescheduleReason('');
                 }}
                 className="text-gray-400 hover:text-white"
               >
@@ -960,6 +995,19 @@ export function UserMyBookings() {
                   sessionDurationHours={selectedBookingDuration}
                 />
               )}
+              <div>
+                <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>
+                  Reason for reschedule <span className="text-gray-600">(optional)</span>
+                </label>
+                <textarea
+                  value={rescheduleReason}
+                  onChange={e => setRescheduleReason(e.target.value)}
+                  placeholder="Add context for the front desk..."
+                  rows={3}
+                  className="w-full bg-[#252525] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#0047AB]"
+                  style={{ fontSize: 13, lineHeight: 1.5 }}
+                />
+              </div>
             </div>
 
             <div className="flex gap-3">
@@ -969,6 +1017,7 @@ export function UserMyBookings() {
                   setSelectedBooking(null);
                   setRescheduleDate('');
                   setRescheduleTime('');
+                  setRescheduleReason('');
                 }}
                 className="flex-1 bg-gray-500/20 text-gray-400 px-4 py-2.5 rounded-xl hover:bg-gray-500/30 transition-colors font-black"
                 style={{ fontSize: 14 }}

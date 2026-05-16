@@ -36,6 +36,22 @@ function parseAcceptanceDetails(adminNotes?: string): Partial<CoachingRequest> {
   }
 }
 
+function parseReviewDetails(adminNotes?: string): Partial<CoachingRequest> {
+  if (!adminNotes) return {};
+  const match = adminNotes.match(/COACHING_REVIEW:(\{.*\})/s);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      rating: typeof parsed.rating === "number" ? parsed.rating : undefined,
+      reviewComment: typeof parsed.comment === "string" ? parsed.comment : undefined,
+      reviewedAt: typeof parsed.reviewedAt === "string" ? parsed.reviewedAt : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function parseLinkedBooking(notes?: string): Partial<CoachingRequest> {
   if (!notes) return {};
   const match = notes.match(/linked_booking:([0-9a-f-]+)/i);
@@ -111,6 +127,7 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     ...parseLinkedBooking(notes),
     ...parseReservedBookingDetails(notes),
     ...parseAcceptanceDetails(adminNotes),
+    ...parseReviewDetails(adminNotes),
     status,
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
     viewerIsCoachForThisSession: row.viewerIsCoachForThisSession as boolean | undefined,
@@ -165,6 +182,9 @@ export interface CoachingRequest {
   coachFee?: number;
   totalAmount?: number;
   coachingMessage?: string;
+  rating?: number;
+  reviewComment?: string;
+  reviewedAt?: string;
   /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined | completed = checked out */
   status: "pending" | "confirmed" | "rejected" | "completed";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
@@ -179,6 +199,7 @@ interface CoachingContextType {
   setActiveRequestId: (id: string | null) => void;
   addRequest: (req: Omit<CoachingRequest, "id" | "status">) => Promise<string>;
   updateRequestStatus: (id: string, status: "pending" | "confirmed" | "rejected" | "cancelled" | "completed", adminNotes?: string) => Promise<void>;
+  submitCoachReview: (id: string, rating: number, comment?: string) => Promise<void>;
   addCoach: (coach: Omit<Coach, "id">) => Promise<void>;
   updateCoach: (id: string, data: Partial<Coach>) => Promise<void>;
   deleteCoach: (id: string) => Promise<void>;
@@ -369,7 +390,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       const res = await apiFetch(`/api/coaching-sessions/${encodeURIComponent(id)}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, admin_notes: adminNotes }),
+        body: JSON.stringify({ status, admin_notes: adminNotes, staff_id: user?.id }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -393,6 +414,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
                           : 'pending',
                 adminNotes: adminNotes ?? r.adminNotes,
                 ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
+                ...parseReviewDetails(adminNotes ?? r.adminNotes),
               }
             : r
         )
@@ -403,6 +425,36 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       console.error('Error updating request status:', error);
       throw error;
     }
+  };
+
+  const submitCoachReview = async (id: string, rating: number, comment?: string): Promise<void> => {
+    if (!user?.id) throw new Error("Please sign in again.");
+    const payload = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user.id, rating, comment }),
+    };
+    let res = await apiFetch(`/api/coaching-sessions/${encodeURIComponent(id)}/review`, payload);
+    let data = await res.json().catch(() => ({}));
+    if (res.status === 404) {
+      res = await apiFetch(`/api/coaching-sessions/review/${encodeURIComponent(id)}`, payload);
+      data = await res.json().catch(() => ({}));
+    }
+    if (!res.ok) throw new Error((data as { error?: string }).error || "Failed to submit review");
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              rating,
+              reviewComment: comment || "",
+              reviewedAt: String((data as any).reviewed_at || new Date().toISOString()),
+              adminNotes: String((data as any).admin_notes || r.adminNotes || ""),
+            }
+          : r
+      )
+    );
+    window.dispatchEvent(new Event("sportsync:coaching-refresh"));
   };
 
   const addCoach = async (coach: Omit<Coach, "id">) => {
@@ -472,6 +524,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
         requests,
         addRequest,
         updateRequestStatus,
+        submitCoachReview,
         addCoach,
         updateCoach,
         deleteCoach,
@@ -500,6 +553,7 @@ export function useCoaching() {
       setActiveRequestId: () => {},
       addRequest: async () => "",
       updateRequestStatus: async () => {},
+      submitCoachReview: async () => {},
       addCoach: async () => {},
       updateCoach: async () => {},
       deleteCoach: async () => {},

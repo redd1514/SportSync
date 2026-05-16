@@ -207,7 +207,7 @@ function InlineCalendar({
 
 /* ─── Time Slot Grid (flat, range-aware) ─────────────────────────── */
 function TimeSlotGrid({
-  accentColor, bookedRanges, disabledBefore, selectedTime, onTimeChange, pricePerHour, selectedEndHour,
+  accentColor, bookedRanges, disabledBefore, selectedTime, onTimeChange, pricePerHour, selectedEndHour, openingHour = 6, closingHour = 23,
 }: {
   accentColor: string;
   bookedRanges: { start: number; end: number }[];
@@ -216,8 +216,10 @@ function TimeSlotGrid({
   onTimeChange: (t: string) => void;
   pricePerHour: number;
   selectedEndHour?: number | null;
+  openingHour?: number;
+  closingHour?: number;
 }) {
-  const allHours = Array.from({ length: 17 }, (_, i) => i + 6);
+  const allHours = Array.from({ length: Math.max(0, closingHour - openingHour) }, (_, i) => i + openingHour);
   const isBooked = (h: number) => bookedRanges.some(r => h >= r.start && h < r.end);
   const isPast   = (h: number) => h < disabledBefore;
   const selHour  = selectedTime ? parseInt(selectedTime.split(':')[0]) : -1;
@@ -289,7 +291,7 @@ function TimeSlotGrid({
 
 /* ─── Duration Picker ────────────────────────────────────────────── */
 function DurationPicker({
-  startTime, bookedRanges, pricePerHour, accentColor, selectedDuration, onSelect,
+  startTime, bookedRanges, pricePerHour, accentColor, selectedDuration, onSelect, minDuration = 1, maxDuration = 8, closingHour = 23,
 }: {
   startTime: string;
   bookedRanges: { start: number; end: number }[];
@@ -297,11 +299,14 @@ function DurationPicker({
   accentColor: string;
   selectedDuration: number;
   onSelect: (dur: number, endH: number) => void;
+  minDuration?: number;
+  maxDuration?: number;
+  closingHour?: number;
 }) {
   const startH = parseInt(startTime.split(':')[0]);
   const nextBooked = bookedRanges.filter(r => r.start > startH).sort((a, b) => a.start - b.start)[0];
-  const maxEnd = Math.min(nextBooked ? nextBooked.start : 23, startH + 8, 23);
-  const slots = Array.from({ length: maxEnd - startH }, (_, i) => i + 1);
+  const maxEnd = Math.min(nextBooked ? nextBooked.start : closingHour, startH + maxDuration, closingHour);
+  const slots = Array.from({ length: maxEnd - startH }, (_, i) => i + 1).filter((dur) => dur >= minDuration);
 
   if (slots.length === 0) return (
     <div className="p-3 rounded-xl flex items-center gap-2" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
@@ -459,7 +464,7 @@ interface BookingModalProps {
 
 function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfirm, initialDate, initialTime, coachingMode = false, coachName, coachHourlyRate = 0, studentName, onDone }: BookingModalProps) {
   const { addonsBySport } = useAddons();
-  const { calcCourtPrice, user } = useUser();
+  const { calcCourtPrice, user, systemSettings } = useUser();
   const now = new Date();
   const accentColor = coachingMode ? '#2563EB' : mode === 'staff' ? '#0047AB' : '#FF8C00';
   const todayStr = getLocalDateString(now);
@@ -507,7 +512,10 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
     .map(b => { const start = parseInt(b.time.split(':')[0]); return { start, end: start + (b.duration || 1) }; }),
   [courtBookings, date]);
 
-  const disabledBefore = date === todayStr ? now.getHours() : 6;
+  const openingHour = Math.max(0, Math.min(23, parseInt(systemSettings.businessHours.start.split(':')[0] || '6', 10)));
+  const closingHour = Math.max(openingHour + 1, Math.min(24, parseInt(systemSettings.businessHours.end.split(':')[0] || '23', 10)));
+  const maxBookingDuration = Math.max(systemSettings.bookingDurationMin, systemSettings.bookingDurationMax);
+  const disabledBefore = date === todayStr ? Math.max(now.getHours(), openingHour) : openingHour;
   const basePrice      = time ? calcCourtPrice(sport, date, time) : 0;
   const sportAddons: AddOn[] = coachingMode ? [] : addonsBySport[sport] || [];
 
@@ -522,9 +530,10 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const coachingRate = coachingMode ? Math.max(0, Number(coachHourlyRate || 0)) : 0;
   const computedCoachingFee = coachingMode ? coachingRate * Math.max(1, duration || 1) : 0;
   const courtSubtotal = basePrice * duration;
+  const loyaltyDiscountBase = courtSubtotal + addonTotal;
   const canUseLoyaltyReward =
-    mode === 'customer' && loyaltyRewardsAvailable(Number(user?.loyaltyPoints || 0)) > 0 && courtSubtotal > 0;
-  const loyaltyDiscount = calcLoyaltyCourtDiscount(courtSubtotal, useLoyaltyReward && canUseLoyaltyReward);
+    mode === 'customer' && loyaltyRewardsAvailable(Number(user?.loyaltyPoints || 0)) > 0 && loyaltyDiscountBase > 0;
+  const loyaltyDiscount = calcLoyaltyCourtDiscount(loyaltyDiscountBase, useLoyaltyReward && canUseLoyaltyReward);
   const total = Math.max(0, courtSubtotal + addonTotal + computedCoachingFee - loyaltyDiscount);
 
   const fallbackPrice = sport === 'Badminton' || sport === 'Pickleball' ? 300 : sport === 'Billiards' || sport === 'Table Tennis' ? 100 : 450;
@@ -629,11 +638,11 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
             </div>
           );
         })}
-        {canUseLoyaltyReward && (
+        {canUseLoyaltyReward && isReview && (
           <LoyaltyRewardToggle
             active={useLoyaltyReward}
             onToggle={() => setUseLoyaltyReward((next) => !next)}
-            discountAmount={calcLoyaltyCourtDiscount(courtSubtotal, true)}
+            discountAmount={calcLoyaltyCourtDiscount(loyaltyDiscountBase, true)}
           />
         )}
         <AnimatePresence>
@@ -873,6 +882,8 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                     onTimeChange={handleTimeChange}
                     pricePerHour={basePrice || fallbackPrice}
                     selectedEndHour={endHour}
+                    openingHour={openingHour}
+                    closingHour={closingHour}
                   />
                 </div>
                 {time && (
@@ -888,6 +899,9 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                       accentColor={accentColor}
                       selectedDuration={duration}
                       onSelect={handleDurationSelect}
+                      minDuration={systemSettings.bookingDurationMin}
+                      maxDuration={maxBookingDuration}
+                      closingHour={closingHour}
                     />
                   </motion.div>
                 )}

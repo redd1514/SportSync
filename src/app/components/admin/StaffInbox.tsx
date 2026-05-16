@@ -12,6 +12,7 @@ import {
   Search,
   Filter,
   Clock,
+  CalendarDays,
   Send,
   Sparkles,
   Bell,
@@ -81,6 +82,8 @@ type ChangeRequestRow = {
   requestedNewDate?: string | null;
   requestedNewStartTime?: string | null;
   requestedNewEndTime?: string | null;
+  availabilityStatus?: 'available' | 'conflict' | 'incomplete' | 'not_checked' | string;
+  availabilityMessage?: string;
   isReal?: boolean;
 };
 
@@ -426,6 +429,31 @@ export function StaffInbox() {
     window.setTimeout(() => setRefreshHint((prev) => (prev === scope ? null : prev)), 1800);
   };
 
+  const openCalendarCheck = (request: ChangeRequestRow, date: string | null | undefined, mode: 'before' | 'after') => {
+    if (!date) return;
+    const targetTime = mode === 'before'
+      ? request.time
+      : request.requestedNewStartTime || '';
+    const target = {
+      date,
+      requestId: request.id,
+      bookingId: mode === 'before' ? request.bookingId : undefined,
+      court: request.court,
+      time: targetTime,
+      mode,
+    };
+    try {
+      localStorage.setItem('sportsync:open-master-calendar-date', date);
+      localStorage.setItem('sportsync:calendar-scroll-target', JSON.stringify(target));
+      localStorage.setItem('sportsync:return-inbox-request', JSON.stringify({
+        id: request.id,
+        type: request.requestType,
+        approved: confirmAction?.approved ?? true,
+      }));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('sportsync:open-master-calendar', { detail: target }));
+  };
+
   const runListLoadingPulse = () => {
     setIsChangeLoading(true);
     window.setTimeout(() => setIsChangeLoading(false), 420);
@@ -467,6 +495,21 @@ export function StaffInbox() {
     const int = setInterval(fetchInboxData, 15000);
     return () => clearInterval(int);
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('sportsync:return-inbox-request');
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.id) {
+        setSub('cancellations');
+        setSelectedId(String(saved.id));
+        setConfirmAction({ type: saved.type || 'reschedule', id: String(saved.id), approved: saved.approved !== false });
+        setModalOpen(true);
+      }
+      localStorage.removeItem('sportsync:return-inbox-request');
+    } catch {}
+  }, [requests.reschedules?.length, requests.cancellations?.length]);
 
   const handleApprove = async () => {
     if (!confirmAction) return;
@@ -516,7 +559,8 @@ export function StaffInbox() {
       setConfirmAction(null);
       setRejectReason('');
       setModalOpen(false);
-      fetchInboxData();
+      await fetchInboxData();
+      window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
       window.setTimeout(() => setNotice(''), 1800);
     } catch (e: any) {
       setNotice(e?.message || 'Action failed.');
@@ -544,14 +588,13 @@ export function StaffInbox() {
   const visibleReschedules = requests.reschedules || [];
   const visibleCoaching = requests.coaching.length > 0 ? requests.coaching : dummyCoaching;
   const pendingCancellations = visibleCancellations.length + visibleReschedules.length;
-  const pendingCoaching = visibleCoaching.length;
+  const pendingCoaching = 0;
 
   const tabs = useMemo(() => {
     return [
       { id: 'cancellations' as InboxSubTab, label: 'Change Requests', icon: AlertTriangle, badge: pendingCancellations, color: '#fbbf24', desc: 'Cancellations and reschedules needing approval.' },
-      { id: 'coaching' as InboxSubTab, label: 'Coaching Payments', icon: GraduationCap, badge: pendingCoaching, color: '#60a5fa', desc: 'Accepted coaching tickets waiting for payment verification.' },
     ];
-  }, [pendingCancellations, pendingCoaching]);
+  }, [pendingCancellations]);
 
   const changeRows: ChangeRequestRow[] = useMemo(() => {
     const cancels = (visibleCancellations || []).map((r: any) => ({ ...r, requestType: 'cancellation' as const }));
@@ -1189,7 +1232,7 @@ export function StaffInbox() {
         title={confirmAction?.approved ? 'Approve request?' : 'Reject request?'}
       >
         <div className="space-y-4">
-          <div className={modalRequest?.requestType === 'reschedule' ? 'grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4' : 'block'}>
+          <div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Request details</p>
@@ -1227,10 +1270,64 @@ export function StaffInbox() {
             </div>
             {modalRequest?.requestType === 'reschedule' ? (
               <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 p-3">
-                <p className="text-blue-200 font-black uppercase" style={{ fontSize: 9 }}>Requested schedule</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-blue-200 font-black uppercase" style={{ fontSize: 9 }}>Requested schedule</p>
+                  <span
+                    className="px-2.5 py-1 rounded-full border font-black uppercase"
+                    style={{
+                      fontSize: 9,
+                      borderColor: modalRequest.availabilityStatus === 'available' ? 'rgba(34,197,94,0.35)' : modalRequest.availabilityStatus === 'conflict' ? 'rgba(239,68,68,0.35)' : 'rgba(234,179,8,0.35)',
+                      background: modalRequest.availabilityStatus === 'available' ? 'rgba(34,197,94,0.15)' : modalRequest.availabilityStatus === 'conflict' ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)',
+                      color: modalRequest.availabilityStatus === 'available' ? '#86efac' : modalRequest.availabilityStatus === 'conflict' ? '#fca5a5' : '#fde68a',
+                    }}
+                  >
+                    {modalRequest.availabilityStatus === 'available' ? 'Available' : modalRequest.availabilityStatus === 'conflict' ? 'Conflict' : 'Needs review'}
+                  </span>
+                </div>
                 <p className="text-white font-black mt-1.5" style={{ fontSize: 12 }}>
                   {formatDateLong(modalRequest?.requestedNewDate || '')} · {formatTimeShort(modalRequest?.requestedNewStartTime || '')}
                 </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                  <div className="rounded-xl border border-red-400/20 bg-red-400/10 p-3">
+                    <p className="text-red-100 font-black uppercase" style={{ fontSize: 9 }}>Current booking</p>
+                    <p className="text-red-100/80 mt-1" style={{ fontSize: 11 }}>{formatDateLong(modalRequest.date)} · {formatTimeShort(modalRequest.time)}</p>
+                  </div>
+                  <div className="rounded-xl border border-blue-400/20 bg-blue-400/10 p-3">
+                    <p className="text-blue-100 font-black uppercase" style={{ fontSize: 9 }}>Requested booking</p>
+                    <p className="text-blue-100/80 mt-1" style={{ fontSize: 11 }}>{formatDateLong(modalRequest.requestedNewDate || '')} · {formatTimeShort(modalRequest.requestedNewStartTime || '')}</p>
+                  </div>
+                </div>
+                <p className="text-blue-100/75 mt-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                  {modalRequest.availabilityMessage || 'SportSync checked this requested slot against current Supabase bookings for the same court.'}
+                </p>
+                {modalRequest.availabilityStatus === 'conflict' && confirmAction?.approved && (
+                  <p className="rounded-lg border border-red-400/25 bg-red-400/10 px-3 py-2 mt-3 text-red-100 font-black" style={{ fontSize: 11 }}>
+                    Approval may fail unless the conflict is resolved.
+                  </p>
+                )}
+                <div className="hidden">
+                  <button
+                    type="button"
+                    onClick={() => openCalendarCheck(modalRequest, modalRequest.date, 'before')}
+                    className="rounded-xl border border-red-400/25 bg-red-400/10 p-3 text-left hover:bg-red-400/15 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 text-red-100 font-black" style={{ fontSize: 12 }}>
+                      <CalendarDays size={14} /> Check before request
+                    </div>
+                    <p className="text-red-100/70 mt-1" style={{ fontSize: 11 }}>{formatDateLong(modalRequest.date)} · {formatTimeShort(modalRequest.time)}</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCalendarCheck(modalRequest, modalRequest.requestedNewDate, 'after')}
+                    disabled={!modalRequest.requestedNewDate || !modalRequest.requestedNewStartTime}
+                    className="rounded-xl border border-blue-400/25 bg-blue-400/10 p-3 text-left hover:bg-blue-400/15 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    <div className="flex items-center gap-2 text-blue-100 font-black" style={{ fontSize: 12 }}>
+                      <CalendarDays size={14} /> Check after request
+                    </div>
+                    <p className="text-blue-100/70 mt-1" style={{ fontSize: 11 }}>{formatDateLong(modalRequest.requestedNewDate || '')} · {formatTimeShort(modalRequest.requestedNewStartTime || '')}</p>
+                  </button>
+                </div>
               </div>
             ) : null}
             <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
@@ -1240,7 +1337,6 @@ export function StaffInbox() {
               </p>
             </div>
           </div>
-          {modalRequest?.requestType === 'reschedule' ? <ScheduleComparison request={modalRequest} /> : null}
           </div>
 
           {!confirmAction?.approved ? (

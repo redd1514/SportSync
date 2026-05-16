@@ -72,6 +72,8 @@ export function mapBookingRowToAdmin(row: {
   createdAt: string;
   facilityMapId?: string;
   userId?: string;
+  source?: string;
+  isCoaching?: boolean;
 } {
   const meta = parseBookingNotes(row.notes ?? undefined);
   const courtName = row.courts?.name ?? 'Court';
@@ -127,6 +129,8 @@ export function mapBookingRowToAdmin(row: {
     createdAt: dbTimestampToUtcIso(row.created_at) ?? new Date().toISOString(),
     facilityMapId: typeof meta.facilityMapId === 'string' && meta.facilityMapId ? meta.facilityMapId : undefined,
     userId: row.user_id || undefined,
+    source: meta.source,
+    isCoaching: /coaching/i.test(String(meta.source || meta.addOns || '')),
   };
 }
 
@@ -153,5 +157,7 @@ export function deskAdminRowToClientBooking(a: ReturnType<typeof mapBookingRowTo
     checkOutTime: a.checkOutTime,
     facilityMapId: a.facilityMapId,
     userId: a.userId,
+    source: a.source,
+    isCoaching: a.isCoaching,
   };
 }

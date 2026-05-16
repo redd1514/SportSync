@@ -1,13 +1,53 @@
 import { Hono } from 'hono';
 import { coachingSessionService } from '../services/coachingSessionService.ts';
+import { supabase } from '../services/supabaseClient.ts';
 
 const coachingSessionsRouter = new Hono();
+
+function mapSessionStatusForUi(dbStatus: string, adminNotes?: string | null): string {
+  if (/COACHING_CHECKED_OUT|checked_out:/i.test(adminNotes || '')) return 'completed';
+  if (dbStatus === 'approved' || dbStatus === 'scheduled') return 'confirmed';
+  if (dbStatus === 'completed') return 'completed';
+  return dbStatus;
+}
 
 // GET /api/coaching-sessions - List all coaching sessions
 coachingSessionsRouter.get('/', async (c) => {
   try {
     const sessions = await coachingSessionService.listSessions();
-    return c.json(sessions);
+    const [{ data: coaches }, { data: sports }, { data: users }] = await Promise.all([
+      supabase.from('coaches').select('id, user_id, users(full_name,email)'),
+      supabase.from('sports').select('id, name'),
+      supabase.from('users').select('id, full_name, email'),
+    ]);
+    const userMap = new Map((users || []).map((u: any) => [String(u.id), u]));
+    const coachMap = new Map((coaches || []).map((coach: any) => [String(coach.id), coach]));
+    const sportMap = new Map((sports || []).map((sport: any) => [String(sport.id), sport]));
+
+    return c.json((sessions || []).map((session: any) => {
+      const coach = coachMap.get(String(session.coach_id));
+      const rawCoachUser = coach?.users;
+      const coachUser = Array.isArray(rawCoachUser) ? rawCoachUser[0] : rawCoachUser;
+      const student = userMap.get(String(session.user_id));
+      const sport = sportMap.get(String(session.sport_id));
+      const notes = typeof session.notes === 'string' ? session.notes : '';
+      const linkedBookingId = notes.match(/linked_booking:([0-9a-f-]+)/i)?.[1];
+      return {
+        ...session,
+        userId: session.user_id,
+        userName: student?.full_name || student?.email || 'Unknown User',
+        coachId: session.coach_id,
+        coachName: coachUser?.full_name || coachUser?.email || 'Unknown Coach',
+        sport: sport?.name || 'Unknown Sport',
+        requestedDate: session.session_date,
+        requestedTime: session.start_time,
+        endTime: session.end_time,
+        message: notes,
+        adminNotes: session.admin_notes,
+        linkedBookingId,
+        status: mapSessionStatusForUi(String(session.status || 'pending'), session.admin_notes),
+      };
+    }));
   } catch (error: any) {
     return c.json({ error: error.message || 'Failed to list coaching sessions' }, 400);
   }
@@ -88,10 +128,32 @@ coachingSessionsRouter.put('/:id/status', async (c) => {
       id,
       body.status,
       body.admin_notes ?? body.adminNotes,
+      body.staff_id ?? body.staffId,
     );
     return c.json(session);
   } catch (error: any) {
     return c.json({ error: error.message || 'Failed to update session status' }, 400);
+  }
+});
+
+// POST /api/coaching-sessions/:id/review - Student coach rating after checkout
+coachingSessionsRouter.post('/:id/review', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const session = await coachingSessionService.submitReview(
+      id,
+      String(body.user_id || body.userId || ''),
+      Number(body.rating),
+      body.comment,
+    );
+    return c.json({
+      success: true,
+      admin_notes: (session as any).admin_notes,
+      reviewed_at: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message || 'Failed to submit review' }, 400);
   }
 });
 

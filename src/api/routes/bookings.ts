@@ -231,7 +231,8 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
       if (diff > 0) durHours = diff / 60;
     } catch {}
 
-    const requestedStart = `${newStart}:00`;
+    const normalizedStart = newStart.length >= 5 ? newStart.slice(0, 5) : newStart;
+    const requestedStart = `${normalizedStart}:00`;
     const requestedEnd = addHoursToTime(requestedStart, durHours);
     const openMin = 7 * 60;
     const closeMin = 23 * 60;

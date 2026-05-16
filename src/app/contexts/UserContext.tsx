@@ -36,6 +36,15 @@ export interface Booking {
   /** Facility map id when booking was made from a specific published map */
   facilityMapId?: string;
   userId?: string;
+  pendingChangeRequest?: {
+    id: string;
+    type: 'cancellation' | 'reschedule' | string;
+    reason?: string;
+    requestedDate?: string | null;
+    requestedStartTime?: string | null;
+    requestedEndTime?: string | null;
+    createdAt?: string | null;
+  } | null;
 }
 
 export interface CancellationRequest {
@@ -317,7 +326,19 @@ export function UserProvider({ children }: { children: ReactNode }) {
       checkOutTime: booking.checkOutTime || booking.check_out_time,
       facilityMapId: booking.facilityMapId || booking.facility_map_id,
       userId: booking.userId || booking.user_id,
+      pendingChangeRequest: booking.pendingChangeRequest || booking.pending_change_request || null,
     };
+  };
+
+  const fetchAuthoritativeLoyaltyPoints = async (userId: string, fallback = 0) => {
+    try {
+      const response = await apiFetch(`/api/users/${encodeURIComponent(userId)}/loyalty`);
+      if (!response.ok) return fallback;
+      const data = await response.json();
+      return Number(data?.points ?? fallback);
+    } catch {
+      return fallback;
+    }
   };
 
   const loadBookingsForUser = async (userId: string) => {
@@ -421,7 +442,8 @@ useEffect(() => {
         }
       }
 
-      setUser(resolvedUser);
+      const freshLoyalty = await fetchAuthoritativeLoyaltyPoints(resolvedUser.id, resolvedUser.loyaltyPoints);
+      setUser({ ...resolvedUser, loyaltyPoints: freshLoyalty });
 
       // Bookings will be loaded by the useEffect that watches user changes
     }
@@ -489,12 +511,18 @@ useEffect(() => {
               return;
             }
 
-            setUser(resolvedUser);
+            fetchAuthoritativeLoyaltyPoints(resolvedUser.id, resolvedUser.loyaltyPoints).then((freshLoyalty) => {
+              if (authEpochRef.current !== epoch) return;
+              setUser({ ...resolvedUser, loyaltyPoints: freshLoyalty });
+            });
           });
           return;
         }
 
-        setUser(resolvedUser);
+        fetchAuthoritativeLoyaltyPoints(resolvedUser.id, resolvedUser.loyaltyPoints).then((freshLoyalty) => {
+          if (authEpochRef.current !== epoch) return;
+          setUser({ ...resolvedUser, loyaltyPoints: freshLoyalty });
+        });
 
         // Bookings will be loaded by the useEffect that watches user changes
       });
@@ -552,13 +580,15 @@ useEffect(() => {
       if (demoTokenResult.error) {
         return { error: demoTokenResult.error };
       }
+      const syncedPoints = Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number } | null)?.loyalty_points ?? 0);
+      const loyaltyPoints = await fetchAuthoritativeLoyaltyPoints(String(resolvedId), syncedPoints);
       setUser({
         id: resolvedId,
         name,
         email,
         phone: "+63 912 345 6789",
         favoriteSports: ["Basketball", "Badminton"],
-        loyaltyPoints: Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number } | null)?.loyalty_points ?? 0),
+        loyaltyPoints,
         totalBookings: 0,
         memberSince: "2025-11-15",
         accountStatus: "active",

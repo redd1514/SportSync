@@ -348,6 +348,54 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
   return fetchBookingById(bookingId);
 }
 
+export async function refundLoyaltyRedemptionForUnstartedBooking(bookingId: string) {
+  const { data: booking, error: bookingErr } = await supabase
+    .from('bookings')
+    .select('id,user_id,status')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bookingErr || !booking?.user_id) return;
+  if (booking.status === 'checked_in' || booking.status === 'completed') return;
+
+  const { data: redemptions } = await supabase
+    .from('loyalty_transactions')
+    .select('points_change')
+    .eq('reference_id', bookingId)
+    .eq('transaction_type', 'redemption');
+
+  const redeemed = Math.abs(
+    (redemptions || []).reduce((sum: number, row: any) => sum + Math.min(0, Number(row.points_change || 0)), 0),
+  );
+  if (redeemed <= 0) return;
+
+  const { data: existingRefund } = await supabase
+    .from('loyalty_transactions')
+    .select('id')
+    .eq('reference_id', bookingId)
+    .eq('transaction_type', 'redemption_refund')
+    .limit(1);
+  if ((existingRefund || []).length > 0) return;
+
+  const { error: txErr } = await supabase.from('loyalty_transactions').insert({
+    user_id: booking.user_id,
+    points_change: redeemed,
+    transaction_type: 'redemption_refund',
+    reference_id: bookingId,
+  });
+  if (txErr) return;
+
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('loyalty_points')
+    .eq('id', booking.user_id)
+    .maybeSingle();
+
+  await supabase
+    .from('users')
+    .update({ loyalty_points: Number(userRow?.loyalty_points || 0) + redeemed })
+    .eq('id', booking.user_id);
+}
+
 export async function checkOutBooking(bookingId: string, staffId?: string | null) {
   const { data: cur, error: curErr } = await supabase
     .from('bookings')

@@ -296,9 +296,12 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [clearingNotifs, setClearingNotifs] = useState(false);
+  const [notifClearError, setNotifClearError] = useState("");
+  const [showClearNotifConfirm, setShowClearNotifConfirm] = useState(false);
 
   // From Incoming: Announcement and Booking logic
-  const { announcements, dismissAnnouncement, undismissedCount } = useAnnouncements();
+  const { announcements, dismissAnnouncement, clearUserNotifications, undismissedCount } = useAnnouncements();
   const [bookingPrefill, setBookingPrefill] = useState<{
     sport: string;
     date: string;
@@ -728,55 +731,41 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
                   style={{ background: "#141414", border: "1px solid rgba(255,255,255,0.08)", position: 'fixed', top: '60px', right: '16px' }}
                   onClick={e => e.stopPropagation()}
                 >
-                  <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between">
+                  <div className="px-4 py-3 border-b border-white/6 flex items-center justify-between gap-3">
                     <p className="text-white font-black" style={{ fontSize: 14 }}>Notifications</p>
-                    <button onClick={() => setShowNotifs(false)} className="text-gray-600 hover:text-white">
-                      <X size={14} />
-                    </button>
-                  </div>
-                  {announcements.length === 0 ? (
-                    <div className="px-4 py-10 text-center">
-                      <Megaphone size={28} className="mx-auto mb-2 text-gray-700" />
-                      <p className="text-gray-500" style={{ fontSize: 12 }}>No announcements yet</p>
-                    </div>
-                  ) : (
-                    announcements.map((ann) => {
-                      const accent = ANNOUNCEMENT_COLORS[ann.type]?.text || "#FF8C00";
-                      return (
+                    <div className="flex items-center gap-2">
+                      {announcements.length > 0 && (
                         <button
-                          key={ann.id}
-                          onClick={() => openNotification(ann)}
-                          className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
+                          disabled={clearingNotifs}
+                          onClick={() => {
+                            setNotifClearError("");
+                            setShowClearNotifConfirm(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg border border-white/10 text-gray-400 hover:text-red-300 hover:border-red-500/30 hover:bg-red-500/10 font-black"
+                          style={{ fontSize: 10 }}
                         >
-                          <div
-                            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                            style={{ backgroundColor: `${accent}18` }}
-                          >
-                            <Megaphone size={14} style={{ color: accent }} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white font-black" style={{ fontSize: 12 }}>{ann.title}</p>
-                            {ann.message ? (
-                              <p className="text-gray-500 line-clamp-2" style={{ fontSize: 11 }}>{ann.message}</p>
-                            ) : null}
-                            <p className="text-gray-700" style={{ fontSize: 10 }}>{formatRelativeTime(ann.createdAt)}</p>
-                          </div>
-                          {!ann.dismissed && (
-                            <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: accent }} />
-                          )}
+                          {clearingNotifs ? "Clearing..." : "Clear"}
                         </button>
-                      );
-                    })
-                  )}
+                      )}
+                      <button onClick={() => setShowNotifs(false)} className="text-gray-600 hover:text-white">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {notifClearError && (
+                      <div className="mx-4 mt-3 rounded-xl px-3 py-2 text-red-200 font-black border border-red-500/25 bg-red-500/10" style={{ fontSize: 11 }}>
+                        {notifClearError}
+                      </div>
+                    )}
                     {announcements.length === 0 ? (
                       <div className="py-8 text-center text-gray-500" style={{ fontSize: 13 }}>No notifications</div>
                     ) : announcements.map(n => (
                       <button key={n.id} onClick={() => openNotification(n)}
                         className="w-full flex items-start gap-3 px-4 py-3 hover:bg-white/4 transition-all text-left border-b border-white/4"
                       >
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `rgba(255,140,0,0.15)` }}>
-                          <Bell size={14} style={{ color: '#FF8C00' }} />
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ backgroundColor: `${(ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00')}18` }}>
+                          {n.id.startsWith("notif:") ? <Bell size={14} style={{ color: ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00' }} /> : <Megaphone size={14} style={{ color: ANNOUNCEMENT_COLORS[n.type]?.text || '#FF8C00' }} />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-black" style={{ fontSize: 12 }}>{n.title}</p>
@@ -800,6 +789,63 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
       </div>
 
       {/* Floating AI Chat — Customer only (admin/staff return early above) */}
+      <AnimatePresence>
+        {showClearNotifConfirm && (
+          <div className="fixed inset-0 z-[220] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+              onClick={() => setShowClearNotifConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              className="relative w-full max-w-sm rounded-3xl border border-white/10 bg-[#171717] p-6 shadow-2xl"
+            >
+              <p className="text-white font-black" style={{ fontSize: 18 }}>Clear notifications?</p>
+              <p className="mt-2 text-gray-400" style={{ fontSize: 13, lineHeight: 1.5 }}>
+                This removes all visible notifications and clears the Supabase notification records for your account.
+              </p>
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  disabled={clearingNotifs}
+                  onClick={() => setShowClearNotifConfirm(false)}
+                  className="flex-1 rounded-2xl bg-white/8 py-3 text-gray-300 font-black"
+                  style={{ fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={clearingNotifs}
+                  onClick={async () => {
+                    setClearingNotifs(true);
+                    setNotifClearError("");
+                    try {
+                      await clearUserNotifications();
+                      setShowClearNotifConfirm(false);
+                      setShowNotifs(false);
+                    } catch (error: any) {
+                      setNotifClearError(error?.message || "Could not clear notifications.");
+                    } finally {
+                      setClearingNotifs(false);
+                    }
+                  }}
+                  className="flex-1 rounded-2xl py-3 text-white font-black disabled:opacity-60"
+                  style={{ fontSize: 13, background: "linear-gradient(135deg,#ef4444,#dc2626)" }}
+                >
+                  {clearingNotifs ? "Clearing..." : "Clear all"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <FloatingAIChat />
     </div>
   );

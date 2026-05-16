@@ -1430,7 +1430,7 @@ function formatActivityAction(action: string | undefined): string {
 function humanizeBookingStatus(s: string | undefined): string {
   if (!s) return '—';
   const m: Record<string, string> = {
-    confirmed: 'Pending',
+    confirmed: 'Reserved',
     checked_in: 'Checked in',
     pending: 'Pending payment',
     pending_payment: 'Pending',
@@ -1446,12 +1446,22 @@ function formatSourceChannel(raw: unknown): string {
   if (s.includes('walk')) return 'Walk-in (desk)';
   if (s.includes('map_staff')) return 'Facility map (staff)';
   if (s.includes('map_customer')) return 'Facility map (customer app)';
+  if (s.includes('ai') || s.includes('concierge')) return 'Customer app';
   if (s.includes('desk')) return 'Desk';
+  if (s.includes('staff')) return 'Staff dashboard';
   return s ? s.replace(/_/g, ' ') : '—';
 }
 
 type ActivitySortKey = 'loggedAt' | 'action' | 'customer' | 'court' | 'ref';
 type ActivityPeriod = 'today' | '7d' | '30d' | 'all';
+
+function activityTone(actionKey: string) {
+  if (actionKey.includes('check_in')) return { fg: '#86efac', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' };
+  if (actionKey.includes('check_out')) return { fg: '#93c5fd', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.24)' };
+  if (actionKey.includes('reject') || actionKey.includes('cancel')) return { fg: '#fca5a5', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' };
+  if (actionKey.includes('approved')) return { fg: '#c4b5fd', bg: 'rgba(139,92,246,0.12)', border: 'rgba(139,92,246,0.24)' };
+  return { fg: '#fdba74', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.24)' };
+}
 
 function flattenActivityRow(row: any) {
   const b = row.bookings;
@@ -1888,11 +1898,13 @@ function StaffActivityLog() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
-                {filteredRows.map((r, idx) => (
+                {filteredRows.map((r, idx) => {
+                  const tone = activityTone(r.actionKey);
+                  return (
                   <tr
                     key={r.id}
                     onClick={() => setDetailRow(r.raw)}
-                    className={`cursor-pointer transition-colors group ${idx % 2 === 0 ? 'bg-white/[0.02]' : 'bg-transparent'} hover:bg-white/[0.06]`}
+                    className={`cursor-pointer transition-colors group ${idx % 2 === 0 ? 'bg-white/[0.025]' : 'bg-transparent'} hover:bg-blue-500/[0.07]`}
                   >
                     <td className="px-4 py-3 text-gray-600 align-middle">
                       <Eye size={14} className="opacity-0 group-hover:opacity-100 text-blue-400 transition-opacity" />
@@ -1905,22 +1917,23 @@ function StaffActivityLog() {
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-blue-200 px-2.5 py-1.5 font-black" style={{ fontSize: 12 }}>
+                      <div className="rounded-full border px-2.5 py-1.5 font-black inline-flex" style={{ fontSize: 12, color: tone.fg, background: tone.bg, borderColor: tone.border }}>
                         {r.actionLabel}
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle max-w-[320px]">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2 leading-snug" style={{ fontSize: 11 }}>
+                      <div className="text-gray-200 leading-snug font-medium" style={{ fontSize: 12 }}>
                         {r.summaryLine}
                       </div>
+                      <div className="mt-1 text-gray-500 font-black" style={{ fontSize: 10 }}>{r.sourceChannel}</div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-100 px-2.5 py-2 font-black" style={{ fontSize: 12 }}>
+                      <div className="text-gray-100 font-black" style={{ fontSize: 12 }}>
                         {r.customer}
                       </div>
                     </td>
                     <td className="px-3 py-3 align-middle">
-                      <div className="rounded-lg bg-white/[0.06] border border-white/10 text-gray-300 px-2.5 py-2" style={{ fontSize: 12 }}>
+                      <div className="text-gray-300" style={{ fontSize: 12 }}>
                         {r.court}
                       </div>
                     </td>
@@ -1930,7 +1943,8 @@ function StaffActivityLog() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2005,7 +2019,7 @@ function StaffActivityLog() {
                           </div>
                         )}
                         <div className="py-2.5 flex justify-between gap-3">
-                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Channel</span>
+                          <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>Recorded from</span>
                           <span className="text-gray-200 font-black text-right" style={{ fontSize: 12 }}>{detailFlat.sourceChannel}</span>
                         </div>
                         {detailFlat.paymentMethod && detailFlat.paymentMethod !== '—' && (
@@ -2673,7 +2687,7 @@ function FrontDeskInbox() {
   const [confirmAction, setConfirmAction] = useState<{ type: 'cancellation' | 'coaching'; id: string; approved: boolean } | null>(null);
 
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length + DUMMY_CANCELLATIONS.filter(d => d.status === 'pending').length;
-  const pendingCoaching = coachingRequests.filter(r => r.status === 'pending').length + DUMMY_COACHING.filter(d => d.status === 'pending').length;
+  const pendingCoaching = 0;
 
   const [verifyingRequest, setVerifyingRequest] = useState<any>(null);
 
@@ -2731,7 +2745,6 @@ function FrontDeskInbox() {
 
   const SUB_TABS = [
     { id: 'cancellations' as InboxSubTab, label: 'Cancellations',   icon: AlertTriangle, badge: pendingCancellations, color: '#fbbf24' },
-    { id: 'coaching'      as InboxSubTab, label: 'Coaching',        icon: GraduationCap, badge: pendingCoaching,       color: '#60a5fa' },
     { id: 'announcements' as InboxSubTab, label: 'Announcements',   icon: Megaphone,     badge: 0,                    color: '#FF8C00' },
   ];
 
@@ -3045,6 +3058,17 @@ export function ConsolidatedStaffDashboard({ onLogout }: { onLogout: () => void 
   const [activeTab, setActiveTab] = useState<StaffTab>('operations');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onOpenCalendar = () => setActiveTab('calendar');
+    const onOpenInbox = () => setActiveTab('inbox');
+    window.addEventListener('sportsync:open-master-calendar', onOpenCalendar);
+    window.addEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    return () => {
+      window.removeEventListener('sportsync:open-master-calendar', onOpenCalendar);
+      window.removeEventListener('sportsync:open-staff-inbox', onOpenInbox);
+    };
+  }, []);
 
   const inboxBadge = cancellationRequests.filter(r => r.status === 'pending').length +
     coachingRequests.filter(r => r.status === 'pending').length;
