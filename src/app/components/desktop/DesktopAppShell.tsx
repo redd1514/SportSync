@@ -22,9 +22,9 @@ import { FacilityMapViewer } from "../shared/FacilityMapViewer";
 import { FloatingAIChat } from "../FloatingAIChat";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
-import { useAnnouncements } from "../../contexts/AnnouncementsContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
+import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -121,17 +121,10 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
     }
   })();
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const parseBookingDate = (dateStr: string) => {
-    if (!dateStr) return new Date();
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
+  const todayKey = getManilaDateKey();
 
   const upcomingBookings = bookings.filter(b => {
-    const isPastDate = parseBookingDate(b.date) < today;
+    const isPastDate = isManilaDateBefore(b.date, todayKey);
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
     if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
     if (isPendingReq) return false;
@@ -278,6 +271,8 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
 /* ─── Main shell ─── */
 interface DesktopAppShellProps { onLogout: () => void; }
 export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
+  const { user, logout, isAdmin, isStaff } = useUser();
+  const { findCoachByEmail } = useCoaching();
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [activeSub, setActiveSub] = useState<Record<string, string>>({ booking: "map", coaching: "services" });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -299,6 +294,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   } | undefined>(undefined);
 
   // From Incoming: Profile Photo logic
+  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
 
@@ -766,7 +762,13 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
       </div>
 
       {/* Floating AI Chat — Customer only (admin/staff return early above) */}
-      <FloatingAIChat />
+      <FloatingAIChat
+        onNavigate={(dest) => {
+          if (dest === 'mybookings') navigate('booking', 'mybookings');
+          else if (dest === 'booking') navigate('booking', 'map');
+          else if (dest === 'coaching') navigate('coaching', 'services');
+        }}
+      />
     </div>
   );
 }

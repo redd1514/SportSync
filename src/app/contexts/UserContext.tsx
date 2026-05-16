@@ -3,6 +3,7 @@ import { supabase } from "../utils/supabase/client";
 import { getApiBaseUrl } from "../utils/apiBase";
 import { apiFetch, clearDemoApiToken, exchangeDemoApiToken } from "../utils/authenticatedFetch";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
+import { mapDbStatusToUiStatus, normalizeBookingDate, normalizeBookingTime } from "../utils/bookingDisplay";
 
 const SYSTEM_SETTINGS_KV_KEY = "system_settings_v1";
 const DEMO_USER_STORAGE_KEY = 'sportsync_demo_user';
@@ -288,11 +289,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const normalizeBooking = (booking: any): Booking => ({
     id: booking.id,
     sport: booking.sport || 'Court Booking',
-    date: booking.date || booking.booking_date || '',
-    time: booking.time || booking.start_time || '',
+    date: normalizeBookingDate(booking.date || booking.booking_date),
+    time: normalizeBookingTime(booking.time || booking.start_time),
     duration: booking.duration || booking.duration_hours || 1,
     court: booking.court || booking.court_id || '',
-    status: booking.status || 'pending',
+    status: mapDbStatusToUiStatus(booking.status),
     amount: booking.amount || booking.total_price || 0,
     paymentStatus: booking.paymentStatus || booking.payment_status || 'pending',
     paymentProofUrl: booking.paymentProofUrl || booking.payment_proof_url,
@@ -302,7 +303,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     addOns: booking.addOns || booking.add_ons,
     cancellationRequested: booking.cancellationRequested || booking.cancellation_requested,
     cancellationReason: booking.cancellationReason || booking.cancellation_reason,
-    refCode: booking.refCode || booking.ref_code,
+    refCode: booking.refCode || booking.qr_code_token || booking.ref_code || booking.id,
     checkInStatus: booking.checkInStatus || booking.check_in_status,
     checkInTime: booking.checkInTime || booking.check_in_time,
     checkOutStatus: booking.checkOutStatus || booking.check_out_status,

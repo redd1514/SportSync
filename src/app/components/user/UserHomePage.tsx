@@ -13,6 +13,7 @@ import {
   SPORT_RATES, MARQUEE_ITEMS,
   FloatingOrbs, TickerBar, SportRateModal, Lightbox,
 } from "./UserHomeComponents";
+import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 
@@ -36,15 +37,9 @@ export function UserHomePage({ onNavigate }: { onNavigate: (tab: Tab, sub?: stri
       return [];
     }
   })();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const parseBookingDate = (dateStr: string) => {
-    if (!dateStr) return new Date();
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
+  const todayKey = getManilaDateKey();
   const upcoming = bookings.filter(b => {
-    const isPastDate = parseBookingDate(b.date) < today;
+    const isPastDate = isManilaDateBefore(b.date, todayKey);
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
     if (isPastDate || b.status === 'completed' || b.status === 'cancelled' || b.status === 'rejected') return false;
     if (isPendingReq) return false;

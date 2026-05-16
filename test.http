@@ -4,6 +4,16 @@
 ### Use REST Client extension in VS Code
 ### Install: humao.rest-client
 
+POST http://localhost:3000/api/chat
+Content-Type: application/json
+Authorization: Bearer your_token_here
+
+{ 
+    "message": "book a basketball court for tomorrow at 3 PM for 1 hour no adds on",
+    "userId": "93871edc-5eae-2657-bdd0-5b05b6910338" 
+}
+
+
 ### HEALTH CHECK
 GET http://localhost:3000/health
 

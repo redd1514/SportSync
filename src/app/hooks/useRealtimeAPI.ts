@@ -3,8 +3,9 @@
  * Combines traditional API calls with real-time updates
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { apiFetch } from '../utils/authenticatedFetch';
+import { mergeBookingRows, normalizeBookingForDisplay } from '../utils/bookingDisplay';
 import { cacheInvalidationManager } from '../utils/realtime/cacheInvalidationManager';
 import {
   useRealtimeBookingData,
@@ -51,26 +52,17 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
   const cacheRef = useRef<any[]>([]);
 
   const normalizeBooking = useCallback((b: any) => {
-    const courtIdStr = b.court || b.court_id || '';
+    const courtIdStr = String(b.court || b.court_id || b.courtId || '');
     const courtInfo = COURT_UUID_MAP[courtIdStr] || { name: courtIdStr, sport: 'Court Booking' };
-
+    const base = normalizeBookingForDisplay(b);
     return {
-      id: b.id,
-      date: b.date || b.booking_date || '',
-      time: b.time || b.start_time || '',
-      duration: b.duration || b.duration_hours || 1,
-      court: courtInfo.name,
+      ...base,
+      court: courtInfo.name !== courtIdStr ? courtInfo.name : base.court,
       courtId: courtIdStr,
-      sport: b.sport || courtInfo.sport,
-      status: b.status || 'pending',
-      amount: b.amount || b.total_price || 0,
-      paymentStatus: b.paymentStatus || b.payment_status || 'pending',
+      sport: base.sport !== 'Sports' ? base.sport : courtInfo.sport,
       customerName: b.customerName || b.customer_name || 'Customer',
       customerPhone: b.customerPhone || b.customer_phone || '',
-      cancellationRequested: b.cancellationRequested || b.cancellation_requested || false,
       cancellationReason: b.cancellationReason || b.cancellation_reason || '',
-      createdAt: b.createdAt || b.created_at || new Date().toISOString(),
-      refCode: b.refCode || b.qr_code_token || b.id || '',
       userId: b.user_id || b.userId || '',
     };
   }, []);
@@ -172,6 +164,14 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
   }, [userId, options?.autoFetch, fetchBookings]);
 
   useEffect(() => {
+    const onRefresh = () => {
+      if (userId) void fetchBookings();
+    };
+    window.addEventListener('sportsync:bookings-refresh', onRefresh);
+    return () => window.removeEventListener('sportsync:bookings-refresh', onRefresh);
+  }, [userId, fetchBookings]);
+
+  useEffect(() => {
     return () => {
       if (options?.invalidateOnUnmount) {
         cacheInvalidationManager.invalidate(
@@ -182,7 +182,18 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
   }, [userId, options?.invalidateOnUnmount]);
 
   const normalizedRealtime = (Array.isArray(realtimeBookings) ? realtimeBookings : []).map(normalizeBooking);
-  const bookings = normalizedRealtime.length > 0 ? normalizedRealtime : apiBookings;
+  const bookings = useMemo(() => {
+    const byId = new Map<string, ReturnType<typeof normalizeBooking>>();
+    normalizedRealtime.forEach((b) => {
+      if (b?.id) byId.set(String(b.id), b);
+    });
+    apiBookings.forEach((b) => {
+      if (!b?.id) return;
+      const id = String(b.id);
+      byId.set(id, mergeBookingRows(byId.get(id), b) as ReturnType<typeof normalizeBooking>);
+    });
+    return Array.from(byId.values());
+  }, [normalizedRealtime, apiBookings]);
 
   return {
     bookings,

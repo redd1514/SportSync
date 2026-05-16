@@ -9,7 +9,6 @@ import { SplashScreen } from "./components/mobile/SplashScreen";
 import { MobileAuth } from "./components/MobileAuth";
 import { ConsolidatedMobileAppShell } from "./components/mobile/ConsolidatedMobileAppShell";
 import { DesktopAppShell } from "./components/desktop/DesktopAppShell";
-import { FloatingAIChat } from "./components/FloatingAIChat";
 import { useUser } from "./contexts/UserContext";
 
 type AppState = "splash" | "auth" | "app";
@@ -41,18 +40,14 @@ function useIsMobile() {
 }
 
 function AppWithAI({ appState, isMobile, onLogout }: { appState: string; isMobile: boolean; onLogout: () => void }) {
-  const { isAdmin, isStaff } = useUser();
-  const showAI = appState === "app" && !isAdmin && !isStaff;
   return (
     <>
-      {appState === "app" && (
-        isMobile ? (
+      {appState === "app" &&
+        (isMobile ? (
           <ConsolidatedMobileAppShell onLogout={onLogout} />
         ) : (
           <DesktopAppShell onLogout={onLogout} />
-        )
-      )}
-      {showAI && <FloatingAIChat />}
+        ))}
     </>
   );
 }

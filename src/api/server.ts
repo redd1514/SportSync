@@ -16,6 +16,7 @@ import coachApplicationsPatchRouter from './routes/coachApplicationsPatch.ts';
 import { coachApplicationService } from './services/coachApplicationService.ts';
 import announcementsRouter from './routes/announcements.ts';
 import notificationsRouter from './routes/notifications.ts';
+import chatRoute from './routes/chatRoute.js';
 import authRouter from './routes/auth.ts';
 import { attachOrRequireAuth, requireAppRoles } from './middleware/authGate.ts';
 
@@ -54,6 +55,7 @@ app.get('/', (c) => {
       staff: '/api/staff',
       admin: '/api/admin',
       facilities: '/api/facilities',
+      chat: '/api/chat',
     },
   });
 });
@@ -165,6 +167,7 @@ app.route('/api/staff', staffMount);
 app.route('/api/announcements', announcementsRouter);
 app.route('/api/notifications', notificationsRouter);
 app.route('/api/facilities', facilitiesRouter);
+app.route('/api/chat', chatRoute);
 
 // 404 handler
 app.notFound((c) => c.json({ error: 'Not Found', path: c.req.path }, 404));

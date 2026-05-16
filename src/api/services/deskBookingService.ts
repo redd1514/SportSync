@@ -41,6 +41,8 @@ export type DeskBookingInput = {
   staff_id?: string | null;
   /** Published facility map id (from map editor) for multi-facility scoping */
   facility_map_id?: string | null;
+  /** Logged-in customer (public.users.id) — required for My Bookings */
+  user_id?: string | null;
 };
 
 function pad2(n: number) {
@@ -53,6 +55,35 @@ export function normalizeStartTime(t: string): string {
   const h = p[0] ?? 0;
   const m = p[1] ?? 0;
   return `${pad2(h)}:${pad2(m)}:00`;
+}
+
+function toMinutesHms(t: string): number {
+  const [h, m] = String(t || '00:00').slice(0, 8).split(':').map((x) => parseInt(x, 10));
+  return (h || 0) * 60 + (m || 0);
+}
+
+/** True when no confirmed/pending booking overlaps [start, end) on court+date. */
+export async function isCourtSlotAvailable(
+  courtId: string,
+  bookingDate: string,
+  startHms: string,
+  endHms: string,
+): Promise<boolean> {
+  const startM = toMinutesHms(startHms);
+  const endM = toMinutesHms(endHms);
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('start_time, end_time')
+    .eq('court_id', courtId)
+    .eq('booking_date', bookingDate)
+    .in('status', ['pending', 'confirmed', 'checked_in']);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const bStart = toMinutesHms(String(row.start_time));
+    const bEnd = toMinutesHms(String(row.end_time));
+    if (startM < bEnd && endM > bStart) return false;
+  }
+  return true;
 }
 
 export function endTimeFromStartAndDuration(startHms: string, durationHours: number): string {
@@ -76,10 +107,28 @@ async function resolveCourtId(courtName: string, sportName: string): Promise<str
   const { data: rows, error } = await supabase
     .from('courts')
     .select('id, name, sports!inner(name)')
-    .eq('name', name);
+    .ilike('name', name);
 
   if (error) throw error;
-  if (!rows?.length) return null;
+  if (!rows?.length) {
+    const numMatch = name.match(/^(.+?)\s+(\d+)$/i);
+    if (numMatch) {
+      const { data: fuzzy, error: fuzzyErr } = await supabase
+        .from('courts')
+        .select('id, name, sports!inner(name)')
+        .ilike('name', `${numMatch[1].trim()} ${numMatch[2]}`);
+      if (fuzzyErr) throw fuzzyErr;
+      if (fuzzy?.length) {
+        const bySport = fuzzy.find(
+          (r: { sports?: { name?: string } }) =>
+            String(r.sports?.name || '').toLowerCase() === sportName.trim().toLowerCase(),
+        );
+        if (bySport?.id) return bySport.id as string;
+        if (fuzzy.length === 1) return fuzzy[0].id as string;
+      }
+    }
+    return null;
+  }
   if (rows.length === 1) return rows[0].id as string;
   const bySport = rows.find((r: { sports?: { name?: string } }) => r.sports?.name === sportName);
   if (bySport?.id) return bySport.id as string;
@@ -100,6 +149,13 @@ export async function createDeskBooking(input: DeskBookingInput) {
   const startNorm = normalizeStartTime(input.start_time);
   const endNorm = endTimeFromStartAndDuration(startNorm, input.duration_hours);
 
+  const available = await isCourtSlotAvailable(courtId, input.booking_date, startNorm, endNorm);
+  if (!available) {
+    throw new Error(
+      `Sorry, ${input.court} is already booked on ${input.booking_date} for that time slot.`,
+    );
+  }
+
   const notes = JSON.stringify({
     refCode: ref,
     customerName: input.customer_name ?? '',
@@ -111,10 +167,13 @@ export async function createDeskBooking(input: DeskBookingInput) {
     ...(input.facility_map_id ? { facilityMapId: input.facility_map_id } : {}),
   });
 
+  const resolvedUserId =
+    input.user_id && isValidUuid(input.user_id) ? input.user_id.trim() : null;
+
   const { data: booking, error: bErr } = await supabase
     .from('bookings')
     .insert({
-      user_id: null,
+      user_id: resolvedUserId,
       court_id: courtId,
       booking_date: input.booking_date,
       start_time: startNorm,
@@ -134,7 +193,7 @@ export async function createDeskBooking(input: DeskBookingInput) {
   const { data: payment, error: pErr } = await supabase
     .from('payments')
     .insert({
-      user_id: null,
+      user_id: resolvedUserId,
       booking_id: bookingId,
       amount: input.total_price,
       payment_method: input.payment_method,

@@ -29,6 +29,27 @@ export async function getAccessTokenForApi(): Promise<string | null> {
   }
 }
 
+/**
+ * Ensure the next apiFetch sends Authorization (Supabase session, refresh, or demo JWT).
+ */
+export async function ensureApiAuthForUser(user: {
+  id: string;
+  email: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const existing = await getAccessTokenForApi();
+  if (existing) return { ok: true };
+
+  const { data: refreshed } = await supabase.auth.refreshSession();
+  if (refreshed.session?.access_token) return { ok: true };
+
+  if (user?.email) {
+    const tok = await exchangeDemoApiToken({ authId: user.id, email: user.email });
+    if (!tok.error) return { ok: true };
+    return { ok: false, error: tok.error || 'Unable to create a demo login token.' };
+  }
+  return { ok: false, error: 'Not signed in' };
+}
+
 /** Mint a SportSync API JWT after demo `/api/users/sync` (requires `SPORTSYNC_API_JWT_SECRET` on the API). */
 export async function exchangeDemoApiToken(params: { authId: string; email: string }): Promise<{ error: string | null }> {
   const res = await fetch(`${getApiBaseUrl()}/api/auth/token`, {

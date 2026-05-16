@@ -2,6 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBookingAPI } from '../hooks/useBookingAPI';
 import { useFacilityAPI } from '../hooks/useFacilityAPI';
+import { useUser } from '../contexts/UserContext';
+import { apiFetch, ensureApiAuthForUser } from '../utils/authenticatedFetch';
+import type { Booking } from '../contexts/UserContext';
+import { mapDbStatusToUiStatus, normalizeBookingDate, normalizeBookingTime } from '../utils/bookingDisplay';
 import {
   Send, Sparkles, RotateCcw, ChevronDown, X, MapPin, CalendarDays, Clock,
   DollarSign, Trophy, GraduationCap, XCircle, CreditCard, ArrowRight,
@@ -17,6 +21,7 @@ type Msg = {
 const QUICK_CHIPS: { label: string; q: string; Icon: any }[] = [
   { label: 'Court Rates',     q: 'What are the court rates?',          Icon: DollarSign },
   { label: 'Hours',           q: 'What are your operating hours?',     Icon: Clock },
+  { label: 'Book Court',      q: 'Book Basketball 1 tomorrow at 3pm for 2 hours', Icon: CalendarDays },
   { label: 'How to Book',     q: 'How do I book a court?',             Icon: CalendarDays },
   { label: 'Loyalty Points',  q: 'How do loyalty points work?',        Icon: Trophy },
   { label: 'Coaching',        q: 'Tell me about coaching services',    Icon: GraduationCap },
@@ -53,7 +58,11 @@ function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[])
         : 'Loading court availability... Check back in a moment.',
       link: { label: 'View Courts', action: 'booking' },
     };
-  if (/book|reserve|court|slot/.test(q))
+  const looksLikeLiveBook =
+    /\b(book|reserve|mag-?book)\b/.test(q) &&
+    /\b(basketball|volleyball|badminton|pickleball|billiards?|table tennis|ping pong)\b/.test(q) &&
+    /\b(\d{1,2}\s*(?:am|pm)|\d{1,2}:\d{2})\b/.test(q);
+  if (/book|reserve|court|slot/.test(q) && !looksLikeLiveBook)
     return {
       text: 'Booking is easy!\n\n1. Go to the Facility Map tab\n2. Select your preferred date & time\n3. Tap any available (green) court\n4. Choose your session length\n5. Add optional extras\n6. Pay via GCash and get your QR ticket\n\nYour QR ticket is required for check-in at the front desk.',
       link: { label: 'Open Facility Map', action: 'booking' },
@@ -109,9 +118,29 @@ function useIsMobile() {
   return isMobile;
 }
 
+function mapChatBookingToClient(row: Record<string, unknown>): Booking {
+  return {
+    id: String(row.id),
+    sport: String(row.sport || 'Sports'),
+    date: normalizeBookingDate(row.date ?? row.booking_date),
+    time: normalizeBookingTime(row.time),
+    duration: Number(row.duration ?? 1),
+    court: String(row.court || 'Court'),
+    status: mapDbStatusToUiStatus(row.status),
+    amount: Number(row.amount ?? 0),
+    paymentStatus: (row.paymentStatus as Booking['paymentStatus']) || 'paid',
+    createdAt: String(row.createdAt || new Date().toISOString()),
+    customerName: row.customerName ? String(row.customerName) : undefined,
+    customerPhone: row.customerPhone ? String(row.customerPhone) : undefined,
+    addOns: row.addOns ? String(row.addOns) : undefined,
+    refCode: String(row.refCode || row.id || ''),
+  };
+}
+
 export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?: (tab: string) => void; forceOpen?: boolean; onClose?: () => void }) {
   const { checkAvailability } = useBookingAPI();
   const { getCourtStatuses, getFacilityInfo } = useFacilityAPI();
+  const { user, addBooking, refreshBookingsFromApi, isLoggedIn } = useUser();
   const [isExpanded, setIsExpanded] = useState(false);
   const [message, setMessage] = useState('');
   const [facilityInfo, setFacilityInfo] = useState<any>(null);
@@ -158,18 +187,91 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
     onClose?.();
   };
 
-  const sendMessage = useCallback((text: string) => {
+  const sendMessage = useCallback(async (text: string) => {
     if (!text.trim()) return;
-    setMessages(prev => [...prev, { role: 'user', text: text.trim(), ts: new Date() }]);
+    const trimmed = text.trim();
+    setMessages(prev => [...prev, { role: 'user', text: trimmed, ts: new Date() }]);
     setMessage('');
     setIsTyping(true);
-    setTimeout(() => {
+
+    try {
+      if (isLoggedIn && user?.id && user?.email) {
+        const authReady = await ensureApiAuthForUser({ id: user.id, email: user.email });
+        if (!authReady.ok && /\b(book|reserve|mag-?book)\b/i.test(trimmed)) {
+          setMessages(prev => [
+            ...prev,
+            {
+              role: 'ai',
+              text: `I need you signed in to book a court. ${authReady.error || 'Please log out and log in again, then retry.'}`,
+              ts: new Date(),
+            },
+          ]);
+          return;
+        }
+      }
+
+      const res = await apiFetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: trimmed,
+          ...(user?.id && user?.email
+            ? { userId: user.id, userEmail: user.email, userName: user.name, userPhone: user.phone }
+            : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        reply?: string;
+        error?: string;
+        booking?: Record<string, unknown>;
+        needsLogin?: boolean;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error || `Chat failed (${res.status})`);
+      }
+
+      let link: Msg['link'] | undefined;
+      if (data.booking) {
+        const b = mapChatBookingToClient(data.booking);
+        addBooking(b);
+        await refreshBookingsFromApi();
+        window.dispatchEvent(new CustomEvent('sportsync:bookings-refresh'));
+        link = { label: 'View My Bookings (QR Ticket)', action: 'mybookings' };
+      } else if (data.needsLogin && /\b(book|reserve|mag-?book)\b/i.test(trimmed)) {
+        link = { label: 'Log in to Book', action: 'booking' };
+      }
+
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'ai',
+          text: data.reply || 'Sorry, I could not respond right now.',
+          ts: new Date(),
+          link,
+        },
+      ]);
+    } catch (err) {
+      const isBookingAttempt = /\b(book|booking|reserve|mag-?book)\b/i.test(trimmed);
+      if (isBookingAttempt) {
+        const msg = err instanceof Error ? err.message : 'Please try again.';
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'ai',
+            text: `Sorry, hindi ko natapos ang booking sa chat. ${msg}\n\nPwede mo ring gamitin ang Facility Map para mag-book.`,
+            ts: new Date(),
+            link: { label: 'Open Facility Map', action: 'booking' },
+          },
+        ]);
+      } else {
+        const resp = getAIResponse(trimmed, facilityInfo, courtStatuses);
+        setMessages(prev => [...prev, { role: 'ai', text: resp.text, ts: new Date(), link: resp.link }]);
+      }
+    } finally {
       setIsTyping(false);
-      // Use facility info in AI response if available
-      const resp = getAIResponse(text, facilityInfo, courtStatuses);
-      setMessages(prev => [...prev, { role: 'ai', text: resp.text, ts: new Date(), link: resp.link }]);
-    }, 800 + Math.random() * 600);
-  }, [facilityInfo, courtStatuses]);
+    }
+  }, [facilityInfo, courtStatuses, addBooking, refreshBookingsFromApi, isLoggedIn, user]);
 
   const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
@@ -185,7 +287,9 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
           <p className="text-white font-black" style={{ fontSize: 14, lineHeight: 1.2 }}>JRC AI Concierge</p>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-green-400" style={{ boxShadow: '0 0 6px #22c55e' }} />
-            <p className="text-blue-200 font-black" style={{ fontSize: 10 }}>Online · Read-only support</p>
+            <p className="text-blue-200 font-black" style={{ fontSize: 10 }}>
+              {isLoggedIn ? 'Online · Can book courts' : 'Online · Log in to book'}
+            </p>
           </div>
         </div>
         <button onClick={() => setMessages([{ role: 'ai', text: 'Chat reset! How can I help you today?', ts: new Date() }])}
@@ -266,7 +370,7 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
       <div className="px-3 pb-4 pt-2 flex-shrink-0 flex gap-2" style={{ background: '#0D0D0D' }}>
         <input ref={inputRef} value={message} onChange={e => setMessage(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(message); } }}
-          placeholder="Ask about courts, rates, coaching..."
+          placeholder={isLoggedIn ? 'Book a court: e.g. Basketball 1 bukas 3pm 2 hours' : 'Ask about courts, rates, coaching...'}
           className="flex-1 rounded-xl px-4 py-2.5 text-white focus:outline-none"
           style={{ fontSize: 13, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}
         />

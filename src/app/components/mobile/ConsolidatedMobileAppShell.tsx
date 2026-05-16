@@ -227,7 +227,11 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
         </AnimatePresence>
       </div>
       <BottomNav active={mainTab} onChange={t => setMainTab(t)} />
-      <FloatingAIChat forceOpen={aiOpen} onClose={() => setAiOpen(false)} />
+      <FloatingAIChat
+        forceOpen={aiOpen}
+        onClose={() => setAiOpen(false)}
+        onNavigate={(dest) => navigate(dest)}
+      />
     </div>
   );
 }

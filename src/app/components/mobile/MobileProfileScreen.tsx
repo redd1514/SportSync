@@ -14,6 +14,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { downloadTicketQrPng } from "../../../shared/qrDownload";
 import { toast } from "sonner";
 import { PhotoAvatar, PhotoCropperModal, loadProfilePhoto, saveProfilePhoto } from "../shared/ProfilePhotoPicker";
+import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
 
 interface MobileProfileScreenProps {
   onLogout: () => void;
@@ -439,17 +440,10 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     }
   });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const parseBookingDate = (dateStr: string) => {
-    if (!dateStr) return new Date();
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
+  const todayKey = getManilaDateKey();
 
   const filteredBookings = userBookings.filter((b) => {
-    const isPastDate = parseBookingDate(b.date) < today;
+    const isPastDate = isManilaDateBefore(b.date, todayKey);
     const isPendingReq = b.cancellationRequested || localPendingRequests.includes(b.id);
     
     if (activeTab === "upcoming") {

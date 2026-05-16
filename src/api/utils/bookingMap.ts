@@ -20,6 +20,16 @@ export function parseBookingNotes(notes: string | null | undefined): BookingNote
   }
 }
 
+/** Normalize DB/API date values to Manila YYYY-MM-DD. */
+export function normalizeManilaDateKey(value: unknown): string {
+  if (value == null || value === '') return '';
+  const normalized = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(parsed);
+}
+
 export function durationHoursFromTimes(start: string, end: string): number {
   const parse = (t: string) => {
     const p = t.split(':').map(Number);
@@ -96,7 +106,7 @@ export function mapBookingRowToAdmin(row: {
     addOns: meta.addOns,
     court: courtName,
     sport: sportName,
-    date: row.booking_date,
+    date: normalizeManilaDateKey(row.booking_date),
     time: start,
     duration,
     amount: Number(row.total_price ?? 0),

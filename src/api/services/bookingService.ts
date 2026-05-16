@@ -2,6 +2,23 @@ import { supabase } from './supabaseClient';
 import { BookingRequest, BookingResponse } from '../types';
 import { createHash } from 'crypto';
 import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
+import { deskAdminRowToClientBooking, mapBookingRowToAdmin } from '../utils/bookingMap.ts';
+
+const USER_BOOKING_SELECT = `
+      id,
+      user_id,
+      booking_date,
+      start_time,
+      end_time,
+      status,
+      total_price,
+      base_price,
+      notes,
+      qr_code_token,
+      created_at,
+      updated_at,
+      courts ( name, sports ( name ) )
+    `;
 
 const USE_MOCK_BOOKINGS = process.env.USE_MOCK_BOOKINGS === 'true';
 
@@ -257,7 +274,7 @@ export const bookingService = {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*')
+        .select(USER_BOOKING_SELECT)
         .eq('user_id', resolvedUserId)
         .order('booking_date', { ascending: false });
 
@@ -272,15 +289,16 @@ export const bookingService = {
           .select('booking_id')
           .in('booking_id', bookingIds)
           .eq('status', 'pending');
-          
-        const mapped = data.map((b: any) => {
-           const hasPendingReq = requests?.some(r => r.booking_id === b.id);
-           return {
-             ...b,
-             cancellation_requested: hasPendingReq || false
-           };
+
+        return data.map((row: any) => {
+          const admin = mapBookingRowToAdmin(row);
+          const client = deskAdminRowToClientBooking(admin);
+          const hasPendingReq = requests?.some((r) => r.booking_id === row.id);
+          return {
+            ...client,
+            cancellation_requested: hasPendingReq || false,
+          } as BookingResponse;
         });
-        return mapped as BookingResponse[];
       }
       if (USE_MOCK_BOOKINGS) {
         throw new Error('Using mock bookings');
