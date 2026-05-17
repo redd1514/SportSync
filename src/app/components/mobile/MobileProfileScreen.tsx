@@ -261,7 +261,7 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<typeof bookings[0] | null>(null);
   const [rescheduleTarget, setRescheduleTarget] = useState<typeof bookings[0] | null>(null);
-  const [qrTarget, setQrTarget] = useState<typeof bookings[0] | null>(null);
+  const [qrTarget, setQrTarget] = useState<any | null>(null);
   const [profileData, setProfileData] = useState<any>(null);
   const [loyaltyData, setLoyaltyData] = useState<any>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);

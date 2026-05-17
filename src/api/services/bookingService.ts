@@ -306,16 +306,38 @@ export const bookingService = {
       console.log('[BookingService] Found bookings:', data?.length);
       if (data && data.length > 0) {
         const bookingIds = data.map((b: any) => b.id);
-        const { data: requests } = await supabase
-          .from('booking_requests')
-          .select('id, booking_id, request_type, reason, requested_new_date, requested_new_start_time, requested_new_end_time, created_at')
-          .in('booking_id', bookingIds)
-          .eq('status', 'pending');
-          
+        const [{ data: requests }, { data: payments }] = await Promise.all([
+          supabase
+            .from('booking_requests')
+            .select('id, booking_id, request_type, reason, requested_new_date, requested_new_start_time, requested_new_end_time, created_at')
+            .in('booking_id', bookingIds)
+            .eq('status', 'pending'),
+          supabase
+            .from('payments')
+            .select('booking_id, status, amount, payment_method')
+            .in('booking_id', bookingIds)
+            .order('created_at', { ascending: false }),
+        ]);
+
+        const paymentByBooking = new Map<string, { status: string; amount: number }>();
+        for (const p of payments ?? []) {
+          const bid = String((p as { booking_id?: string }).booking_id || '');
+          if (bid && !paymentByBooking.has(bid)) {
+            paymentByBooking.set(bid, {
+              status: String((p as { status?: string }).status || 'pending'),
+              amount: Number((p as { amount?: number }).amount || 0),
+            });
+          }
+        }
+
         const mapped = data.map((b: any) => {
            const pendingReq = requests?.find(r => r.booking_id === b.id);
+           const pay = paymentByBooking.get(String(b.id));
+           const base = deskAdminRowToClientBooking(mapBookingRowToAdmin(b));
+           const payComplete = pay?.status === 'completed';
            return {
-             ...deskAdminRowToClientBooking(mapBookingRowToAdmin(b)),
+             ...base,
+             paymentStatus: payComplete ? 'paid' : base.paymentStatus,
              cancellationRequested: !!pendingReq,
              cancellation_requested: !!pendingReq,
              pendingChangeRequest: pendingReq ? {

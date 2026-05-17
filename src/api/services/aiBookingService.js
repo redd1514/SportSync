@@ -9,11 +9,8 @@ import {
   sportKeyFromName,
 } from '../utils/aiContext.js';
 import { extractDateAndTimeFromMessage, normalizeTime24 } from '../utils/messageDateParse.js';
-import {
-  createDeskBooking,
-  normalizeStartTime,
-} from './deskBookingService.ts';
-import { deskAdminRowToClientBooking } from '../utils/bookingMap.ts';
+import { normalizeStartTime } from './deskBookingService.ts';
+import { createPaymongoCourtCheckout } from './paymongoCheckoutService.ts';
 
 const BOOKING_INTENT_RE =
   /\b(book|booking|reserve|reservation|mag-?book|i-?book|gusto\s+kong\s+mag-?book|magpa-?book|pa-?book|schedule|iskedyul)\b/i;
@@ -309,9 +306,11 @@ export async function tryConciergeBooking({
   message,
   courts,
   userId,
+  userEmail,
   customerName,
   customerPhone,
   dateOverrides = {},
+  returnBaseUrl,
 }) {
   if (!messageLooksLikeBooking(message)) {
     return { ok: false, skipped: true };
@@ -355,34 +354,55 @@ export async function tryConciergeBooking({
   }
 
   let courtRates;
+  let downpaymentPercentage = 50;
   try {
-    ({ courtRates } = await fetchSystemCourtRates(getPgPool()));
+    const settings = await fetchSystemCourtRates(getPgPool());
+    courtRates = settings.courtRates;
+    downpaymentPercentage = settings.downpaymentPercentage ?? 50;
   } catch (e) {
     return { ok: false, error: e?.message || 'Could not load pricing', intent };
   }
   const total = computeTotalPrice(courtRates, intent);
   const startNorm = normalizeStartTime(intent.start_time);
+  const duration = intent.duration_hours || 1;
+  const base = typeof returnBaseUrl === 'string' ? returnBaseUrl.trim().replace(/\/$/, '') : '';
 
   try {
-    const out = await createDeskBooking({
+    const checkout = await createPaymongoCourtCheckout(userId, userEmail || '', {
       court: intent.court_name,
       sport: intent.sport,
       booking_date: intent.booking_date,
       start_time: startNorm,
-      duration_hours: intent.duration_hours || 1,
+      duration_hours: duration,
       total_price: total,
-      base_price: total,
       customer_name: customerName || 'Customer',
       customer_phone: customerPhone || '',
-      payment_method: 'gcash',
-      source: 'ai_concierge',
       add_ons: intent.add_ons || 'AI Concierge Booking',
-      user_id: userId,
+      downpayment_percentage: downpaymentPercentage,
+      source: 'ai_concierge',
+      ...(base
+        ? {
+            success_url: `${base}?payment=success`,
+            cancel_url: `${base}?payment=cancelled`,
+          }
+        : {}),
     });
 
-    const client = deskAdminRowToClientBooking(out.booking);
-    return { ok: true, booking: client, intent, refCode: client.refCode };
+    return {
+      ok: false,
+      needsPayment: true,
+      intent,
+      refCode: checkout.refCode,
+      payment: {
+        checkoutUrl: checkout.checkoutUrl,
+        bookingId: checkout.bookingId,
+        downpaymentAmount: checkout.downpaymentAmount,
+        totalPrice: checkout.totalPrice,
+        downpaymentPercentage: checkout.downpaymentPercentage,
+        balanceDue: checkout.balanceDue,
+      },
+    };
   } catch (e) {
-    return { ok: false, error: e?.message || 'Booking failed', intent };
+    return { ok: false, error: e?.message || 'Could not start PayMongo checkout', intent };
   }
 }

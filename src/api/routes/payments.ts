@@ -1,8 +1,28 @@
 import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
 import { paymentService } from '../services/paymentService.ts';
+import { resolveBearer } from '../auth/resolveBearer.ts';
+import { createPaymongoCourtCheckout } from '../services/paymongoCheckoutService.ts';
 
 const paymentsRouter = new Hono();
+
+/** Create PayMongo hosted checkout for court booking downpayment */
+paymentsRouter.post('/checkout', async (c) => {
+  try {
+    const auth = await resolveBearer(c.req.header('Authorization'));
+    if (!auth) {
+      return c.json({ error: 'Unauthorized. Please sign in again.' }, 401);
+    }
+
+    const body = await c.req.json();
+    const result = await createPaymongoCourtCheckout(auth.userId, auth.email, body);
+    return c.json(result, 201);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Payment initialization failed';
+    console.error('[payments/checkout]', message);
+    return c.json({ error: message }, 400);
+  }
+});
 
 paymentsRouter.post('/', async (c) => {
   try {

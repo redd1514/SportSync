@@ -46,8 +46,6 @@ export type DeskBookingInput = {
   loyalty_discount?: number;
   /** Published facility map id (from map editor) for multi-facility scoping */
   facility_map_id?: string | null;
-  /** Logged-in customer (public.users.id) — required for My Bookings */
-  user_id?: string | null;
 };
 
 function pad2(n: number) {
@@ -152,8 +150,12 @@ async function resolveCourtId(courtName: string, sportName: string): Promise<str
       if (fuzzyErr) throw fuzzyErr;
       if (fuzzy?.length) {
         const bySport = fuzzy.find(
-          (r: { sports?: { name?: string } }) =>
-            String(r.sports?.name || '').toLowerCase() === sportName.trim().toLowerCase(),
+          (r: { sports?: Array<{ name?: string }> | { name?: string } }) => {
+            const sportMatch = Array.isArray(r.sports)
+              ? r.sports[0]?.name
+              : r.sports?.name;
+            return String(sportMatch || '').toLowerCase() === sportName.trim().toLowerCase();
+          },
         );
         if (bySport?.id) return bySport.id as string;
         if (fuzzy.length === 1) return fuzzy[0].id as string;
@@ -162,7 +164,10 @@ async function resolveCourtId(courtName: string, sportName: string): Promise<str
     return null;
   }
   if (rows.length === 1) return rows[0].id as string;
-  const bySport = rows.find((r: { sports?: { name?: string } }) => r.sports?.name === sportName);
+  const bySport = rows.find((r: { sports?: Array<{ name?: string }> | { name?: string } }) => {
+    const sportMatch = Array.isArray(r.sports) ? r.sports[0]?.name : r.sports?.name;
+    return sportMatch === sportName;
+  });
   if (bySport?.id) return bySport.id as string;
   throw new Error(
     `Multiple database courts share the name "${name}". Match sport "${sportName}" or add a facility column to courts.`,
@@ -207,9 +212,6 @@ export async function createDeskBooking(input: DeskBookingInput) {
     ...(loyaltyPointsRedeemed > 0 ? { loyaltyPointsRedeemed, loyaltyDiscount: input.loyalty_discount ?? 0 } : {}),
     ...(input.facility_map_id ? { facilityMapId: input.facility_map_id } : {}),
   });
-
-  const resolvedUserId =
-    input.user_id && isValidUuid(input.user_id) ? input.user_id.trim() : null;
 
   const { data: booking, error: bErr } = await supabase
     .from('bookings')

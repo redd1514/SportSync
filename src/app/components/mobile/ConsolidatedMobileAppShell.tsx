@@ -15,6 +15,7 @@ import { UserMyBookings }           from "../UserMyBookings";
 import { UserCoachingServices }     from "../user/UserCoachingServices";
 import { UserMyCoaching }           from "../user/UserMyCoaching";
 import { CoachApplicationForm }     from "../user/CoachApplicationForm";
+import { PaymentFlashBanner } from "../shared/PaymentFlashBanner";
 
 /* ── Tab types ── */
 type MainTab    = "home" | "booking" | "coaching" | "account";
@@ -218,6 +219,7 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden" style={{ background: "#0D0D0D" }}>
       <PremiumStatusBar />
+      <PaymentFlashBanner />
       <div className="flex-1 overflow-hidden relative min-h-0">
         <AnimatePresence mode="wait">
           <motion.div key={mainTab}

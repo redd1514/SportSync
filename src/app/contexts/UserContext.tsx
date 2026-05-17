@@ -4,11 +4,19 @@ import { getApiBaseUrl } from "../utils/apiBase";
 import { apiFetch, clearDemoApiToken, exchangeDemoApiToken } from "../utils/authenticatedFetch";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
 import { mapDbStatusToUiStatus, normalizeBookingDate, normalizeBookingTime } from "../utils/bookingDisplay";
+import {
+  clearPaymentReturnFromUrl,
+  processPendingCoachingLink,
+  readPaymentReturnFromUrl,
+} from "../utils/paymentReturn";
 
 const SYSTEM_SETTINGS_KV_KEY = "system_settings_v1";
-const DEMO_USER_STORAGE_KEY = 'sportsync_demo_user';
-/** Legacy key from older builds; cleared on logout. */
-const DEMO_USER_LOGGED_OUT_KEY = 'sportsync_demo_user_logged_out';
+import {
+  clearPersistedDemoSession,
+  persistDemoSession,
+  readPersistedDemoSession,
+  removePersistedDemoStorage,
+} from "../utils/demoSession";
 
 const _TODAY = new Date().toISOString().split('T')[0];
 
@@ -168,6 +176,8 @@ interface UserContextType {
   authFlow: "none" | "password_recovery";
   clearAuthFlow: () => void;
   refreshBookingsFromApi: () => Promise<void>;
+  paymentFlash: string | null;
+  clearPaymentFlash: () => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -201,6 +211,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [systemSettingsKvReady, setSystemSettingsKvReady] = useState(false);
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [paymentFlash, setPaymentFlash] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,13 +247,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }, 800);
     return () => window.clearTimeout(t);
   }, [systemSettings, systemSettingsKvReady]);
-
-  const clearPersistedDemoKeys = () => {
-    try {
-      localStorage.removeItem(DEMO_USER_STORAGE_KEY);
-      localStorage.removeItem(DEMO_USER_LOGGED_OUT_KEY);
-    } catch {}
-  };
 
   const syncUserProfile = async (profile: { id: string; email: string; name: string; phone?: string; role?: string }) => {
     try {
@@ -342,6 +346,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const restoreDemoSession = useCallback(async (): Promise<boolean> => {
+    const persisted = readPersistedDemoSession();
+    if (!persisted) return false;
+
+    const { profile, demoAuthId } = persisted;
+    const tok = await exchangeDemoApiToken({
+      authId: demoAuthId || profile.id,
+      email: profile.email,
+    });
+    if (tok.error) {
+      console.warn("[UserContext] Demo session restore failed:", tok.error);
+      return false;
+    }
+
+    const freshLoyalty = await fetchAuthoritativeLoyaltyPoints(
+      profile.id,
+      profile.loyaltyPoints ?? 0,
+    );
+    setUser({ ...profile, loyaltyPoints: freshLoyalty });
+    return true;
+  }, []);
+
   const loadBookingsForUser = async (userId: string) => {
     try {
       const response = await apiFetch(`/api/bookings/${encodeURIComponent(userId)}`);
@@ -383,6 +409,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    const { status, bookingId } = readPaymentReturnFromUrl();
+    if (!status) return;
+    clearPaymentReturnFromUrl();
+    void (async () => {
+      if (status === "success") {
+        await refreshBookingsFromApi();
+        if (bookingId) await processPendingCoachingLink(bookingId);
+        setPaymentFlash("Downpayment received — your booking is confirmed. View it in My Bookings.");
+      } else {
+        setPaymentFlash("Payment was cancelled. Your slot was not charged — you can try again anytime.");
+      }
+    })();
+  }, [refreshBookingsFromApi]);
+
+  const clearPaymentFlash = useCallback(() => setPaymentFlash(null), []);
+
   // 1. Listen for real Supabase sessions when the app loads
 useEffect(() => {
   (async () => {
@@ -395,6 +438,7 @@ useEffect(() => {
     if (authEpochRef.current !== epoch) return;
 
     if (session?.user) {
+      removePersistedDemoStorage();
       clearDemoApiToken();
 
       const nextUser = {
@@ -447,14 +491,20 @@ useEffect(() => {
       setUser({ ...resolvedUser, loyaltyPoints: freshLoyalty });
 
       // Bookings will be loaded by the useEffect that watches user changes
+    } else {
+      await restoreDemoSession();
     }
 
     setIsLoading(false);
   })();
 
-  const {
-    data: { subscription }
-  } = supabase.auth.onAuthStateChange((event, session) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only session bootstrap
+  }, []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
     if (event === "PASSWORD_RECOVERY") {
       setAuthFlow("password_recovery");
     }
@@ -466,6 +516,7 @@ useEffect(() => {
     const epoch = authEpochRef.current;
 
     if (session?.user) {
+      removePersistedDemoStorage();
       clearDemoApiToken();
 
       const nextUser = {
@@ -527,15 +578,16 @@ useEffect(() => {
 
         // Bookings will be loaded by the useEffect that watches user changes
       });
-    } else {
+    } else if (event === "SIGNED_OUT") {
       clearDemoApiToken();
       setUser(null);
       setBookings([]);
     }
-  });
+    // INITIAL_SESSION with null session: demo restore runs in mount effect — do not clear user here
+    });
 
-  return () => subscription.unsubscribe();
-}, []);
+    return () => subscription.unsubscribe();
+  }, [restoreDemoSession]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -583,7 +635,7 @@ useEffect(() => {
       }
       const syncedPoints = Number((syncedUser as { loyalty_points?: number; loyaltyPoints?: number } | null)?.loyalty_points ?? 0);
       const loyaltyPoints = await fetchAuthoritativeLoyaltyPoints(String(resolvedId), syncedPoints);
-      setUser({
+      const demoProfile: UserProfile = {
         id: resolvedId,
         name,
         email,
@@ -593,13 +645,16 @@ useEffect(() => {
         totalBookings: 0,
         memberSince: "2025-11-15",
         accountStatus: "active",
-        role
-      });
+        role,
+      };
+      persistDemoSession(demoProfile, id);
+      setUser(demoProfile);
       // Bookings will be loaded by the useEffect that watches user changes
       return { error: null }; // Success!
     }
 
     // --- REAL SUPABASE CHECK ---
+    removePersistedDemoStorage();
     clearDemoApiToken();
     // If it's not one of the 3 demo accounts above, try real Supabase Login
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -685,7 +740,7 @@ useEffect(() => {
     clearDemoApiToken();
     setUser(null); // Clears demo session
     setBookings([]);
-    clearPersistedDemoKeys();
+    clearPersistedDemoSession();
   };
 
   // 5. Reset Password
@@ -808,7 +863,9 @@ useEffect(() => {
       error,
       authFlow,
       clearAuthFlow,
-      refreshBookingsFromApi
+      refreshBookingsFromApi,
+      paymentFlash,
+      clearPaymentFlash,
     }}>
       {children}
     </UserContext.Provider>

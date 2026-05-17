@@ -33,7 +33,7 @@ LANGUAGE:
 - If they write in English only, respond in English.
 
 BOOKING:
-- When BOOKING_RESULT shows ok:true, confirm the reservation with court, date, time, duration, total price (₱), and QR ref code. Tell them it appears in My Bookings with a scannable QR ticket.
+- When BOOKING_RESULT shows needsPayment:true, the slot is held as pending until PayMongo downpayment is paid. Tell the user to tap "Pay downpayment" in chat (GCash, card, or Maya). After payment, the booking is confirmed and appears in My Bookings with a QR ticket.
 - When BOOKING_RESULT shows needsLogin, ask them to log in first to complete a booking.
 - When BOOKING_RESULT shows ok:false with error, explain clearly (e.g. slot taken, missing court name).
 
@@ -110,6 +110,27 @@ export function buildConciergeBookingSuccessReply(bookingResult) {
 Na-reserve ang **${court}** sa **${formatManilaDateLong(dateKey)}, ${formatTime12h(time24)}** for **${duration} ${hoursLabel}**. Ang total price ay **₱${amount}**.
 
 Ang reference code mo ay **${ref}**. Makikita mo rin ito sa My Bookings, kasama ang scannable QR ticket.`;
+}
+
+/** Taglish reply when checkout is ready — booking stays pending until PayMongo payment. */
+export function buildConciergePaymentPendingReply(bookingResult) {
+  const intent = bookingResult.intent || {};
+  const pay = bookingResult.payment || {};
+  const court = intent.court_name || 'your court';
+  const dateKey = intent.booking_date || '';
+  const time24 = String(intent.start_time || '12:00').slice(0, 5);
+  const duration = Number(intent.duration_hours ?? 1);
+  const hoursLabel = duration === 1 ? 'hour' : 'hours';
+  const total = Number(pay.totalPrice ?? 0);
+  const down = Number(pay.downpaymentAmount ?? 0);
+  const pct = Number(pay.downpaymentPercentage ?? 50);
+  const ref = bookingResult.refCode || '';
+
+  return `Naka-hold na ang **${court}** sa **${formatManilaDateLong(dateKey)}, ${formatTime12h(time24)}** (${duration} ${hoursLabel}).
+
+Para ma-confirm ang reservation, kailangan mo munang bayaran ang **${pct}% downpayment (₱${down})** ng total na **₱${total}** via PayMongo (GCash, card, o Maya).
+
+Reference: **${ref}**. Tap **Pay downpayment** sa chat para mag-checkout. Pagkatapos ng bayad, lalabas na ito sa My Bookings kasama ang QR ticket.`;
 }
 
 function formatGeminiSdkError(err) {
@@ -231,15 +252,19 @@ chat.post('/', async (c) => {
     if (messageLooksLikeBooking(message)) {
       if (auth?.userId) {
         const userRow = await findUserRow(auth.userId);
+        const returnBaseUrl =
+          typeof body.returnBaseUrl === 'string' ? body.returnBaseUrl.trim() : '';
         bookingResult = await tryConciergeBooking({
           message,
           courts: knowledge.courts,
           userId: auth.userId,
+          userEmail: auth.email,
           customerName: String(
             body.userName || userRow?.full_name || auth.email || 'Customer',
           ),
           customerPhone: String(userRow?.phone || body.userPhone || ''),
           dateOverrides: { today, explicitDate, explicitTime },
+          returnBaseUrl,
         });
       } else {
         bookingResult = await tryConciergeBooking({
@@ -252,7 +277,9 @@ chat.post('/', async (c) => {
     }
 
     let reply;
-    if (bookingResult?.ok) {
+    if (bookingResult?.needsPayment) {
+      reply = buildConciergePaymentPendingReply(bookingResult);
+    } else if (bookingResult?.ok) {
       reply = buildConciergeBookingSuccessReply(bookingResult);
     } else if (bookingResult?.needsLogin) {
       reply =
@@ -294,8 +321,13 @@ chat.post('/', async (c) => {
       requestedTime: knowledge.requestedTime,
       dateSource,
       booking: bookingResult?.ok ? bookingResult.booking : null,
-      bookingError: bookingResult?.ok ? null : bookingResult?.error || null,
+      bookingError:
+        bookingResult?.ok || bookingResult?.needsPayment
+          ? null
+          : bookingResult?.error || null,
       needsLogin: Boolean(bookingResult?.needsLogin),
+      needsPayment: Boolean(bookingResult?.needsPayment),
+      paymentCheckout: bookingResult?.needsPayment ? bookingResult.payment : null,
       meta: {
         courtsCount: knowledge.courts?.length ?? 0,
         existingBookingsCount: knowledge.existingBookings?.length ?? 0,

@@ -52,10 +52,18 @@ function AppWithAI({ appState, isMobile, onLogout }: { appState: string; isMobil
   );
 }
 
+function isPaymentReturnUrl() {
+  if (typeof window === "undefined") return false;
+  const p = new URLSearchParams(window.location.search).get("payment");
+  return p === "success" || p === "cancelled";
+}
+
 function RootContent() {
-  const [appState, setAppState] = useState<AppState>("splash");
+  const [appState, setAppState] = useState<AppState>(() =>
+    isPaymentReturnUrl() ? "app" : "splash",
+  );
   const isMobile = useIsMobile();
-  const { isLoggedIn, authFlow } = useUser();
+  const { isLoggedIn, authFlow, isLoading } = useUser();
   const [isRecoveryPending, setIsRecoveryPending] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const fromStorage = window.sessionStorage.getItem(RECOVERY_PENDING_KEY) === "1";
@@ -66,12 +74,13 @@ function RootContent() {
 
   useEffect(() => {
     if (appState === "splash") return;
+    if (isLoading) return;
     if (isRecoveryPending || authFlow === "password_recovery") {
       setAppState("auth");
       return;
     }
     setAppState(isLoggedIn ? "app" : "auth");
-  }, [isLoggedIn, appState, isRecoveryPending, authFlow]);
+  }, [isLoggedIn, appState, isRecoveryPending, authFlow, isLoading]);
 
   const handleSplashComplete = () => {
     if (isRecoveryFlowInUrl()) {
@@ -82,6 +91,7 @@ function RootContent() {
       setAppState("auth");
       return;
     }
+    if (isLoading) return;
     setAppState(isLoggedIn && !isRecoveryPending && authFlow !== "password_recovery" ? "app" : "auth");
   };
 

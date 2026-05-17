@@ -28,6 +28,7 @@ import {
   formatLoyaltyDiscountLabel,
   loyaltyRewardsAvailable,
 } from '../../constants/loyalty';
+import { PaymongoDownpaymentConfirm } from './PaymongoDownpaymentConfirm';
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
 const MIN_ZOOM = 0.15;
@@ -386,10 +387,14 @@ interface BookingModalProps {
   coachName?: string;
   coachHourlyRate?: number;
   studentName?: string;
+  coachingSessionId?: string;
+  coachingStudentId?: string;
+  coachId?: string;
+  facilityMapId?: string | null;
   onDone?: () => void;
 }
 
-function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfirm, initialDate, initialTime, coachingMode = false, coachName, coachHourlyRate = 0, studentName, onDone }: BookingModalProps) {
+function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfirm, initialDate, initialTime, coachingMode = false, coachName, coachHourlyRate = 0, studentName, coachingSessionId, coachingStudentId, coachId, facilityMapId, onDone }: BookingModalProps) {
   const { addonsBySport } = useAddons();
   const { calcCourtPrice, user, systemSettings } = useUser();
   const now = new Date();
@@ -972,18 +977,49 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                   <p className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</p>
                 </div>
                 {priceBreakdownPanel}
-                <FacilityPaymentConfirm
-                  amount={total}
-                  onSuccess={async () => {
-                    setError('');
-                    try {
-                      await doConfirm();
-                      setStep(doneStep);
-                    } catch (e: any) {
-                      setError(e?.message || 'Could not save booking. Please try again.');
-                    }
+                <PaymongoDownpaymentConfirm
+                  totalAmount={total}
+                  downpaymentPercentage={systemSettings.downpaymentPercentage}
+                  bookingPayload={{
+                    court: courtName,
+                    sport,
+                    booking_date: date,
+                    start_time: time,
+                    duration_hours: duration,
+                    total_price: total,
+                    customer_name: coachingMode ? (studentName || user?.name) : user?.name,
+                    add_ons: [
+                      Array.from(selectedAddons).map(id => {
+                        const a = sportAddons.find(x => x.id === id);
+                        return a ? formatAddonLinePeso(a, duration).left : id;
+                      }).join(' | '),
+                      useLoyaltyReward ? `Loyalty ${formatLoyaltyDiscountLabel()} applied` : '',
+                      coachingMode ? `Coaching with ${coachName || 'coach'}` : 'Online Booking',
+                    ].filter(Boolean).join(' | '),
+                    ref_code: refCode.current,
+                    facility_map_id: facilityMapId ?? undefined,
+                    user_id: user?.id,
                   }}
                   onCancel={goPrev}
+                  pendingCoachingLink={
+                    coachingSessionId || coachId
+                      ? {
+                          coachingSessionId,
+                          coachId,
+                          coachingStudentId: coachingStudentId || user?.id,
+                          coachName,
+                          coachHourlyRate,
+                          duration,
+                          sessionDate: date,
+                          startTime: time,
+                          courtAmount: courtSubtotal + addonTotal - loyaltyDiscount,
+                          coachFee: computedCoachingFee,
+                          totalDue: total,
+                          refCode: refCode.current,
+                          acceptedBy: user?.name || coachName,
+                        }
+                      : undefined
+                  }
                 />
               </motion.div>
             </AnimatePresence>
@@ -1011,7 +1047,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
               style={{ fontSize: 14, background: `linear-gradient(135deg,${accentColor},${accentColor}cc)`, boxShadow: `0 4px 16px ${accentColor}35` }}>
               {isReview
                 ? mode === 'customer'
-                  ? <><Smartphone size={16} /> Proceed to Confirm</>
+                  ? <><CreditCard size={16} /> Proceed to Payment</>
                   : <><Check size={16} /> Confirm Walk-In</>
                 : <>{isWalkIn ? 'Next' : 'Continue'} <ArrowRight size={15} /></>
               }
@@ -1827,6 +1863,10 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
             coachName={prefill?.coachName || user?.name}
             coachHourlyRate={prefill?.coachHourlyRate}
             studentName={prefill?.coachingStudentName}
+            coachingSessionId={prefill?.coachingSessionId}
+            coachingStudentId={prefill?.coachingStudentId}
+            coachId={prefill?.coachId}
+            facilityMapId={activeMap?.id ?? null}
             onDone={isCoachReservation ? onExitCoachingReservation : undefined}
           />
         )}

@@ -294,22 +294,17 @@ export function UserMyBookings() {
   // Show ALL bookings (upcoming + past + cancelled) for history.
 
   const userBookings = React.useMemo(() => {
-    const byId = new Map<string, ReturnType<typeof normalizeBookingForDisplay>>();
-    const add = (raw: Record<string, unknown>) => {
+    const byId = new Map<string, any>();
+    const add = (raw: any) => {
       if (!raw?.id) return;
       const id = String(raw.id);
       const normalized = normalizeBookingForDisplay(raw);
       const merged = mergeBookingRows(byId.get(id), {
         ...normalized,
         court: normalized.court || String(raw.court || ''),
-      });
+      }) as any;
       byId.set(id, merged);
     };
-    (Array.isArray(contextBookings) ? contextBookings : []).forEach((b) => {
-      if (!user?.id || !b.userId || b.userId === user.id) {
-        add(b as unknown as Record<string, unknown>);
-      }
-    });
     (Array.isArray(bookings) ? bookings : []).forEach((b) => add(b as Record<string, unknown>));
     return Array.from(byId.values());
   }, [bookings]);
@@ -323,9 +318,6 @@ export function UserMyBookings() {
     if (!selectedBookingRecord) return 1;
     const explicit = Number(selectedBookingRecord.duration);
     if (Number.isFinite(explicit) && explicit > 0) return explicit;
-    if (selectedBookingRecord.time && selectedBookingRecord.endTime) {
-      return Math.max(1, calculateDuration(selectedBookingRecord.time, selectedBookingRecord.endTime));
-    }
     return 1;
   }, [selectedBookingRecord]);
 
@@ -603,7 +595,7 @@ export function UserMyBookings() {
   };
 
   const formatDateShort = (date: string) => (
-    date?.includes('-') ? format(parseBookingDate(date), 'MMM d, yyyy') : date
+    date ? formatManilaDateLabel(date) : date
   );
 
   const BookingCard = ({ booking }: { booking: any }) => {

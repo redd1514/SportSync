@@ -4,6 +4,8 @@ import { useBookingAPI } from '../hooks/useBookingAPI';
 import { useFacilityAPI } from '../hooks/useFacilityAPI';
 import { useUser } from '../contexts/UserContext';
 import { apiFetch, ensureApiAuthForUser } from '../utils/authenticatedFetch';
+import { redirectToPayMongoCheckout } from '../services/paymongoPayment';
+import { persistDemoSession, readPersistedDemoSession } from '../utils/demoSession';
 import type { Booking } from '../contexts/UserContext';
 import { mapDbStatusToUiStatus, normalizeBookingDate, normalizeBookingTime } from '../utils/bookingDisplay';
 import {
@@ -11,11 +13,20 @@ import {
   DollarSign, Trophy, GraduationCap, XCircle, CreditCard, ArrowRight,
 } from 'lucide-react';
 
+type PaymentCheckoutInfo = {
+  checkoutUrl: string;
+  downpaymentAmount: number;
+  totalPrice: number;
+  downpaymentPercentage: number;
+  refCode?: string;
+};
+
 type Msg = {
   role: 'user' | 'ai';
   text: string;
   ts: Date;
   link?: { label: string; action: 'booking' | 'coaching' | 'mybookings' };
+  paymentCheckout?: PaymentCheckoutInfo;
 };
 
 const QUICK_CHIPS: { label: string; q: string; Icon: any }[] = [
@@ -97,7 +108,7 @@ function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[])
         : 'JRC Sports Complex\nValenzuela City, Metro Manila\n\nOpen 7AM – 12MN daily. Check the Facility Map for details.' 
     };
   if (/payment|pay|gcash|card|cash/.test(q))
-    return { text: 'Payment methods:\n\nGCash — online bookings (full payment required)\nCash on-site — walk-in bookings (pay at front desk)\n\nYou\'ll receive a digital QR ticket after payment.' };
+    return { text: 'Payment for online & AI chat bookings:\n\n• PayMongo downpayment (GCash, card, or Maya) — required to confirm your reservation\n• Balance due at the facility on check-in\n\nAfter downpayment, you\'ll get a digital QR ticket in My Bookings.' };
   if (/equipment|racket|ball|paddle|rent/.test(q))
     return { text: 'Equipment add-ons at booking:\n\n• Ball Rental (Basketball/Volleyball): ₱100\n• Racket Rental (Badminton): ₱50\n• Paddle Rental (Pickleball): ₱50–100\n• Shuttlecock — Feather: ₱50 / Plastic: ₱50\n• Lighting (evening): +₱300' };
   if (/hi|hello|hey|good|help|start/.test(q))
@@ -210,11 +221,17 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
         }
       }
 
+      const returnBaseUrl =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${window.location.pathname}`
+          : '';
+
       const res = await apiFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: trimmed,
+          returnBaseUrl,
           ...(user?.id && user?.email
             ? { userId: user.id, userEmail: user.email, userName: user.name, userPhone: user.phone }
             : {}),
@@ -225,6 +242,8 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
         error?: string;
         booking?: Record<string, unknown>;
         needsLogin?: boolean;
+        needsPayment?: boolean;
+        paymentCheckout?: PaymentCheckoutInfo & { bookingId?: string };
       };
 
       if (!res.ok) {
@@ -232,7 +251,18 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
       }
 
       let link: Msg['link'] | undefined;
-      if (data.booking) {
+      let paymentCheckout: PaymentCheckoutInfo | undefined;
+
+      if (data.needsPayment && data.paymentCheckout?.checkoutUrl) {
+        paymentCheckout = {
+          checkoutUrl: data.paymentCheckout.checkoutUrl,
+          downpaymentAmount: data.paymentCheckout.downpaymentAmount,
+          totalPrice: data.paymentCheckout.totalPrice,
+          downpaymentPercentage: data.paymentCheckout.downpaymentPercentage,
+        };
+        await refreshBookingsFromApi();
+        window.dispatchEvent(new CustomEvent('sportsync:bookings-refresh'));
+      } else if (data.booking) {
         const b = mapChatBookingToClient(data.booking);
         addBooking(b);
         await refreshBookingsFromApi();
@@ -249,6 +279,7 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
           text: data.reply || 'Sorry, I could not respond right now.',
           ts: new Date(),
           link,
+          paymentCheckout,
         },
       ]);
     } catch (err) {
@@ -272,6 +303,16 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
       setIsTyping(false);
     }
   }, [facilityInfo, courtStatuses, addBooking, refreshBookingsFromApi, isLoggedIn, user]);
+
+  const handlePayDownpayment = useCallback(
+    (checkout: PaymentCheckoutInfo) => {
+      if (!user?.id) return;
+      const snap = readPersistedDemoSession();
+      persistDemoSession(user, snap?.demoAuthId ?? user.id);
+      redirectToPayMongoCheckout(checkout.checkoutUrl);
+    },
+    [user],
+  );
 
   const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
@@ -323,6 +364,22 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
                 }}>
                 {msg.text}
               </div>
+              {msg.role === 'ai' && msg.paymentCheckout && (
+                <button
+                  type="button"
+                  onClick={() => handlePayDownpayment(msg.paymentCheckout!)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-white font-black hover:opacity-90 transition-opacity w-full justify-center"
+                  style={{
+                    fontSize: 12,
+                    background: 'linear-gradient(135deg,#FF8C00,#cc7000)',
+                    boxShadow: '0 2px 10px rgba(255,140,0,0.35)',
+                  }}
+                >
+                  <CreditCard size={13} />
+                  Pay ₱{msg.paymentCheckout.downpaymentAmount} downpayment ({msg.paymentCheckout.downpaymentPercentage}%)
+                  <ArrowRight size={11} />
+                </button>
+              )}
               {msg.role === 'ai' && msg.link && onNavigate && (
                 <button onClick={() => { onNavigate(msg.link!.action); setIsExpanded(false); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-black hover:opacity-90 transition-opacity"

@@ -100,6 +100,7 @@ export function mapBookingRowToAdmin(row: {
     `JRC-${row.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
   const checkedIn = row.status === 'checked_in';
   const checkedOut = row.status === 'completed';
+  const downpaymentPaid = meta.downpaymentPaid === true;
   const uiStatus:
     | 'pending_payment'
     | 'pending_verification'
@@ -131,7 +132,7 @@ export function mapBookingRowToAdmin(row: {
     duration,
     amount: Number(row.total_price ?? 0),
     status: uiStatus,
-    paymentStatus: checkedIn || checkedOut ? 'paid' : 'pending',
+    paymentStatus: checkedIn || checkedOut || downpaymentPaid ? 'paid' : 'pending',
     checkInStatus: checkedIn ? 'checked_in' : 'none',
     checkInTime: checkedIn ? dbTimestampToUtcIso(row.updated_at || row.created_at) : undefined,
     checkOutStatus: checkedOut ? 'checked_out' : 'none',

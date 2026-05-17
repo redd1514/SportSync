@@ -3,4 +3,11 @@ import { projectId, publicAnonKey } from './info';
 
 const supabaseUrl = `https://${projectId}.supabase.co`;
 
-export const supabase = createClient(supabaseUrl, publicAnonKey);
+export const supabase = createClient(supabaseUrl, publicAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: `sb-${projectId}-auth`,
+  },
+});

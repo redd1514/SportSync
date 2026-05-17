@@ -106,12 +106,23 @@ export async function fetchSystemCourtRates(pool) {
     );
     const value = res.rows[0]?.value;
     if (value && typeof value === 'object' && value.courtRates) {
-      return { courtRates: value.courtRates, businessHours: value.businessHours ?? null, source: 'app_kv_store' };
+      const pct = Number(value.downpaymentPercentage);
+      return {
+        courtRates: value.courtRates,
+        businessHours: value.businessHours ?? null,
+        downpaymentPercentage: Number.isFinite(pct) && pct > 0 ? pct : 50,
+        source: 'app_kv_store',
+      };
     }
   } catch (e) {
     console.warn('[aiContext] could not load system_settings_v1:', e?.message || e);
   }
-  return { courtRates: DEFAULT_COURT_RATES, businessHours: { start: '06:00', end: '23:00' }, source: 'defaults' };
+  return {
+    courtRates: DEFAULT_COURT_RATES,
+    businessHours: { start: '06:00', end: '23:00' },
+    downpaymentPercentage: 50,
+    source: 'defaults',
+  };
 }
 
 /**

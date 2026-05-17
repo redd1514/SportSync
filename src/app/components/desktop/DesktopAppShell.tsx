@@ -20,13 +20,19 @@ import { UserCoachingServices } from "../user/UserCoachingServices";
 import { UserMyCoaching } from "../user/UserMyCoaching";
 import { FacilityMapViewer } from "../shared/FacilityMapViewer";
 import { FloatingAIChat } from "../FloatingAIChat";
+import { PaymentFlashBanner } from "../shared/PaymentFlashBanner";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
 import { useUserAPI } from "../../hooks/useUserAPI";
 import { LoyaltyProgressBar } from "../shared/loyalty/LoyaltyProgressBar";
-import { LOYALTY_DISCOUNT_PERCENT, loyaltyRewardsAvailable } from "../../constants/loyalty";
+import {
+  LOYALTY_DISCOUNT_PERCENT,
+  loyaltyPointsToNextReward,
+  loyaltyRewardsAvailable,
+} from "../../constants/loyalty";
+import { getManilaDateKey, isManilaDateBefore } from "../../utils/manilaDate";
 
 type Tab = "home" | "booking" | "coaching" | "account";
 type BookingSub = "mybookings" | "map";
@@ -112,8 +118,12 @@ function SidebarTooltip({ label, children, danger }: { label: string; children: 
 
 /* ─── Home view ─── */
 function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => void }) {
-  const { user, bookings } = useUser();
+  const { user, bookings, updateUser } = useUser();
+  const { resetLoyaltyPoints } = useUserAPI();
   const [selectedSport, setSelectedSport] = useState<string | null>(null);
+  const loyaltyPoints = user?.loyaltyPoints || 0;
+  const loyaltyRewards = loyaltyRewardsAvailable(loyaltyPoints);
+  const loyaltyPointsRemaining = loyaltyPointsToNextReward(loyaltyPoints);
 
   const localPendingRequests = (() => {
     try {
@@ -134,6 +144,16 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
   });
 
   const recentBookings = bookings.slice(0, 4);
+
+  const resetMyLoyalty = async () => {
+    if (!user) return;
+    try {
+      await resetLoyaltyPoints(user.id);
+    } catch {
+      /* demo fallback */
+    }
+    updateUser(user.id, { loyaltyPoints: 0 });
+  };
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -262,7 +282,7 @@ function DesktopHome({ onNavigate }: { onNavigate: (tab: Tab, sub?: string) => v
                 <p className={loyaltyRewards > 0 ? "text-yellow-300" : "text-gray-600"} style={{ fontSize: 11 }}>
                   {loyaltyRewards > 0
                     ? `${loyaltyRewards} reward · ${LOYALTY_DISCOUNT_PERCENT}% off court`
-                    : `${10 - (loyaltyPoints % 10 || 10)} more for ${LOYALTY_DISCOUNT_PERCENT}% off`}
+                    : `${loyaltyPointsRemaining} more for ${LOYALTY_DISCOUNT_PERCENT}% off`}
                 </p>
                 <button type="button" onClick={resetMyLoyalty} className="rounded-lg px-2 py-1 text-gray-500 hover:text-white hover:bg-white/5" style={{ fontSize: 10, fontWeight: 800 }}>
                   Reset
@@ -310,12 +330,12 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
   } | undefined>(undefined);
 
   // From Incoming: Profile Photo logic
-  const myCoachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
   const [profilePhoto, setProfilePhoto] = useState(() => loadProfilePhoto(user?.id));
   const unread = undismissedCount;
   const loyaltyPoints = user?.loyaltyPoints || 0;
   const loyaltyRewards = Math.floor(loyaltyPoints / 10);
   const loyaltyProgress = loyaltyRewards > 0 ? 100 : Math.min((loyaltyPoints / 10) * 100, 100);
+  const loyaltyPointsRemaining = loyaltyPointsToNextReward(loyaltyPoints);
   const resetMyLoyalty = async () => {
     if (!user) return;
     try {
@@ -651,6 +671,7 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
 
       {/* ── Main area ── */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <PaymentFlashBanner />
 
         {/* Mobile header */}
         <div className="md:hidden flex items-center gap-3 bg-[#111] px-4 py-3 border-b border-white/[0.05] flex-shrink-0">
