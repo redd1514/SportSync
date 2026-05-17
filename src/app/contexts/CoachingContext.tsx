@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import { apiFetch } from "../utils/authenticatedFetch";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
 import { useUser } from "./UserContext";
@@ -52,6 +52,51 @@ function parseReviewDetails(adminNotes?: string): Partial<CoachingRequest> {
   }
 }
 
+function parseRescheduleDetails(adminNotes?: string): Partial<CoachingRequest> {
+  if (!adminNotes || !/COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(adminNotes)) return {};
+  const proposalMatches = [...adminNotes.matchAll(/COACHING_RESCHEDULE_PROPOSED:(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const proposalMatch = proposalMatches[proposalMatches.length - 1];
+  const decisionMatches = [...adminNotes.matchAll(/COACHING_RESCHEDULE_(ACCEPTED|REJECTED):(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const decisionMatch = decisionMatches[decisionMatches.length - 1];
+  if (proposalMatch) {
+    try {
+      const parsed = JSON.parse(proposalMatch[1]) as Record<string, unknown>;
+      const decision = decisionMatch
+        ? {
+            status: String(decisionMatch[1]).toLowerCase() as "accepted" | "rejected",
+            decidedAt: typeof JSON.parse(decisionMatch[2]).decidedAt === "string" ? JSON.parse(decisionMatch[2]).decidedAt : undefined,
+          }
+        : undefined;
+      return {
+        status: decision ? "confirmed" : "reschedule_requested",
+        rescheduleProposal: {
+          requestedDate: typeof parsed.requestedDate === "string" ? parsed.requestedDate : "",
+          requestedTime: typeof parsed.requestedTime === "string" ? parsed.requestedTime : "",
+          requestedEndTime: typeof parsed.requestedEndTime === "string" ? parsed.requestedEndTime : undefined,
+          reason: typeof parsed.reason === "string" ? parsed.reason : "",
+          requestedAt: typeof parsed.requestedAt === "string" ? parsed.requestedAt : undefined,
+          status: decision?.status || "pending",
+          decidedAt: decision?.decidedAt,
+        },
+      };
+    } catch {
+      return { status: "reschedule_requested" };
+    }
+  }
+  const match = adminNotes.match(/COACHING_RESCHEDULE_REQUESTED:(\{.*\})/s);
+  if (!match) return { status: "reschedule_requested" };
+  try {
+    const parsed = JSON.parse(match[1]) as Record<string, unknown>;
+    return {
+      status: "reschedule_requested",
+      rescheduleReason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+      rescheduleRequestedAt: typeof parsed.requestedAt === "string" ? parsed.requestedAt : undefined,
+    };
+  } catch {
+    return { status: "reschedule_requested" };
+  }
+}
+
 function parseLinkedBooking(notes?: string): Partial<CoachingRequest> {
   if (!notes) return {};
   const match = notes.match(/linked_booking:([0-9a-f-]+)/i);
@@ -77,7 +122,7 @@ function parseReservedBookingDetails(notes?: string): Partial<CoachingRequest> {
 
 /** Maps `GET /api/coaching-sessions` DB rows (snake_case) into UI `CoachingRequest` shape.
  * DB statuses: pending | approved | rejected | cancelled
- * UI statuses: pending | confirmed | rejected | completed
+ * UI statuses: pending | confirmed | reschedule_requested | rejected | completed
  */
 export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>): CoachingRequest {
   const notes = typeof row.notes === "string" ? row.notes : "";
@@ -92,6 +137,12 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
   let status: CoachingRequest["status"] = "pending";
   if (/COACHING_CHECKED_OUT|checked_out:/i.test(adminNotes || "") || dbStatus === "completed") {
     status = "completed";
+  } else if (/PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(adminNotes || "")) {
+    status = "ongoing";
+  } else if (/COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(adminNotes || "") && !/COACHING_RESCHEDULE_(ACCEPTED|REJECTED)/i.test(adminNotes || "") || dbStatus === "reschedule_requested") {
+    status = "reschedule_requested";
+  } else if (dbStatus === "ongoing") {
+    status = "ongoing";
   } else if (dbStatus === "approved" || dbStatus === "confirmed" || dbStatus === "scheduled") {
     status = "confirmed";
   } else if (dbStatus === "rejected" || dbStatus === "cancelled") {
@@ -128,6 +179,17 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     ...parseReservedBookingDetails(notes),
     ...parseAcceptanceDetails(adminNotes),
     ...parseReviewDetails(adminNotes),
+    ...parseRescheduleDetails(adminNotes),
+    courtId: typeof row.courtId === "string" ? row.courtId : typeof row.court_id === "string" ? row.court_id : undefined,
+    courtName: String(row.courtName || row.court_name || parseReservedBookingDetails(notes).courtName || parseAcceptanceDetails(adminNotes).courtName || ""),
+    courtAmount: row.courtAmount != null ? Number(row.courtAmount) : row.court_amount != null ? Number(row.court_amount) : parseReservedBookingDetails(notes).courtAmount,
+    coachFee: row.coachFee != null ? Number(row.coachFee) : row.coach_fee != null ? Number(row.coach_fee) : parseReservedBookingDetails(notes).coachFee,
+    totalAmount: row.totalAmount != null ? Number(row.totalAmount) : row.total_amount != null ? Number(row.total_amount) : parseReservedBookingDetails(notes).totalAmount,
+    downpaymentAmount: row.downpaymentAmount != null ? Number(row.downpaymentAmount) : row.downpayment_amount != null ? Number(row.downpayment_amount) : undefined,
+    downpaymentPercentage: row.downpaymentPercentage != null ? Number(row.downpaymentPercentage) : row.downpayment_percentage != null ? Number(row.downpayment_percentage) : undefined,
+    balanceDue: row.balanceDue != null ? Number(row.balanceDue) : row.balance_due != null ? Number(row.balance_due) : undefined,
+    coachCourtQr: typeof row.coachCourtQr === "string" ? row.coachCourtQr : typeof row.coach_court_qr === "string" ? row.coach_court_qr : undefined,
+    pendingLinkedBookingChange: row.pendingLinkedBookingChange as CoachingRequest["pendingLinkedBookingChange"] | undefined,
     status,
     viewerIsStudent: row.viewerIsStudent as boolean | undefined,
     viewerIsCoachForThisSession: row.viewerIsCoachForThisSession as boolean | undefined,
@@ -178,15 +240,37 @@ export interface CoachingRequest {
   durationHours?: number;
   linkedBookingId?: string;
   courtName?: string;
+  courtId?: string;
   courtAmount?: number;
   coachFee?: number;
   totalAmount?: number;
+  downpaymentAmount?: number;
+  downpaymentPercentage?: number;
+  balanceDue?: number;
+  coachCourtQr?: string;
+  pendingLinkedBookingChange?: {
+    type: 'cancellation' | 'reschedule' | string;
+    requestedDate?: string | null;
+    requestedStartTime?: string | null;
+    requestedEndTime?: string | null;
+  } | null;
   coachingMessage?: string;
   rating?: number;
   reviewComment?: string;
   reviewedAt?: string;
-  /** pending = awaiting coach acceptance | confirmed = coach accepted | rejected = declined | completed = checked out */
-  status: "pending" | "confirmed" | "rejected" | "completed";
+  rescheduleReason?: string;
+  rescheduleRequestedAt?: string;
+  rescheduleProposal?: {
+    requestedDate: string;
+    requestedTime: string;
+    requestedEndTime?: string;
+    reason?: string;
+    requestedAt?: string;
+    status: "pending" | "accepted" | "rejected";
+    decidedAt?: string;
+  };
+  /** pending = unpaid/unverified legacy request | confirmed = paid ticket active | reschedule_requested = coach requested schedule help | rejected = cancelled/refunded | completed = checked out */
+  status: "pending" | "confirmed" | "ongoing" | "reschedule_requested" | "rejected" | "completed";
   /** Set by GET /api/users/:id/coaching-sessions — prefer over client-side coachId matching */
   viewerIsStudent?: boolean;
   viewerIsCoachForThisSession?: boolean;
@@ -220,6 +304,31 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requestsBootstrapped, setRequestsBootstrapped] = useState(false);
+
+  const roleCoachProfile = useMemo<Coach | undefined>(() => {
+    if (user?.role !== "coach" || !user.email) return undefined;
+    if (user.email.trim().toLowerCase() !== "coach@jrc.com") return undefined;
+    const existing = coaches.find((c) => c.email?.trim().toLowerCase() === user.email.trim().toLowerCase());
+    if (existing) return existing;
+    return {
+      id: user.id || "coach-profile",
+      name: user.name || "Coach",
+      email: user.email,
+      sport: "Table Tennis",
+      hourlyRate: 800,
+      description: "Your coach profile is active. Admin can update your sport, rate, schedule, and bio in Coaching Management.",
+      availableDays: [],
+      timeRange: "08:00 AM - 06:00 PM",
+      isAvailable: true,
+    };
+  }, [coaches, user?.email, user?.id, user?.name, user?.role]);
+
+  const visibleCoaches = useMemo(() => {
+    if (!roleCoachProfile) return coaches;
+    return coaches.some((c) => c.email?.trim().toLowerCase() === roleCoachProfile.email?.trim().toLowerCase())
+      ? coaches
+      : [roleCoachProfile, ...coaches];
+  }, [coaches, roleCoachProfile]);
 
   const refreshCoaches = useCallback(async () => {
     setIsLoading(true);
@@ -302,10 +411,17 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return;
     const onRefresh = () => {
       void refreshRequests();
+      void refreshCoaches();
     };
     window.addEventListener("sportsync:coaching-refresh", onRefresh);
-    return () => window.removeEventListener("sportsync:coaching-refresh", onRefresh);
-  }, [refreshRequests]);
+    window.addEventListener("sportsync:notifications-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    return () => {
+      window.removeEventListener("sportsync:coaching-refresh", onRefresh);
+      window.removeEventListener("sportsync:notifications-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
+  }, [refreshCoaches, refreshRequests]);
 
   // Note: KV store sync removed - coaching sessions now persisted in database
   // useEffect(() => {
@@ -405,6 +521,8 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
                 status:
                   status === 'completed'
                     ? 'completed'
+                    : /PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(adminNotes ?? r.adminNotes ?? '')
+                      ? 'ongoing'
                     : status === 'confirmed'
                       ? 'confirmed'
                       : status === 'cancelled'
@@ -415,6 +533,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
                 adminNotes: adminNotes ?? r.adminNotes,
                 ...parseAcceptanceDetails(adminNotes ?? r.adminNotes),
                 ...parseReviewDetails(adminNotes ?? r.adminNotes),
+                ...parseRescheduleDetails(adminNotes ?? r.adminNotes),
               }
             : r
         )
@@ -514,13 +633,13 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
   const findCoachByEmail = (email: string) => {
     const normalized = email.trim().toLowerCase();
     if (normalized === "user@jrc.com") return undefined;
-    return coaches.find((c) => c.email?.trim().toLowerCase() === normalized);
+    return visibleCoaches.find((c) => c.isAvailable !== false && c.email?.trim().toLowerCase() === normalized);
   };
 
   return (
     <CoachingContext.Provider
       value={{
-        coaches,
+        coaches: visibleCoaches,
         requests,
         addRequest,
         updateRequestStatus,

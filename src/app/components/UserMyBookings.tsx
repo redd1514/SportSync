@@ -56,6 +56,14 @@ function QrTicketModal({
   const color = getSportColor(String(booking.sport || 'Sports'));
   const ticketId = 'jrc-ticket-canvas';
   const qrValue = String(token || booking.refCode || booking.id || '');
+  const totalAmount = Number(booking.totalAmount ?? booking.amount ?? 0);
+  const downpaymentAmount = booking.downpaymentAmount != null ? Number(booking.downpaymentAmount) : null;
+  const balanceDue =
+    booking.balanceDue != null
+      ? Number(booking.balanceDue)
+      : downpaymentAmount != null
+        ? Math.max(0, totalAmount - downpaymentAmount)
+        : null;
 
   const downloadTicket = async () => {
     const ticketEl = document.getElementById(ticketId);
@@ -131,11 +139,23 @@ function QrTicketModal({
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Amount</span>
+            <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Total</span>
             <span className="font-black" style={{ fontSize: 13, color: '#FF8C00' }}>
-              ₱{Number(booking.amount ?? 0).toLocaleString()}
+              ₱{totalAmount.toLocaleString()}
             </span>
           </div>
+          {downpaymentAmount != null && (
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Downpayment paid</span>
+              <span className="text-green-300 font-black" style={{ fontSize: 13 }}>₱{downpaymentAmount.toLocaleString()}</span>
+            </div>
+          )}
+          {balanceDue != null && (
+            <div className="flex justify-between items-center">
+              <span className="text-gray-500 font-bold uppercase" style={{ fontSize: 9, letterSpacing: 0.5 }}>Balance due</span>
+              <span className="text-white font-black" style={{ fontSize: 13 }}>₱{balanceDue.toLocaleString()}</span>
+            </div>
+          )}
         </div>
 
         <div className="relative flex items-center px-0 py-0">
@@ -464,7 +484,7 @@ export function UserMyBookings() {
     setIsSubmitting(true);
     try {
       if (!user?.id) throw new Error('Please sign in again.');
-      await requestBookingReschedule(selectedBooking, user.id, rescheduleReason.trim() || 'No reason provided', rescheduleDate, rescheduleTime);
+      await requestBookingReschedule(selectedBooking, user.id, rescheduleReason.trim() || 'No reason provided', rescheduleDate, rescheduleTime, requestedEnd);
 
       const latest = await fetchBookings();
       const serverHasPending = latest.some((b: any) => String(b.id) === String(selectedBooking) && (b.cancellationRequested || b.cancellation_requested || b.pendingChangeRequest));
@@ -602,7 +622,8 @@ export function UserMyBookings() {
     const color = getSportColor(booking.sport);
     const isPast = booking.status === 'completed' || booking.status === 'cancelled';
     const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id) || !!booking.pendingChangeRequest;
-    const canModify = !isPast && !isPendingReq && booking.status !== 'pending' && booking.status !== 'pending_verification' && booking.status !== 'checked_in';
+    const isOngoing = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in' || booking.status === 'ongoing';
+    const canModify = !isPast && !isPendingReq && !isOngoing && booking.status !== 'pending' && booking.status !== 'pending_verification';
     const pendingReq = booking.pendingChangeRequest;
 
     const { scanValue, displayCode } = resolveBookingTicketToken(booking.refCode, booking.id);

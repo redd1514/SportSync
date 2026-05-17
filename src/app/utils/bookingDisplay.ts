@@ -121,6 +121,10 @@ export function mergeBookingRows(
     court: pick('court'),
     sport: pick('sport'),
     amount: pick('amount'),
+    totalAmount: pick('totalAmount'),
+    downpaymentAmount: pick('downpaymentAmount'),
+    downpaymentPercentage: pick('downpaymentPercentage'),
+    balanceDue: pick('balanceDue'),
     duration: pick('duration'),
   };
 }
@@ -144,17 +148,30 @@ export function displayRefCode(refCode: unknown, fallbackId?: unknown): string {
 /** Normalize a booking row from API, realtime, or chat for My Bookings. */
 export function normalizeBookingForDisplay(raw: Record<string, unknown>) {
   const courtIdStr = String(raw.court || raw.court_id || raw.courtId || '');
+  const startMin = manilaMinutesFromTime24(raw.time ?? raw.start_time);
+  const endMin = manilaMinutesFromTime24(raw.endTime ?? raw.end_time);
+  const durationFromTimes =
+    startMin != null && endMin != null && endMin > startMin
+      ? (endMin - startMin) / 60
+      : undefined;
   return {
     ...raw,
     id: String(raw.id || ''),
     date: normalizeBookingDate(raw.date ?? raw.booking_date),
     time: normalizeBookingTime(raw.time ?? raw.start_time),
-    duration: Number(raw.duration ?? raw.duration_hours ?? 1) || 1,
+    duration: Number(raw.duration ?? raw.duration_hours ?? durationFromTimes ?? 1) || 1,
     court: String(raw.court || raw.court_name || courtIdStr || 'Court'),
     courtId: courtIdStr,
     sport: String(raw.sport || raw.sport_name || 'Sports'),
     status: mapDbStatusToUiStatus(raw.status),
-    amount: Number(raw.amount ?? raw.total_price ?? 0) || 0,
+    amount: Number(raw.amount ?? raw.totalAmount ?? raw.total_price ?? 0) || 0,
+    totalAmount: Number(raw.totalAmount ?? raw.total_amount ?? raw.total_price ?? raw.amount ?? 0) || 0,
+    downpaymentAmount:
+      raw.downpaymentAmount ?? raw.downpayment_amount,
+    downpaymentPercentage:
+      raw.downpaymentPercentage ?? raw.downpayment_percentage,
+    balanceDue:
+      raw.balanceDue ?? raw.balance_due,
     paymentStatus: String(raw.paymentStatus ?? raw.payment_status ?? 'paid'),
     refCode: String(raw.refCode ?? raw.qr_code_token ?? raw.ref_code ?? raw.id ?? ''),
     cancellationRequested: Boolean(

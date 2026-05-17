@@ -9,7 +9,7 @@ import { persistDemoSession, readPersistedDemoSession } from '../utils/demoSessi
 import type { Booking } from '../contexts/UserContext';
 import { mapDbStatusToUiStatus, normalizeBookingDate, normalizeBookingTime } from '../utils/bookingDisplay';
 import {
-  Send, Sparkles, RotateCcw, ChevronDown, X, MapPin, CalendarDays, Clock,
+  Send, Bot, RotateCcw, ChevronDown, X, MapPin, CalendarDays, Clock,
   DollarSign, Trophy, GraduationCap, XCircle, CreditCard, ArrowRight,
 } from 'lucide-react';
 
@@ -164,6 +164,8 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
   const isMobile = useIsMobile();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chipStripRef = useRef<HTMLDivElement>(null);
+  const chipDragRef = useRef({ dragging: false, startX: 0, scrollLeft: 0, moved: false });
 
   // Fetch facility info and court statuses on mount
   useEffect(() => {
@@ -316,13 +318,31 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
 
   const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
+  const startChipDrag = (clientX: number) => {
+    const el = chipStripRef.current;
+    if (!el) return;
+    chipDragRef.current = { dragging: true, startX: clientX, scrollLeft: el.scrollLeft, moved: false };
+  };
+  const moveChipDrag = (clientX: number) => {
+    const el = chipStripRef.current;
+    if (!el || !chipDragRef.current.dragging) return;
+    const delta = clientX - chipDragRef.current.startX;
+    if (Math.abs(delta) > 6) chipDragRef.current.moved = true;
+    el.scrollLeft = chipDragRef.current.scrollLeft - delta;
+  };
+  const stopChipDrag = () => {
+    const moved = chipDragRef.current.moved;
+    chipDragRef.current.dragging = false;
+    if (moved) window.setTimeout(() => { chipDragRef.current.moved = false; }, 120);
+  };
+
   const chatContent = (
     <>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3.5 flex-shrink-0"
         style={{ background: 'linear-gradient(135deg,#0047AB,#1d4ed8)', borderBottom: '1px solid rgba(0,0,0,0.2)' }}>
         <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
-          <Sparkles size={18} className="text-white" />
+          <Bot size={19} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-white font-black" style={{ fontSize: 14, lineHeight: 1.2 }}>JRC AI Concierge</p>
@@ -350,7 +370,7 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
             {msg.role === 'ai' && (
               <div className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                 style={{ background: 'linear-gradient(135deg,#0047AB,#1d4ed8)', boxShadow: '0 3px 8px rgba(0,71,171,0.4)' }}>
-                <Sparkles size={13} className="text-white" />
+                <Bot size={14} className="text-white" />
               </div>
             )}
             <div className="max-w-[82%] space-y-1.5">
@@ -395,7 +415,7 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5 justify-start">
             <div className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0"
               style={{ background: 'linear-gradient(135deg,#0047AB,#1d4ed8)' }}>
-              <Sparkles size={13} className="text-white" />
+              <Bot size={14} className="text-white" />
             </div>
             <div className="rounded-2xl px-4 py-3 flex items-center gap-1"
               style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -411,9 +431,27 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
 
       {/* Quick Chips */}
       <div className="px-3 py-2.5 border-t border-white/5 flex-shrink-0" style={{ background: '#0D0D0D' }}>
-        <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
+        <div
+          ref={chipStripRef}
+          className="flex gap-1.5 overflow-x-auto pb-0.5 cursor-grab active:cursor-grabbing select-none"
+          style={{ scrollbarWidth: 'none' }}
+          onMouseDown={(e) => startChipDrag(e.clientX)}
+          onMouseMove={(e) => moveChipDrag(e.clientX)}
+          onMouseUp={stopChipDrag}
+          onMouseLeave={stopChipDrag}
+          onTouchStart={(e) => startChipDrag(e.touches[0]?.clientX ?? 0)}
+          onTouchMove={(e) => moveChipDrag(e.touches[0]?.clientX ?? 0)}
+          onTouchEnd={stopChipDrag}
+        >
           {QUICK_CHIPS.map(chip => (
-            <button key={chip.label} onClick={() => sendMessage(chip.q)}
+            <button key={chip.label} onClick={(e) => {
+              if (chipDragRef.current.moved) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+              void sendMessage(chip.q);
+            }}
               className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-black transition-all hover:bg-blue-500/20 active:scale-95"
               style={{ fontSize: 11, background: 'rgba(0,71,171,0.12)', color: '#93c5fd', border: '1px solid rgba(0,71,171,0.25)', whiteSpace: 'nowrap' }}>
               <chip.Icon size={10} />
@@ -449,10 +487,10 @@ export function FloatingAIChat({ onNavigate, forceOpen, onClose }: { onNavigate?
             className="fixed z-[40]" style={{ bottom: 24, right: 20 }}>
             <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.94 }} onClick={() => { setIsExpanded(true); setUnreadCount(0); }}
               className="rounded-2xl shadow-2xl flex items-center justify-center relative"
-              style={{ width: 56, height: 56, background: 'linear-gradient(135deg,#0047AB,#1d4ed8)', boxShadow: '0 8px 28px rgba(0,71,171,0.5),0 0 0 1px rgba(0,71,171,0.3)' }}>
-              <Sparkles size={24} className="text-white" strokeWidth={2.5} />
+              style={{ width: 56, height: 56, background: 'linear-gradient(135deg,#0047AB,#1d4ed8)', boxShadow: '0 8px 22px rgba(0,71,171,0.38),0 0 0 1px rgba(0,71,171,0.28)' }}>
+              <Bot size={24} className="text-white" strokeWidth={2.35} />
               <motion.span className="absolute inset-0 rounded-2xl border-2 border-[#0047AB]"
-                animate={{ scale: [1, 1.4, 1], opacity: [0.6, 0, 0.6] }} transition={{ duration: 2.6, repeat: Infinity }} />
+                animate={{ scale: [1, 1.22, 1], opacity: [0.35, 0, 0.35] }} transition={{ duration: 3.4, repeat: Infinity }} />
               <AnimatePresence>
                 {unreadCount > 0 && (
                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}

@@ -67,5 +67,30 @@ announcementsRouter.post('/', async (c) => {
   }
 });
 
+announcementsRouter.delete('/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { error } = await supabase.from('announcements').delete().eq('id', id);
+    if (error) throw error;
+    return c.json({ success: true, id });
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Failed to delete announcement' }, 400);
+  }
+});
+
+announcementsRouter.delete('/', async (c) => {
+  try {
+    const { data: rows, error: listError } = await supabase.from('announcements').select('id');
+    if (listError) throw listError;
+    const ids = (rows || []).map((row: any) => row.id).filter(Boolean);
+    if (ids.length === 0) return c.json({ success: true });
+    const { error } = await supabase.from('announcements').delete().in('id', ids);
+    if (error) throw error;
+    return c.json({ success: true });
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Failed to clear announcements' }, 400);
+  }
+});
+
 export default announcementsRouter;
 

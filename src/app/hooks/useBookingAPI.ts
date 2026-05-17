@@ -172,14 +172,14 @@ export const useBookingAPI = () => {
     }
   };
 
-  const requestBookingReschedule = async (bookingId: string, userId: string, reason: string, newDate: string, newStartTime: string) => {
+  const requestBookingReschedule = async (bookingId: string, userId: string, reason: string, newDate: string, newStartTime: string, newEndTime?: string) => {
     setLoading(true);
     setError(null);
     try {
       const response = await apiFetch(`/api/bookings/${bookingId}/request-reschedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, reason, requested_new_date: newDate, requested_new_start_time: newStartTime }),
+        body: JSON.stringify({ user_id: userId, reason, requested_new_date: newDate, requested_new_start_time: newStartTime, requested_new_end_time: newEndTime }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error((data as { error?: string }).error || 'Request failed');

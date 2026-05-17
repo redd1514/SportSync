@@ -56,6 +56,186 @@ const CANCEL_REASONS = [
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dayLabels = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
+function playBuddyChime() {
+  if (typeof window === "undefined") return;
+  const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioCtor) return;
+
+  try {
+    const ctx = new AudioCtor();
+    const now = ctx.currentTime;
+    [523.25, 659.25, 783.99].forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, now + index * 0.075);
+      gain.gain.setValueAtTime(0, now + index * 0.075);
+      gain.gain.linearRampToValueAtTime(0.055, now + index * 0.075 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.075 + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + index * 0.075);
+      osc.stop(now + index * 0.075 + 0.2);
+    });
+    window.setTimeout(() => void ctx.close().catch(() => undefined), 520);
+  } catch {
+    /* Sound is a bonus; keep the interaction working if the browser blocks it. */
+  }
+}
+
+function playBuddyTalkBlip(step: number) {
+  if (typeof window === "undefined" || step % 3 !== 0) return;
+  const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioCtor) return;
+
+  try {
+    const ctx = new AudioCtor();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(420 + ((step % 7) * 38), ctx.currentTime);
+    gain.gain.setValueAtTime(0.025, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.055);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.06);
+    window.setTimeout(() => void ctx.close().catch(() => undefined), 90);
+  } catch {
+    /* Browser may block very short speech blips. */
+  }
+}
+
+function ProfileCourtBuddy({
+  userName,
+  loyaltyPoints,
+  bookingCount,
+  rewardsReady,
+}: {
+  userName: string;
+  loyaltyPoints: number;
+  bookingCount: number;
+  rewardsReady: number;
+}) {
+  const [messageIndex, setMessageIndex] = useState(0);
+  const [isTalking, setIsTalking] = useState(false);
+  const [isTypingText, setIsTypingText] = useState(false);
+  const [displayedText, setDisplayedText] = useState("");
+  const hideTimerRef = useRef<number | null>(null);
+  const firstName = userName.split(" ")[0] || "there";
+  const pointsIntoReward = loyaltyPoints % LOYALTY_REWARD_THRESHOLD;
+  const pointsNeeded = pointsIntoReward === 0 && loyaltyPoints > 0
+    ? LOYALTY_REWARD_THRESHOLD
+    : LOYALTY_REWARD_THRESHOLD - pointsIntoReward;
+  const messages = [
+    `Hi ${firstName}! Tap My Bookings before your visit so your QR ticket is ready.`,
+    rewardsReady > 0
+      ? `You have ${rewardsReady} loyalty reward${rewardsReady > 1 ? "s" : ""} ready. Nice shot.`
+      : `${pointsNeeded} point${pointsNeeded === 1 ? "" : "s"} until your next discount.`,
+    bookingCount > 0
+      ? `You have ${bookingCount} booking${bookingCount === 1 ? "" : "s"} in your activity history.`
+      : "Book your first court and I will cheer from here.",
+    "Tip: completed bookings earn loyalty points after check-in and checkout.",
+  ];
+  useEffect(() => {
+    if (!isTalking) return;
+    const fullText = messages[messageIndex];
+    let cursor = 0;
+    setDisplayedText("");
+    setIsTypingText(true);
+    const interval = window.setInterval(() => {
+      cursor += 1;
+      setDisplayedText(fullText.slice(0, cursor));
+      playBuddyTalkBlip(cursor);
+      if (cursor >= fullText.length) {
+        setIsTypingText(false);
+        window.clearInterval(interval);
+      }
+    }, 32);
+    return () => window.clearInterval(interval);
+  }, [isTalking, messageIndex]);
+
+  useEffect(() => () => {
+    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+  }, []);
+
+  const speak = () => {
+    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+    setMessageIndex((current) => (current + 1) % messages.length);
+    setIsTalking(true);
+    playBuddyChime();
+    hideTimerRef.current = window.setTimeout(() => setIsTalking(false), 7000);
+  };
+
+  return (
+    <div className="pointer-events-none absolute -top-9 right-[calc(16.666%-40px)] h-24 w-24 z-20">
+      <motion.div
+        className="absolute inset-x-2 bottom-3 h-3 rounded-full bg-black/35 blur-sm"
+        animate={{ opacity: [0.25, 0.55, 0.25] }}
+        transition={{ duration: 4.8, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.button
+        type="button"
+        aria-label="Ask Court Buddy for a tip"
+        onClick={speak}
+        whileTap={{ scale: 0.94 }}
+        className="pointer-events-auto absolute left-1/2 -translate-x-1/2 bottom-0 w-20 h-20 rounded-3xl focus:outline-none"
+      >
+        <motion.div
+          className="absolute inset-x-2 bottom-0 h-3 rounded-full bg-black/35 blur-sm"
+          animate={{ scaleX: [0.86, 1.08, 0.86], opacity: [0.35, 0.55, 0.35] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+        />
+          <motion.div
+            className="absolute left-2 top-1 w-16 h-16 rounded-full overflow-hidden shadow-xl shadow-black/30"
+            style={{ background: "radial-gradient(circle at 32% 25%, #ffd08a 0 13%, #ff9f1c 28%, #e66b00 100%)" }}
+          animate={{ y: [0, -5, 0], rotate: [-2, 2, -2] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <div className="absolute inset-y-0 left-1/2 w-0.5 bg-black/28 -translate-x-1/2" />
+          <div className="absolute inset-x-0 top-1/2 h-0.5 bg-black/28 -translate-y-1/2" />
+          <div className="absolute -left-5 top-1/2 w-12 h-12 rounded-full border-2 border-black/25 -translate-y-1/2" />
+          <div className="absolute -right-5 top-1/2 w-12 h-12 rounded-full border-2 border-black/25 -translate-y-1/2" />
+          <div className="absolute left-5 top-6 w-2 h-2 rounded-full bg-[#151515]" />
+          <div className="absolute right-5 top-6 w-2 h-2 rounded-full bg-[#151515]" />
+          <motion.div
+            className="absolute left-1/2 top-9 h-1 rounded-full bg-[#151515] -translate-x-1/2"
+            animate={{ width: isTypingText ? [9, 16, 9] : 10 }}
+            transition={{ duration: 0.22, repeat: isTypingText ? Infinity : 0 }}
+          />
+        </motion.div>
+        <motion.div className="absolute left-4 bottom-2 w-5 h-2 rounded-full bg-white/80" animate={{ y: [0, -1, 0] }} transition={{ duration: 2.4, repeat: Infinity }} />
+        <motion.div className="absolute right-4 bottom-2 w-5 h-2 rounded-full bg-white/80" animate={{ y: [0, -1, 0] }} transition={{ duration: 2.4, repeat: Infinity, delay: 0.12 }} />
+      </motion.button>
+
+
+
+      <AnimatePresence mode="wait">
+        {isTalking && (
+          <motion.div
+            key={messageIndex}
+            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.96 }}
+            className="pointer-events-none absolute right-[-32px] bottom-[96px] w-[min(78vw,300px)] rounded-2xl bg-white text-[#171717] px-4 py-3 shadow-2xl shadow-black/30"
+            style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.45 }}
+          >
+            <div className="absolute right-8 bottom-[-7px] w-3.5 h-3.5 bg-white rotate-45" />
+            {displayedText}
+            {isTypingText && (
+              <motion.span
+                className="inline-block w-1.5 h-4 ml-1 align-[-2px] rounded-full bg-[#171717]"
+                animate={{ opacity: [0.15, 1, 0.15] }}
+                transition={{ duration: 0.7, repeat: Infinity }}
+              />
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ── Mini inline calendar for reschedule ── */
 function MiniCalendar({ selectedDate, onSelect, minDate }: { selectedDate: string; onSelect: (d: string) => void; minDate: string }) {
   const [viewMonth, setViewMonth] = useState(() => {
@@ -287,8 +467,9 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
 
   const isAdmin = user?.email === "admin@jrc.com";
   const coachProfile = user?.email ? findCoachByEmail(user.email) : undefined;
-  const roleLabel = coachProfile ? "COACH" : isAdmin ? "ADMIN" : "USER";
-  const roleColor = coachProfile ? "#2563EB" : isAdmin ? "#FFD700" : "#22c55e";
+  const isCoachRole = !!coachProfile;
+  const roleLabel = isCoachRole ? "COACH" : isAdmin ? "ADMIN" : "USER";
+  const roleColor = isCoachRole ? "#2563EB" : isAdmin ? "#FFD700" : "#22c55e";
 
   // Fetch profile data from API on mount
   const loadProfileData = async () => {
@@ -477,7 +658,13 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
       </div>
 
       {/* Stats */}
-      <div className="px-5 mb-5">
+      <div className="px-5 mb-5 pt-12 relative">
+        <ProfileCourtBuddy
+          userName={user.name}
+          loyaltyPoints={user.loyaltyPoints}
+          bookingCount={userBookings.length}
+          rewardsReady={loyaltyRewardsAvailable(user.loyaltyPoints)}
+        />
         <div className="grid grid-cols-3 gap-3">
           {[
             { icon: CalendarDays, label: "Bookings", value: userBookings.length, color: "#FF8C00" },
@@ -736,11 +923,11 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
             <div className="space-y-4">
               <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: `${roleColor}10`, border: `1px solid ${roleColor}25` }}>
                 <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: `${roleColor}18` }}>
-                  {coachProfile ? <Trophy size={18} style={{ color: roleColor }} /> : <User size={18} style={{ color: roleColor }} />}
+                  {isCoachRole ? <Trophy size={18} style={{ color: roleColor }} /> : <User size={18} style={{ color: roleColor }} />}
                 </div>
                 <div>
                   <p className="text-white font-black" style={{ fontSize: 14 }}>{roleLabel === "COACH" ? "Coach account" : "User account"}</p>
-                  <p className="text-gray-500" style={{ fontSize: 12 }}>{coachProfile ? `${coachProfile.sport} coach profile active` : "Standard JRC member access"}</p>
+                  <p className="text-gray-500" style={{ fontSize: 12 }}>{isCoachRole ? `${coachProfile?.sport || "Coach"} profile active` : "Standard JRC member access"}</p>
                 </div>
               </div>
               <div>

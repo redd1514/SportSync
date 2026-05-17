@@ -149,9 +149,56 @@ export const coachService = {
       email: input.email,
     });
 
-    const { data: existingCoach } = await supabase.from('coaches').select('id').eq('user_id', userId).maybeSingle();
+    const { data: existingCoach } = await supabase.from('coaches').select('id, is_available').eq('user_id', userId).maybeSingle();
     if (existingCoach?.id) {
-      throw new Error('This person already has a coach profile. Edit the existing coach instead.');
+      const metaJson = buildMetaJson(input.availableDays || [], input.timeRange || '');
+      const { error: coachUpdateErr } = await supabase
+        .from('coaches')
+        .update({
+          bio: input.description || '',
+          certification_details: metaJson,
+          hourly_rate: input.hourlyRate,
+          is_available: input.isAvailable !== false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingCoach.id);
+      if (coachUpdateErr) throw coachUpdateErr;
+
+      await supabase.from('coach_specializations').delete().eq('coach_id', existingCoach.id);
+      const { error: specUpdateErr } = await supabase.from('coach_specializations').insert([
+        { coach_id: existingCoach.id, sport_id: sportId, experience_years: 0 },
+      ]);
+      if (specUpdateErr) throw specUpdateErr;
+
+      const userPatch: Record<string, unknown> = {
+        full_name: input.name,
+        email,
+        role: 'user',
+        updated_at: new Date().toISOString(),
+      };
+      if (input.image) userPatch.profile_picture_url = input.image;
+      const { error: userUpdateErr } = await supabase.from('users').update(userPatch).eq('id', userId);
+      if (userUpdateErr) throw userUpdateErr;
+
+      const { data: hydrated, error: hErr } = await supabase
+        .from('coaches')
+        .select(
+          `
+          id,
+          bio,
+          certification_details,
+          hourly_rate,
+          is_available,
+          rating,
+          review_count,
+          users ( full_name, email, profile_picture_url ),
+          coach_specializations ( sport_id, sports ( name ) )
+        `
+        )
+        .eq('id', existingCoach.id)
+        .single();
+      if (hErr) throw hErr;
+      return mapRowToHubPayload(hydrated);
     }
 
     const metaJson = buildMetaJson(input.availableDays || [], input.timeRange || '');
@@ -184,9 +231,10 @@ export const coachService = {
       throw specErr;
     }
 
-    if (input.image) {
-      await supabase.from('users').update({ profile_picture_url: input.image }).eq('id', userId);
-    }
+    const userPatch: Record<string, unknown> = { role: 'user', updated_at: new Date().toISOString() };
+    if (input.image) userPatch.profile_picture_url = input.image;
+    const { error: userPatchErr } = await supabase.from('users').update(userPatch).eq('id', userId);
+    if (userPatchErr) throw userPatchErr;
 
     const { data: hydrated, error: hErr } = await supabase
       .from('coaches')
@@ -290,6 +338,14 @@ export const coachService = {
   },
 
   async deleteCoach(id: string): Promise<void> {
+    const { data: existing, error: existingErr } = await supabase
+      .from('coaches')
+      .select('user_id, users ( email )')
+      .eq('id', id)
+      .single();
+
+    if (existingErr) throw existingErr;
+
     const { count, error: cErr } = await supabase
       .from('coaching_sessions')
       .select('id', { count: 'exact', head: true })
@@ -300,10 +356,26 @@ export const coachService = {
     if ((count ?? 0) > 0) {
       const { error } = await supabase.from('coaches').update({ is_available: false }).eq('id', id);
       if (error) throw error;
+      if ((existing as any)?.user_id) {
+        const { error: userErr } = await supabase
+          .from('users')
+          .update({ role: 'user', updated_at: new Date().toISOString() })
+          .eq('id', (existing as any).user_id)
+          .eq('role', 'coach');
+        if (userErr) throw userErr;
+      }
       return;
     }
 
     const { error } = await supabase.from('coaches').delete().eq('id', id);
     if (error) throw error;
+    if ((existing as any)?.user_id) {
+      const { error: userErr } = await supabase
+        .from('users')
+        .update({ role: 'user', updated_at: new Date().toISOString() })
+        .eq('id', (existing as any).user_id)
+        .eq('role', 'coach');
+      if (userErr) throw userErr;
+    }
   },
 };

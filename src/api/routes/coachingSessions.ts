@@ -6,6 +6,8 @@ const coachingSessionsRouter = new Hono();
 
 function mapSessionStatusForUi(dbStatus: string, adminNotes?: string | null): string {
   if (/COACHING_CHECKED_OUT|checked_out:/i.test(adminNotes || '')) return 'completed';
+  if (/PAYMENT_VERIFIED|COACHING_CHECKED_IN|checked_in:/i.test(adminNotes || '')) return 'ongoing';
+  if (/COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(adminNotes || '') && !/COACHING_RESCHEDULE_(ACCEPTED|REJECTED)/i.test(adminNotes || '')) return 'reschedule_requested';
   if (dbStatus === 'approved' || dbStatus === 'scheduled') return 'confirmed';
   if (dbStatus === 'completed') return 'completed';
   return dbStatus;
@@ -85,7 +87,8 @@ coachingSessionsRouter.post('/', async (c) => {
       sport_id: body.sport_id || body.sportId,
       session_date: String(body.session_date || body.sessionDate || body.requestedDate),
       start_time: String(body.start_time || body.startTime || body.requestedTime),
-      end_time: String(body.end_time || body.endTime),
+      end_time: body.end_time || body.endTime ? String(body.end_time || body.endTime) : undefined,
+      duration_hours: body.duration_hours || body.durationHours,
       status: body.status || 'pending',
       linked_booking_id: body.linked_booking_id || body.linkedBookingId,
       payment_proof_url: body.payment_proof_url || body.paymentProofUrl,

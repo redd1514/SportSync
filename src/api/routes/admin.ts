@@ -452,6 +452,20 @@ adminRouter.post('/approve-cancellation', async (c) => {
     if (br?.booking_id) {
       await refundLoyaltyRedemptionForUnstartedBooking(br.booking_id);
       await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', br.booking_id);
+      const { data: linkedSessions } = await supabase
+        .from('coaching_sessions')
+        .select('id, admin_notes')
+        .ilike('notes', `%linked_booking:${br.booking_id}%`);
+      for (const session of linkedSessions || []) {
+        await supabase
+          .from('coaching_sessions')
+          .update({
+            status: 'cancelled',
+            admin_notes: `${(session as any).admin_notes || ''}\nCOACHING_LINKED_BOOKING_CANCELLED\nlinked_booking_cancelled:${new Date().toISOString()}`.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', (session as any).id);
+      }
     }
     return c.json({ success: true, id: requestId, approved_at: new Date().toISOString() });
   } catch (error: any) {

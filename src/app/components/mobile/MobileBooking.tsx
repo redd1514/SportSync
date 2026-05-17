@@ -282,6 +282,15 @@ export function MobileBooking() {
   const [showRates, setShowRates] = useState(false);
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
   const endPickerRef = useRef<HTMLDivElement>(null);
+  const confirmScrollRef = useRef<HTMLDivElement>(null);
+  const selectScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    window.setTimeout(() => {
+      confirmScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      selectScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }, 40);
+  }, [step]);
 
   useEffect(() => {
     if (unlinkedRequest) {
@@ -653,7 +662,7 @@ export function MobileBooking() {
         </div>
         <BookingProgressBar currentStep="confirm" />
 
-        <div className="flex-1 overflow-y-auto px-5 scrollbar-hide pt-3">
+        <div ref={confirmScrollRef} className="flex-1 overflow-y-auto px-5 scrollbar-hide pt-3">
 
           {/* Booking summary card */}
           <div className="bg-[#1A1A1A] rounded-2xl p-4 mb-4 border border-white/5">
@@ -910,7 +919,7 @@ export function MobileBooking() {
         )}
       </AnimatePresence>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div ref={selectScrollRef} className="flex-1 overflow-y-auto scrollbar-hide">
         {unlinkedRequest && (
           <div className="mx-5 mb-5 p-3 rounded-xl bg-[#0047AB]/10 border border-[#0047AB]/30 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">

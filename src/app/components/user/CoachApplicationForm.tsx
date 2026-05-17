@@ -84,8 +84,8 @@ export function CoachApplicationForm() {
     const sameId = user?.id && app.userId === user.id;
     return sameEmail || sameId;
   });
-  const activeNewApplication = myApplications.find((app) =>
-    (app.applicationType || "new") === "new" && (app.status === "pending" || app.status === "approved")
+  const pendingNewApplication = myApplications.find((app) =>
+    (app.applicationType || "new") === "new" && app.status === "pending"
   );
   const pendingCoachRequest = myApplications.find((app) =>
     app.applicationType !== "new" && app.status === "pending"
@@ -298,19 +298,19 @@ export function CoachApplicationForm() {
     );
   }
 
-  if (activeNewApplication) {
+  if (pendingNewApplication && !submitted && step !== 3) {
     return (
       <div className="min-h-full flex items-center justify-center px-6 py-12" style={{ background: BG, fontFamily: "'Outfit','Inter',sans-serif" }}>
         <div className="max-w-lg w-full rounded-3xl border p-8 text-center" style={{ background: SURFACE, borderColor: BORDER }}>
-          <div className="w-16 h-16 rounded-3xl mx-auto mb-5 flex items-center justify-center" style={{ background: activeNewApplication.status === "pending" ? "rgba(234,179,8,0.13)" : "rgba(34,197,94,0.13)" }}>
-            {activeNewApplication.status === "pending" ? <Clock size={30} className="text-yellow-400" /> : <CheckCircle size={30} className="text-green-400" />}
+          <div className="w-16 h-16 rounded-3xl mx-auto mb-5 flex items-center justify-center" style={{ background: "rgba(234,179,8,0.13)" }}>
+            <Clock size={30} className="text-yellow-400" />
           </div>
           <h2 className="text-white font-black mb-2" style={{ fontSize: 22 }}>
-            {activeNewApplication.status === "pending" ? "Application Under Review" : "Application Approved"}
+            Application Under Review
           </h2>
           <p style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 1.6 }}>
-            You already have a coach application for <strong className="text-white">{activeNewApplication.sport}</strong>.
-            {activeNewApplication.status === "pending" ? " Admin will review it soon, so another application is not needed." : " Your coach profile should appear in the Coaching Hub."}
+            Your coach application for <strong className="text-white">{pendingNewApplication.sport}</strong> is waiting for admin review.
+            You will be notified once it is accepted or rejected.
           </p>
         </div>
       </div>
@@ -325,7 +325,7 @@ export function CoachApplicationForm() {
           <div className="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)" }}>
             <CheckCircle size={40} className="text-green-400" />
           </div>
-          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Waiting for Admin Approval</h2>
+          <h2 style={{ color: TEXT_PRIMARY, fontSize: 24, fontWeight: 900, marginBottom: 10 }}>Application Submitted</h2>
           <p style={{ color: TEXT_SECONDARY, fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
             Your coaching application for <strong style={{ color: TEXT_PRIMARY }}>{sport}</strong> has been received. 
             You will be notified when admin accepts or rejects it. If accepted, your coach badge will appear on your profile.

@@ -1437,6 +1437,10 @@ function PricingRatesTab() {
   const [saved, setSaved] = useState(false);
   const [pricingConfirmOpen, setPricingConfirmOpen] = useState(false);
   const [pricingSaving, setPricingSaving] = useState(false);
+  const [bulkMode, setBulkMode] = useState<'percent' | 'fixed'>('percent');
+  const [bulkDirection, setBulkDirection] = useState<'increase' | 'decrease'>('increase');
+  const [bulkValue, setBulkValue] = useState(10);
+  const [bulkSelected, setBulkSelected] = useState<string[]>(['basketball', 'volleyball', 'badminton', 'pickleball', 'billiards', 'tableTennis']);
 
   const updateCourtRate = (sport: string, field: string, val: number) => {
     updateSystemSettings({
@@ -1457,12 +1461,100 @@ function PricingRatesTab() {
     { key: 'billiards',   label: 'Billiards',    color: '#ec4899' },
     { key: 'tableTennis', label: 'Table Tennis', color: '#06b6d4' },
   ];
+  const allRateSports = [...tieredSports, ...flatSports];
+  const selectedLabels = allRateSports.filter(s => bulkSelected.includes(s.key)).map(s => s.label);
+  const toggleBulkSport = (key: string) => {
+    setBulkSelected(prev => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]);
+  };
+  const applyBulkRates = () => {
+    if (bulkSelected.length === 0 || !Number.isFinite(bulkValue)) return;
+    const sign = bulkDirection === 'increase' ? 1 : -1;
+    const transform = (value: number) => {
+      const next = bulkMode === 'percent'
+        ? value * (1 + sign * (bulkValue / 100))
+        : value + sign * bulkValue;
+      return Math.max(0, Math.round(next / 10) * 10);
+    };
+    const nextRates: any = { ...systemSettings.courtRates };
+    bulkSelected.forEach((key) => {
+      const current = nextRates[key];
+      if (!current) return;
+      nextRates[key] = Object.fromEntries(
+        Object.entries(current).map(([field, value]) => [field, transform(Number(value || 0))])
+      );
+    });
+    updateSystemSettings({ courtRates: nextRates } as any);
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-white font-black" style={{ fontSize: 18 }}>Pricing & Rates</h3>
         <p className="text-gray-500" style={{ fontSize: 13 }}>Changes apply immediately to all new bookings.</p>
+      </div>
+
+      <div className="rounded-2xl border border-orange-500/20 p-4" style={{ background: 'rgba(255,140,0,0.06)' }}>
+        <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+          <div className="flex-1">
+            <p className="text-white font-black mb-1" style={{ fontSize: 14 }}>Bulk price adjustment</p>
+            <p className="text-gray-500" style={{ fontSize: 12 }}>Use this for promos or price increases, then fine-tune individual sports below.</p>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {allRateSports.map((sport) => {
+                const active = bulkSelected.includes(sport.key);
+                return (
+                  <button key={sport.key} type="button" onClick={() => toggleBulkSport(sport.key)}
+                    className="px-3 py-1.5 rounded-xl border font-black transition-all"
+                    style={{ fontSize: 11, background: active ? `${sport.color}18` : 'rgba(255,255,255,0.04)', borderColor: active ? `${sport.color}55` : 'rgba(255,255,255,0.08)', color: active ? sport.color : '#777' }}>
+                    {sport.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 lg:w-[38rem]">
+            <div className="col-span-2 sm:col-span-1 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-[#1A1A1A] p-1">
+              {(['increase', 'decrease'] as const).map((option) => {
+                const active = bulkDirection === option;
+                return (
+                  <button key={option} type="button" onClick={() => setBulkDirection(option)}
+                    className="rounded-lg px-2 py-1.5 font-black transition-all"
+                    style={{ fontSize: 11, background: active ? '#FF8C00' : 'transparent', color: active ? 'white' : '#8b8b8b' }}>
+                    {option === 'increase' ? 'Increase' : 'Decrease'}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="col-span-2 sm:col-span-1 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-[#1A1A1A] p-1">
+              {([
+                { value: 'percent' as const, label: 'Percent' },
+                { value: 'fixed' as const, label: 'Peso' },
+              ]).map((option) => {
+                const active = bulkMode === option.value;
+                return (
+                  <button key={option.value} type="button" onClick={() => setBulkMode(option.value)}
+                    className="rounded-lg px-2 py-1.5 font-black transition-all"
+                    style={{ fontSize: 11, background: active ? 'rgba(255,140,0,0.18)' : 'transparent', color: active ? '#FFB347' : '#8b8b8b', border: active ? '1px solid rgba(255,140,0,0.35)' : '1px solid transparent' }}>
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1 bg-[#1A1A1A] border border-white/10 rounded-xl px-3 py-2">
+              <input type="number" min={0} step={bulkMode === 'percent' ? 1 : 10} value={bulkValue}
+                onChange={e => setBulkValue(parseFloat(e.target.value) || 0)}
+                className="w-full bg-transparent text-white font-black outline-none" style={{ fontSize: 12 }} />
+              <span className="text-gray-500 font-black" style={{ fontSize: 11 }}>{bulkMode === 'percent' ? '%' : '₱'}</span>
+            </div>
+            <button type="button" onClick={applyBulkRates} disabled={bulkSelected.length === 0}
+              className="rounded-xl bg-[#FF8C00] text-white font-black disabled:opacity-40"
+              style={{ fontSize: 12 }}>
+              Apply
+            </button>
+          </div>
+        </div>
+        <p className="text-gray-600 mt-3" style={{ fontSize: 11 }}>
+          Target: {bulkSelected.length === allRateSports.length ? 'All sports' : selectedLabels.join(', ') || 'None selected'}
+        </p>
       </div>
 
       {/* Tiered sports */}
@@ -1608,7 +1700,7 @@ function PricingRatesTab() {
 
 function SystemSettingsTab() {
   const { systemSettings, updateSystemSettings } = useUser();
-  const { addAnnouncement, announcements } = useAnnouncements();
+  const { addAnnouncement, announcements, clearAnnouncement, clearAnnouncements, refresh: refreshAnnouncements } = useAnnouncements();
   const { customSports } = useAddons();
   const [sub, setSub] = useState<SettingsSubTab>('business');
   const [announcementForm, setAnnouncementForm] = useState({ title: '', message: '', type: 'promotion' as Announcement['type'] });
@@ -1616,6 +1708,7 @@ function SystemSettingsTab() {
   const [savedBiz, setSavedBiz] = useState(false);
   const [bizConfirmOpen, setBizConfirmOpen] = useState(false);
   const [bizSaving, setBizSaving] = useState(false);
+  const [announcementClear, setAnnouncementClear] = useState<{ mode: 'one' | 'all'; id?: string; title?: string } | null>(null);
 
   const SETTINGS_TABS: { id: SettingsSubTab; icon: any; label: string; desc: string }[] = [
     { id: 'business',      icon: Building,   label: 'Business Config', desc: 'Hours & policies'       },
@@ -1794,8 +1887,20 @@ function SystemSettingsTab() {
 
           {/* History */}
           <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 overflow-hidden">
-            <div className="px-5 py-4 border-b border-white/5">
+            <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between gap-3">
               <h4 className="text-white font-black" style={{ fontSize: 15 }}>Sent Announcements ({announcements.length})</h4>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void refreshAnnouncements()}
+                  className="px-3 py-1.5 rounded-xl border border-white/10 text-gray-400 hover:text-white font-black"
+                  style={{ fontSize: 11 }}>
+                  Refresh
+                </button>
+                <button type="button" disabled={announcements.length === 0} onClick={() => setAnnouncementClear({ mode: 'all' })}
+                  className="px-3 py-1.5 rounded-xl border font-black disabled:opacity-40"
+                  style={{ fontSize: 11, borderColor: 'rgba(239,68,68,0.24)', color: '#fca5a5', background: 'rgba(239,68,68,0.08)' }}>
+                  Clear All
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-white/5 max-h-[380px] overflow-y-auto custom-scrollbar">
               {announcements.length === 0 ? (
@@ -1816,6 +1921,10 @@ function SystemSettingsTab() {
                         <p className="text-gray-400 line-clamp-2" style={{ fontSize: 12 }}>{ann.message}</p>
                         <p className="text-gray-600 mt-1" style={{ fontSize: 10 }}>{new Date(ann.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
                       </div>
+                      <button type="button" onClick={() => setAnnouncementClear({ mode: 'one', id: ann.id, title: ann.title })}
+                        className="w-8 h-8 rounded-xl border border-white/10 text-gray-500 hover:text-red-300 hover:border-red-500/25 hover:bg-red-500/10 flex items-center justify-center">
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
                 );
@@ -1824,6 +1933,26 @@ function SystemSettingsTab() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {announcementClear && (
+          <ConfirmModal opts={{
+            title: announcementClear.mode === 'all' ? 'Clear all announcements?' : 'Clear announcement?',
+            body: announcementClear.mode === 'all'
+              ? 'This removes sent announcements from the admin list and published user announcement feed.'
+              : `Remove "${announcementClear.title}" from sent announcements?`,
+            confirmLabel: announcementClear.mode === 'all' ? 'Clear All' : 'Clear',
+            confirmColor: '#ef4444',
+            icon: <Trash2 size={24} className="text-white" />,
+            onCancel: () => setAnnouncementClear(null),
+            onConfirm: async () => {
+              if (announcementClear.mode === 'all') await clearAnnouncements();
+              else if (announcementClear.id) await clearAnnouncement(announcementClear.id);
+              setAnnouncementClear(null);
+            },
+          }} />
+        )}
+      </AnimatePresence>
 
     </div>
   );

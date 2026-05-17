@@ -52,6 +52,34 @@ async function sendCoachingNotification(sessionId: string, title: string, desc: 
   }
 }
 
+async function syncLinkedCoachingSessionFromBooking(
+  bookingId: string,
+  update: { status?: 'approved' | 'cancelled'; sessionDate?: string; startTime?: string; endTime?: string; note: string },
+) {
+  const { data: sessions, error } = await supabase
+    .from('coaching_sessions')
+    .select('id, admin_notes')
+    .ilike('notes', `%linked_booking:${bookingId}%`);
+  if (error) throw error;
+
+  for (const session of sessions || []) {
+    const patch: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+      admin_notes: `${(session as any).admin_notes || ''}\n${update.note}`.trim(),
+    };
+    if (update.status) patch.status = update.status;
+    if (update.sessionDate) patch.session_date = update.sessionDate;
+    if (update.startTime) patch.start_time = update.startTime;
+    if (update.endTime) patch.end_time = update.endTime;
+
+    const { error: updateErr } = await supabase
+      .from('coaching_sessions')
+      .update(patch)
+      .eq('id', (session as any).id);
+    if (updateErr) throw updateErr;
+  }
+}
+
 async function countActionableBookingRequests() {
   const { data: reqRows } = await supabase
     .from('booking_requests')
@@ -272,6 +300,10 @@ staffRouter.put('/requests/:id/cancel/approve', async (c) => {
     if (br.booking_id) {
       await refundLoyaltyRedemptionForUnstartedBooking(br.booking_id);
       await supabase.from('bookings').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', br.booking_id);
+      await syncLinkedCoachingSessionFromBooking(br.booking_id, {
+        status: 'cancelled',
+        note: `COACHING_LINKED_BOOKING_CANCELLED\nlinked_booking_cancelled:${new Date().toISOString()}`,
+      });
       if (isUuid(staffId)) {
         await supabase.from('staff_operations').insert({
           staff_id: staffId,
@@ -281,6 +313,18 @@ staffRouter.put('/requests/:id/cancel/approve', async (c) => {
         });
       }
       await sendUserNotification(br.booking_id, staffId, 'Cancellation Approved', 'Your booking cancellation request has been approved by the staff.');
+      const { data: linkedSessions } = await supabase
+        .from('coaching_sessions')
+        .select('id')
+        .ilike('notes', `%linked_booking:${br.booking_id}%`);
+      await Promise.all((linkedSessions || []).map((session: any) =>
+        sendCoachingNotification(
+          session.id,
+          'Coaching booking cancelled',
+          'The linked court booking was cancelled. The coaching session has been cancelled as well.',
+          'alert',
+        )
+      ));
     }
 
     return c.json({ success: true, id });
@@ -402,6 +446,13 @@ staffRouter.put('/requests/:id/reschedule/approve', async (c) => {
           updated_at: new Date().toISOString(),
         })
         .eq('id', br.booking_id);
+      await syncLinkedCoachingSessionFromBooking(br.booking_id, {
+        status: 'approved',
+        sessionDate: br.requested_new_date,
+        startTime: br.requested_new_start_time,
+        endTime: br.requested_new_end_time,
+        note: `COACHING_LINKED_BOOKING_RESCHEDULED\nlinked_booking_rescheduled:${new Date().toISOString()}`,
+      });
 
       if (isUuid(staffId)) {
         await supabase.from('staff_operations').insert({
@@ -412,6 +463,17 @@ staffRouter.put('/requests/:id/reschedule/approve', async (c) => {
         });
       }
       await sendUserNotification(br.booking_id, staffId, 'Reschedule Approved', `Your booking has been successfully rescheduled to ${br.requested_new_date} at ${br.requested_new_start_time}.`);
+      const { data: linkedSessions } = await supabase
+        .from('coaching_sessions')
+        .select('id')
+        .ilike('notes', `%linked_booking:${br.booking_id}%`);
+      await Promise.all((linkedSessions || []).map((session: any) =>
+        sendCoachingNotification(
+          session.id,
+          'Coaching booking rescheduled',
+          `The linked coaching booking moved to ${br.requested_new_date} at ${br.requested_new_start_time}.`,
+        )
+      ));
     }
 
     return c.json({ success: true, id });
@@ -472,7 +534,7 @@ staffRouter.put('/requests/:id/coaching/verify', async (c) => {
       .maybeSingle();
     if (fetchErr) throw fetchErr;
     if (!session) return c.json({ error: 'Coaching session not found' }, 404);
-    if (session.status !== 'approved') return c.json({ error: 'Coach has not accepted this request yet.' }, 400);
+    if (session.status !== 'approved') return c.json({ error: 'This coaching ticket is not ready for front desk check-in yet.' }, 400);
 
     const note = `${session.admin_notes || ''}\nPAYMENT_VERIFIED_MANUAL\nCOACHING_CHECKED_IN\nCoaching payment verified at the front desk before session check-in.`.trim();
     const { error } = await supabase

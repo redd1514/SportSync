@@ -10,6 +10,7 @@ import { MobileAuth } from "./components/MobileAuth";
 import { ConsolidatedMobileAppShell } from "./components/mobile/ConsolidatedMobileAppShell";
 import { DesktopAppShell } from "./components/desktop/DesktopAppShell";
 import { useUser } from "./contexts/UserContext";
+import { PaymentReturnReceiptModal } from "./components/shared/PaymentReturnReceiptModal";
 
 type AppState = "splash" | "auth" | "app";
 const RECOVERY_PENDING_KEY = "auth_recovery_pending";
@@ -119,6 +120,7 @@ function RootContent() {
 
       {/* Authenticated App — Mobile or Desktop shell based on screen size */}
       <AppWithAI appState={appState} isMobile={isMobile} onLogout={() => setAppState("auth")} />
+      {appState === "app" && <PaymentReturnReceiptModal />}
     </>
   );
 }

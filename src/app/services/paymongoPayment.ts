@@ -15,6 +15,14 @@ export type CourtBookingPaymentInput = {
   facility_map_id?: string | null;
   user_id?: string;
   downpayment_percentage?: number;
+  loyalty_points_redeemed?: number;
+  loyalty_discount?: number;
+  coach_id?: string;
+  coach_name?: string;
+  coaching_student_id?: string;
+  coach_fee?: number;
+  court_amount?: number;
+  total_due?: number;
 };
 
 export type CourtBookingPaymentResult = {
@@ -26,6 +34,7 @@ export type CourtBookingPaymentResult = {
   totalPrice: number;
   downpaymentPercentage: number;
   balanceDue: number;
+  coachingSessionId?: string;
 };
 
 export type PaymentAuthUser = {
