@@ -466,6 +466,9 @@ export function UserMyBookings() {
       setShowCancelModal(false);
       setSelectedBooking(null);
       setCancellationReason('');
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
+      window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
+      window.dispatchEvent(new Event('sportsync:notifications-refresh'));
       
       toast.success('Cancellation request submitted! Admin will review your request.');
     } catch (e: any) {
@@ -495,6 +498,9 @@ export function UserMyBookings() {
       setRescheduleDate('');
       setRescheduleTime('');
       setRescheduleReason('');
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
+      window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
+      window.dispatchEvent(new Event('sportsync:notifications-refresh'));
       
       toast.success('Reschedule request submitted! Admin will review your request.');
     } catch (e: any) {

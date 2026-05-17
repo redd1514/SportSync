@@ -151,9 +151,11 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
 
   // Compute duration from start/end if duration_hours not set
   let durationHours: number | undefined;
-  if (row.start_time && row.end_time) {
-    const [sh, sm] = String(row.start_time).split(":").map(Number);
-    const [eh, em] = String(row.end_time).split(":").map(Number);
+  const startTimeForDuration = row.start_time ?? row.requestedTime;
+  const endTimeForDuration = row.end_time ?? row.endTime;
+  if (startTimeForDuration && endTimeForDuration) {
+    const [sh, sm] = String(startTimeForDuration).split(":").map(Number);
+    const [eh, em] = String(endTimeForDuration).split(":").map(Number);
     durationHours = Math.round(((eh * 60 + em) - (sh * 60 + sm)) / 60);
   } else if (typeof row.duration_hours === "number") {
     durationHours = row.duration_hours;
@@ -168,7 +170,7 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
     sport: typeof row.sport === "string" ? row.sport : "Sports",
     requestedDate: String(row.session_date ?? row.requestedDate ?? ""),
     requestedTime: String(row.start_time ?? row.requestedTime ?? ""),
-    endTime: row.end_time ? String(row.end_time) : undefined,
+    endTime: row.end_time || row.endTime ? String(row.end_time ?? row.endTime) : undefined,
     message: (typeof row.message === "string" ? row.message : notes)
       .replace(/COACHING_BOOKING:\{.*\}/s, "")
       .replace(/linked_booking:[0-9a-f-]+/i, "")
@@ -413,13 +415,18 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       void refreshRequests();
       void refreshCoaches();
     };
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === "visible") onRefresh();
+    };
     window.addEventListener("sportsync:coaching-refresh", onRefresh);
     window.addEventListener("sportsync:notifications-refresh", onRefresh);
     window.addEventListener("focus", onRefresh);
+    document.addEventListener("visibilitychange", onVisibleRefresh);
     return () => {
       window.removeEventListener("sportsync:coaching-refresh", onRefresh);
       window.removeEventListener("sportsync:notifications-refresh", onRefresh);
       window.removeEventListener("focus", onRefresh);
+      document.removeEventListener("visibilitychange", onVisibleRefresh);
     };
   }, [refreshCoaches, refreshRequests]);
 
@@ -490,6 +497,8 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
 
       setRequests((prev) => [newReq, ...prev]);
       window.dispatchEvent(new Event('sportsync:notifications-refresh'));
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
       return newReq.id;
     } catch (error) {
       console.error('Error creating coaching session:', error);
@@ -540,6 +549,7 @@ export function CoachingProvider({ children }: { children: ReactNode }) {
       );
       window.dispatchEvent(new Event('sportsync:notifications-refresh'));
       window.dispatchEvent(new Event('sportsync:coaching-refresh'));
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
     } catch (error) {
       console.error('Error updating request status:', error);
       throw error;

@@ -172,8 +172,19 @@ export const useRealtimeBookingAPI = (userId: string, options?: UseRealtimeAPIOp
     const onRefresh = () => {
       if (userId) void fetchBookings();
     };
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === 'visible') onRefresh();
+    };
     window.addEventListener('sportsync:bookings-refresh', onRefresh);
-    return () => window.removeEventListener('sportsync:bookings-refresh', onRefresh);
+    window.addEventListener('sportsync:notifications-refresh', onRefresh);
+    window.addEventListener('focus', onRefresh);
+    document.addEventListener('visibilitychange', onVisibleRefresh);
+    return () => {
+      window.removeEventListener('sportsync:bookings-refresh', onRefresh);
+      window.removeEventListener('sportsync:notifications-refresh', onRefresh);
+      window.removeEventListener('focus', onRefresh);
+      document.removeEventListener('visibilitychange', onVisibleRefresh);
+    };
   }, [userId, fetchBookings]);
 
   useEffect(() => {
@@ -358,6 +369,25 @@ export const useRealtimeCoachingAPI = (
       fetchSessions();
     }
   }, [userId, options?.autoFetch, fetchSessions]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      if (userId) void fetchSessions();
+    };
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === 'visible') onRefresh();
+    };
+    window.addEventListener('sportsync:coaching-refresh', onRefresh);
+    window.addEventListener('sportsync:notifications-refresh', onRefresh);
+    window.addEventListener('focus', onRefresh);
+    document.addEventListener('visibilitychange', onVisibleRefresh);
+    return () => {
+      window.removeEventListener('sportsync:coaching-refresh', onRefresh);
+      window.removeEventListener('sportsync:notifications-refresh', onRefresh);
+      window.removeEventListener('focus', onRefresh);
+      document.removeEventListener('visibilitychange', onVisibleRefresh);
+    };
+  }, [userId, fetchSessions]);
 
   useEffect(() => {
     return () => {

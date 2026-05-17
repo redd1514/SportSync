@@ -665,7 +665,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
         sport: req.sport,
         court: req.courtName || "Reserved court",
         date: req.requestedDate,
-        time: req.requestedTime,
+        time: req.endTime ? `${req.requestedTime}|${req.endTime}` : req.requestedTime,
         endTime: req.endTime,
         duration: ticketDuration,
         amount: totalAmount,
@@ -704,7 +704,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
             </div>
             <div className="rounded-2xl p-3" style={{ background: SURF }}>
               <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>TIME</p>
-              <p className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(req.requestedTime)}</p>
+              <p className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(req.requestedTime)}{req.endTime ? ` - ${fmt12(req.endTime)}` : ""}</p>
             </div>
           </div>
           <div className="rounded-2xl p-3" style={{ background: SURF }}>

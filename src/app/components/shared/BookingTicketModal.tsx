@@ -32,6 +32,10 @@ function formatTicketDate(date: string) {
 
 function formatTicketTime(time: string) {
   if (!time) return '—';
+  if (time.includes('|')) {
+    const [start, end] = time.split('|');
+    return `${formatTicketTime(start)} - ${formatTicketTime(end)}`;
+  }
   const [h] = time.split(':').map(Number);
   return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
 }

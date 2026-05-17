@@ -426,6 +426,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, [user?.id, user?.role]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || !user?.id) return;
+    const onRefresh = () => {
+      void refreshBookingsFromApi();
+    };
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === "visible") onRefresh();
+    };
+    window.addEventListener("sportsync:bookings-refresh", onRefresh);
+    window.addEventListener("sportsync:notifications-refresh", onRefresh);
+    window.addEventListener("sportsync:coaching-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    document.addEventListener("visibilitychange", onVisibleRefresh);
+    return () => {
+      window.removeEventListener("sportsync:bookings-refresh", onRefresh);
+      window.removeEventListener("sportsync:notifications-refresh", onRefresh);
+      window.removeEventListener("sportsync:coaching-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      document.removeEventListener("visibilitychange", onVisibleRefresh);
+    };
+  }, [user?.id, refreshBookingsFromApi]);
+
+  useEffect(() => {
     const { status, bookingId } = readPaymentReturnFromUrl();
     if (!status) return;
     if (status === "success" && bookingId && !user?.id) return;

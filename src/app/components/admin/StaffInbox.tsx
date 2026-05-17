@@ -492,8 +492,22 @@ export function StaffInbox() {
 
   useEffect(() => {
     fetchInboxData(true);
-    const int = setInterval(fetchInboxData, 15000);
-    return () => clearInterval(int);
+    const onRefresh = () => void fetchInboxData(false);
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === 'visible') onRefresh();
+    };
+    window.addEventListener('sportsync:staff-operations-refresh', onRefresh);
+    window.addEventListener('sportsync:bookings-refresh', onRefresh);
+    window.addEventListener('sportsync:coaching-refresh', onRefresh);
+    window.addEventListener('focus', onRefresh);
+    document.addEventListener('visibilitychange', onVisibleRefresh);
+    return () => {
+      window.removeEventListener('sportsync:staff-operations-refresh', onRefresh);
+      window.removeEventListener('sportsync:bookings-refresh', onRefresh);
+      window.removeEventListener('sportsync:coaching-refresh', onRefresh);
+      window.removeEventListener('focus', onRefresh);
+      document.removeEventListener('visibilitychange', onVisibleRefresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -561,6 +575,9 @@ export function StaffInbox() {
       setModalOpen(false);
       await fetchInboxData();
       window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
+      window.dispatchEvent(new Event('sportsync:coaching-refresh'));
+      window.dispatchEvent(new Event('sportsync:notifications-refresh'));
       window.setTimeout(() => setNotice(''), 1800);
     } catch (e: any) {
       setNotice(e?.message || 'Action failed.');
@@ -1368,15 +1385,15 @@ export function StaffInbox() {
             <button
               type="button"
               onClick={() => void handleApprove()}
-              disabled={busy}
+              disabled={busy || !!(confirmAction?.approved && modalRequest?.requestType === 'reschedule' && modalRequest?.availabilityStatus === 'conflict')}
               className="flex-1 py-3 rounded-2xl font-black text-white transition-all"
               style={{
                 fontSize: 13,
                 background: confirmAction?.approved ? 'linear-gradient(135deg,#22c55e,#16a34a)' : 'linear-gradient(135deg,#ef4444,#dc2626)',
-                opacity: busy ? 0.65 : 1,
+                opacity: busy || (confirmAction?.approved && modalRequest?.requestType === 'reschedule' && modalRequest?.availabilityStatus === 'conflict') ? 0.65 : 1,
               }}
             >
-              {busy ? 'Processing...' : (confirmAction?.approved ? 'Approve' : 'Reject')}
+              {busy ? 'Processing...' : (confirmAction?.approved && modalRequest?.requestType === 'reschedule' && modalRequest?.availabilityStatus === 'conflict' ? 'Conflict detected' : confirmAction?.approved ? 'Approve' : 'Reject')}
             </button>
           </div>
         </div>

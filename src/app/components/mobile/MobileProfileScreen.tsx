@@ -9,6 +9,7 @@ import {
 import { useUser } from "../../contexts/UserContext";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { useUserAPI } from "../../hooks/useUserAPI";
+import { useBookingAPI } from "../../hooks/useBookingAPI";
 import { useRealtimeBookingAPI } from "../../hooks/useRealtimeAPI";
 import { SportIcon, getSportColor } from "../SportIcons";
 import { QRCodeSVG } from "qrcode.react";
@@ -354,19 +355,68 @@ function CancelDialog({ booking, onClose, onConfirm }: {
 
 /* ── Reschedule Dialog ── */
 function RescheduleDialog({ booking, onClose, onConfirm }: {
-  booking: { id: string; sport: string; court: string; date: string; time: string };
+  booking: { id: string; sport: string; court: string; date: string; time: string; duration?: number; courtId?: string; court_id?: string };
   onClose: () => void;
   onConfirm: (date: string, time: string) => void;
 }) {
+  const { checkAvailability } = useBookingAPI();
   const todayStr = new Date().toISOString().split('T')[0];
   const [newDate, setNewDate] = useState(booking.date > todayStr ? booking.date : todayStr);
   const [newTime, setNewTime] = useState(booking.time);
   const [period, setPeriod] = useState<'AM' | 'PM'>(parseInt(booking.time) >= 12 ? 'PM' : 'AM');
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [checkingTimes, setCheckingTimes] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState('');
 
   const amHours = [6, 7, 8, 9, 10, 11];
   const pmHours = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
   const hours = period === 'AM' ? amHours : pmHours;
   const fmt12 = (h: number) => `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
+  const durationHours = Math.max(1, Number(booking.duration || 1));
+  const courtId = String(booking.courtId || booking.court_id || booking.court || '');
+  const addHoursToTime = (time: string, hoursToAdd: number) => {
+    const [h = 0, m = 0] = time.split(':').map(Number);
+    return `${String(h + hoursToAdd).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    let active = true;
+    const loadAvailableTimes = async () => {
+      if (!newDate || !courtId) {
+        setAvailableTimes([]);
+        setAvailabilityError('Unable to verify this court. Please reschedule from My Bookings.');
+        return;
+      }
+
+      setCheckingTimes(true);
+      setAvailabilityError('');
+      const allHours = [...amHours, ...pmHours].filter((h) => h + durationHours <= 23);
+      try {
+        const checked = await Promise.all(allHours.map(async (h) => {
+          const start = `${String(h).padStart(2, '0')}:00`;
+          const end = addHoursToTime(start, durationHours);
+          const available = await checkAvailability(courtId, newDate, start, end, booking.id);
+          return available ? start : null;
+        }));
+        if (!active) return;
+        const next = checked.filter(Boolean) as string[];
+        setAvailableTimes(next);
+        if (newTime && !next.includes(newTime)) setAvailabilityError('That time is already booked or reserved.');
+      } catch {
+        if (active) {
+          setAvailableTimes([]);
+          setAvailabilityError('Unable to verify availability right now.');
+        }
+      } finally {
+        if (active) setCheckingTimes(false);
+      }
+    };
+
+    void loadAvailableTimes();
+    return () => { active = false; };
+  }, [newDate, courtId, durationHours, booking.id]);
+
+  const selectedTimeAvailable = !!newTime && availableTimes.includes(newTime);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -402,25 +452,32 @@ function RescheduleDialog({ booking, onClose, onConfirm }: {
           {hours.map(h => {
             const tStr = `${String(h).padStart(2,'0')}:00`;
             const isSelected = tStr === newTime;
+            const isAvailable = availableTimes.includes(tStr);
             return (
-              <button key={h} onClick={() => setNewTime(tStr)}
-                className="py-3 rounded-xl font-black transition-all"
-                style={{ fontSize: 15, background: isSelected ? '#FF8C00' : 'rgba(255,255,255,0.06)', color: isSelected ? 'white' : '#bbb', border: `1px solid ${isSelected ? '#FF8C00' : 'rgba(255,255,255,0.08)'}`, boxShadow: isSelected ? '0 4px 12px rgba(255,140,0,0.3)' : 'none' }}>
+              <button key={h} onClick={() => isAvailable && setNewTime(tStr)} disabled={checkingTimes || !isAvailable}
+                className="py-3 rounded-xl font-black transition-all disabled:cursor-not-allowed"
+                style={{ fontSize: 15, background: isSelected ? '#FF8C00' : isAvailable ? 'rgba(255,255,255,0.06)' : 'rgba(239,68,68,0.08)', color: isSelected ? 'white' : isAvailable ? '#bbb' : '#7f1d1d', border: `1px solid ${isSelected ? '#FF8C00' : isAvailable ? 'rgba(255,255,255,0.08)' : 'rgba(239,68,68,0.22)'}`, boxShadow: isSelected ? '0 4px 12px rgba(255,140,0,0.3)' : 'none', opacity: checkingTimes || !isAvailable ? 0.55 : 1 }}>
                 {h % 12 || 12}
               </button>
             );
           })}
         </div>
 
+        {(checkingTimes || availabilityError) && (
+          <p className="text-center font-black mb-3" style={{ fontSize: 12, color: checkingTimes ? '#94a3b8' : '#f87171' }}>
+            {checkingTimes ? 'Checking booked and reserved slots...' : availabilityError}
+          </p>
+        )}
+
         {newDate && newTime && (
           <p className="text-center font-black mb-4" style={{ fontSize: 13, color: '#FF8C00' }}>
-            New slot: {new Date(newDate + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })} at {fmt12(parseInt(newTime))}
+            New slot: {new Date(newDate + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })} at {fmt12(parseInt(newTime))} - {fmt12(parseInt(addHoursToTime(newTime, durationHours)))}
           </p>
         )}
 
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-3 rounded-xl font-black text-gray-400 border border-white/10" style={{ fontSize: 14 }}>Cancel</button>
-          <button onClick={() => onConfirm(newDate, newTime)} disabled={!newDate || !newTime}
+          <button onClick={() => selectedTimeAvailable && onConfirm(newDate, newTime)} disabled={!newDate || !newTime || checkingTimes || !selectedTimeAvailable}
             className="flex-1 py-3 rounded-xl text-white font-black transition-all disabled:opacity-40"
             style={{ fontSize: 14, background: 'linear-gradient(135deg,#FF8C00,#e67e00)' }}>
             Confirm Reschedule
