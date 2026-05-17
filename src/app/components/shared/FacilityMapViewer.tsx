@@ -437,6 +437,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   const refCode = useRef(genRefCode());
   const [qrDownloadBusy, setQrDownloadBusy] = useState(false);
   const [useLoyaltyReward, setUseLoyaltyReward] = useState(false);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
 
   /* Derived */
   const bookedRanges = useMemo(() => courtBookings
@@ -526,6 +527,12 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
   };
   const goPrev = () => { setError(''); setStep(s => Math.max(0, s - 1)); };
 
+  useEffect(() => {
+    window.setTimeout(() => {
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 40);
+  }, [step]);
+
   const formatDate = (d: string) => {
     if (!d) return { label: '—', rateType: '' };
     const dt = new Date(d + 'T00:00:00');
@@ -570,13 +577,6 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
             </div>
           );
         })}
-        {canUseLoyaltyReward && isReview && (
-          <LoyaltyRewardToggle
-            active={useLoyaltyReward}
-            onToggle={() => setUseLoyaltyReward((next) => !next)}
-            discountAmount={calcLoyaltyCourtDiscount(loyaltyDiscountBase, true)}
-          />
-        )}
         <AnimatePresence>
           {loyaltyDiscount > 0 && (
             <motion.div
@@ -591,6 +591,13 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
             </motion.div>
           )}
         </AnimatePresence>
+        {canUseLoyaltyReward && isReview && (
+          <LoyaltyRewardToggle
+            active={useLoyaltyReward}
+            onToggle={() => setUseLoyaltyReward((next) => !next)}
+            discountAmount={calcLoyaltyCourtDiscount(loyaltyDiscountBase, true)}
+          />
+        )}
         <div className="border-t border-white/8 pt-1.5 flex justify-between items-end">
           <span className="text-white font-black" style={{ fontSize: 13 }}>TOTAL</span>
           <span className="font-black" style={{ fontSize: 20, color: accentColor }}>{'\u20B1'}{total.toLocaleString()}</span>
@@ -651,7 +658,7 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5" style={{ scrollbarWidth: 'none' }}>
+        <div ref={modalBodyRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-5" style={{ scrollbarWidth: 'none' }}>
 
           {/* ── Done ── */}
           {isDone && (
@@ -999,6 +1006,8 @@ function BookingModal({ courtName, sport, mode, courtBookings, onClose, onConfir
                     ref_code: refCode.current,
                     facility_map_id: facilityMapId ?? undefined,
                     user_id: user?.id,
+                    loyalty_points_redeemed: useLoyaltyReward ? LOYALTY_REWARD_THRESHOLD : 0,
+                    loyalty_discount: loyaltyDiscount,
                   }}
                   onCancel={goPrev}
                   pendingCoachingLink={

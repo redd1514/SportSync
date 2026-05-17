@@ -6,6 +6,7 @@ import bookingsRouter from './routes/bookings.ts';
 import coachesRouter from './routes/coaches.ts';
 import coachingSessionsRouter from './routes/coachingSessions.ts';
 import { coachService } from './services/coachService.ts';
+import { coachingSessionService } from './services/coachingSessionService.ts';
 import paymentsRouter from './routes/payments.ts';
 import usersRouter from './routes/users.ts';
 import adminRouter from './routes/admin.ts';

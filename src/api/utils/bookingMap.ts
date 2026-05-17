@@ -3,9 +3,20 @@ export type BookingNotesPayload = {
   customerName?: string;
   customerPhone?: string;
   sport?: string;
+  court?: string;
   addOns?: string;
   source?: string;
   paymentMethod?: string;
+  downpaymentPercentage?: number;
+  downpaymentAmount?: number;
+  totalPrice?: number;
+  balanceDue?: number;
+  downpaymentPaid?: boolean;
+  coachId?: string;
+  coachName?: string;
+  coachFee?: number;
+  courtAmount?: number;
+  totalDue?: number;
   /** Facility map editor id when booking came from a specific published map */
   facilityMapId?: string;
 };
@@ -73,6 +84,10 @@ export function mapBookingRowToAdmin(row: {
   time: string;
   duration: number;
   amount: number;
+  totalAmount: number;
+  downpaymentAmount?: number;
+  downpaymentPercentage?: number;
+  balanceDue?: number;
   status: string;
   paymentStatus: string;
   checkInStatus: 'none' | 'checked_in';
@@ -101,6 +116,15 @@ export function mapBookingRowToAdmin(row: {
   const checkedIn = row.status === 'checked_in';
   const checkedOut = row.status === 'completed';
   const downpaymentPaid = meta.downpaymentPaid === true;
+  const totalAmount = Number(meta.totalPrice ?? row.total_price ?? 0);
+  const downpaymentAmount =
+    meta.downpaymentAmount != null ? Number(meta.downpaymentAmount) : undefined;
+  const balanceDue =
+    meta.balanceDue != null
+      ? Number(meta.balanceDue)
+      : downpaymentAmount != null
+        ? Math.max(0, totalAmount - downpaymentAmount)
+        : undefined;
   const uiStatus:
     | 'pending_payment'
     | 'pending_verification'
@@ -130,7 +154,12 @@ export function mapBookingRowToAdmin(row: {
     date: normalizeManilaDateKey(row.booking_date),
     time: start,
     duration,
-    amount: Number(row.total_price ?? 0),
+    amount: totalAmount,
+    totalAmount,
+    downpaymentAmount,
+    downpaymentPercentage:
+      meta.downpaymentPercentage != null ? Number(meta.downpaymentPercentage) : undefined,
+    balanceDue,
     status: uiStatus,
     paymentStatus: checkedIn || checkedOut || downpaymentPaid ? 'paid' : 'pending',
     checkInStatus: checkedIn ? 'checked_in' : 'none',
@@ -156,6 +185,10 @@ export function deskAdminRowToClientBooking(a: ReturnType<typeof mapBookingRowTo
     court: a.court,
     status: a.status as any,
     amount: a.amount,
+    totalAmount: a.totalAmount,
+    downpaymentAmount: a.downpaymentAmount,
+    downpaymentPercentage: a.downpaymentPercentage,
+    balanceDue: a.balanceDue,
     paymentStatus: a.paymentStatus as any,
     createdAt: a.createdAt,
     customerName: a.customerName,

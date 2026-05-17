@@ -13,6 +13,29 @@ function defaultEndTimeFromStart(start: string): string {
   return `${pad(nh)}:${pad(m)}:${pad(s)}`;
 }
 
+function addHoursToTime(start: string, hours: number): string {
+  const parts = String(start || '09:00:00').split(':').map((p) => parseInt(p, 10));
+  const h = Number.isFinite(parts[0]) ? parts[0] : 9;
+  const m = Number.isFinite(parts[1]) ? parts[1] : 0;
+  const s = Number.isFinite(parts[2]) ? parts[2] : 0;
+  const totalSeconds = h * 3600 + m * 60 + s + Math.round(Math.max(1, hours || 1) * 3600);
+  const wrapped = ((totalSeconds % 86400) + 86400) % 86400;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(wrapped / 3600))}:${pad(Math.floor((wrapped % 3600) / 60))}:${pad(wrapped % 60)}`;
+}
+
+function durationHoursFromTimes(start?: string | null, end?: string | null): number | undefined {
+  const parse = (value?: string | null) => {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return undefined;
+    return Number(match[1]) * 60 + Number(match[2]);
+  };
+  const startMin = parse(start);
+  const endMin = parse(end);
+  if (startMin == null || endMin == null || endMin <= startMin) return undefined;
+  return (endMin - startMin) / 60;
+}
+
 /** DB has `notes` only — store proof URL + linked booking id in notes (same shape as updateSessionStatus). */
 function notesFromProofAndLinked(paymentProofUrl?: string, linkedBookingId?: string): string | undefined {
   const parts: string[] = [];
@@ -26,8 +49,45 @@ function linkedBookingIdFromNotes(notes?: string | null): string | undefined {
   return match?.[1];
 }
 
+function linkedBookingIdFromAdminNotes(adminNotes?: string | null): string | undefined {
+  const matches = [...String(adminNotes || '').matchAll(/COACHING_ACCEPTANCE:(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const latest = matches[matches.length - 1]?.[1];
+  if (!latest) return undefined;
+  try {
+    const parsed = JSON.parse(latest) as Record<string, unknown>;
+    return typeof parsed.linkedBookingId === 'string' ? parsed.linkedBookingId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isValidUuid(value: string | undefined | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+function parseLatestRescheduleProposal(adminNotes?: string | null): {
+  requestedDate: string;
+  requestedTime: string;
+  requestedEndTime?: string;
+  reason?: string;
+} | null {
+  const matches = [...String(adminNotes || '').matchAll(/COACHING_RESCHEDULE_PROPOSED:(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const latest = matches[matches.length - 1]?.[1];
+  if (!latest) return null;
+  try {
+    const parsed = JSON.parse(latest) as Record<string, unknown>;
+    const requestedDate = typeof parsed.requestedDate === 'string' ? parsed.requestedDate : '';
+    const requestedTime = typeof parsed.requestedTime === 'string' ? parsed.requestedTime : '';
+    if (!requestedDate || !requestedTime) return null;
+    return {
+      requestedDate,
+      requestedTime,
+      requestedEndTime: typeof parsed.requestedEndTime === 'string' ? parsed.requestedEndTime : undefined,
+      reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function notifyUser(userId: string | undefined, eventType: string, title: string, message: string, extra?: Record<string, unknown>) {
@@ -48,7 +108,7 @@ export type CoachingSessionPayload = {
   start_time: string;
   end_time?: string;
   duration_hours?: number;
-  status?: 'pending' | 'pending_verification' | 'confirmed' | 'rejected';
+  status?: 'pending' | 'pending_verification' | 'confirmed' | 'approved' | 'rejected' | 'cancelled' | 'completed';
   payment_proof_url?: string;
   linked_booking_id?: string;
 };
@@ -169,6 +229,38 @@ export const coachingSessionService = {
   async createSession(input: CoachingSessionPayload): Promise<CoachingSessionRow> {
     const user_id = await resolveUserRowId(String(input.user_id));
     const coach_id = String(input.coach_id).trim();
+    const requestedStatus = String(input.status || 'pending');
+    const dbStatus =
+      requestedStatus === 'confirmed' || requestedStatus === 'approved' || requestedStatus === 'completed'
+        ? 'approved'
+        : requestedStatus === 'cancelled'
+          ? 'cancelled'
+          : requestedStatus === 'rejected'
+            ? 'rejected'
+            : 'pending';
+
+    if (input.linked_booking_id) {
+      const linked = String(input.linked_booking_id).trim();
+      const { data: existingLinked, error: linkedErr } = await supabase
+        .from('coaching_sessions')
+        .select('*')
+        .ilike('notes', `%linked_booking:${linked}%`)
+        .limit(1);
+      if (linkedErr) throw linkedErr;
+      if (existingLinked?.[0]) {
+        if (dbStatus === 'approved' && existingLinked[0].status !== 'approved') {
+          const { data: updated, error: updateErr } = await supabase
+            .from('coaching_sessions')
+            .update({ status: 'approved', updated_at: new Date().toISOString() })
+            .eq('id', existingLinked[0].id)
+            .select('*')
+            .single();
+          if (updateErr) throw updateErr;
+          return updated as CoachingSessionRow;
+        }
+        return existingLinked[0] as CoachingSessionRow;
+      }
+    }
 
     const { data: activePending, error: pendingErr } = await supabase
       .from('coaching_sessions')
@@ -192,7 +284,13 @@ export const coachingSessionService = {
       throw new Error(`Invalid coach_id: no coach row for ${coach_id}`);
     }
 
-    const end_time = (input.end_time && String(input.end_time).trim()) || defaultEndTimeFromStart(input.start_time);
+    const inputEndTime = input.end_time && String(input.end_time).trim();
+    const end_time =
+      inputEndTime && inputEndTime !== 'undefined'
+        ? inputEndTime
+        : input.duration_hours && Number(input.duration_hours) > 0
+          ? addHoursToTime(input.start_time, Number(input.duration_hours))
+          : defaultEndTimeFromStart(input.start_time);
 
     // If sport_id is not provided, get it from coach_specializations
     let sportId = input.sport_id;
@@ -221,6 +319,7 @@ export const coachingSessionService = {
     }
 
     const notes = notesFromProofAndLinked(input.payment_proof_url, input.linked_booking_id);
+
     const insertRow: Record<string, unknown> = {
       user_id,
       coach_id,
@@ -228,7 +327,7 @@ export const coachingSessionService = {
       session_date: input.session_date,
       start_time: input.start_time,
       end_time,
-      status: input.status || 'pending',
+      status: dbStatus,
     };
     if (notes) insertRow.notes = notes;
 
@@ -247,9 +346,11 @@ export const coachingSessionService = {
     await notifyUser(
       coachOwnerRow?.user_id,
       'coaching_request_created',
-      'New coaching request',
-      'A student requested a coaching session. Open My Coaching to review and reserve a court.',
-      { sessionId: data.id, studentId: user_id, sessionDate: input.session_date, startTime: input.start_time },
+      dbStatus === 'approved' ? 'New paid coaching session' : 'New coaching request',
+      dbStatus === 'approved'
+        ? 'A student paid the downpayment for an available coaching slot. The session is already accepted; request a reschedule only if you cannot attend.'
+        : 'A student requested a coaching session. Open My Coaching to review the details.',
+      { sessionId: data.id, studentId: user_id, sessionDate: input.session_date, startTime: input.start_time, status: dbStatus },
     );
     
     return data as CoachingSessionRow;
@@ -274,6 +375,10 @@ export const coachingSessionService = {
     if (extraNotes) update.notes = extraNotes;
 
     const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
+    if (typeof update.start_time === 'string' && update.end_time === undefined) {
+      const preservedDuration = durationHoursFromTimes(oldData?.start_time, oldData?.end_time) || 1;
+      update.end_time = addHoursToTime(String(update.start_time), preservedDuration);
+    }
     const { data, error } = await supabase.from('coaching_sessions').update(update).eq('id', id).select('*').single();
 
     if (error) throw error;
@@ -326,9 +431,19 @@ export const coachingSessionService = {
     }
 
     const update: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
+    const acceptedReschedule = /COACHING_RESCHEDULE_ACCEPTED/i.test(String(nextAdminNotes || ''));
+    const acceptedProposal = acceptedReschedule ? parseLatestRescheduleProposal(nextAdminNotes) : null;
+    const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
+    if (acceptedProposal) {
+      const preservedDuration =
+        durationHoursFromTimes(oldData?.start_time, oldData?.end_time) ||
+        1;
+      update.session_date = acceptedProposal.requestedDate;
+      update.start_time = acceptedProposal.requestedTime;
+      update.end_time = acceptedProposal.requestedEndTime || addHoursToTime(acceptedProposal.requestedTime, preservedDuration);
+    }
     if (nextAdminNotes !== undefined) update.admin_notes = nextAdminNotes;
     
-    const { data: oldData } = await supabase.from('coaching_sessions').select('*').eq('id', id).single();
     const { data, error } = await supabase
       .from('coaching_sessions')
       .update(update)
@@ -341,19 +456,74 @@ export const coachingSessionService = {
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
 
-    const linkedBookingId = linkedBookingIdFromNotes(data?.notes || oldData?.notes);
+    const linkedBookingId =
+      linkedBookingIdFromNotes(data?.notes || oldData?.notes) ||
+      linkedBookingIdFromAdminNotes(data?.admin_notes || oldData?.admin_notes);
+    const checkedIn = /COACHING_CHECKED_IN|checked_in:/i.test(String(nextAdminNotes || data?.admin_notes || ''));
+    const rescheduleRequested = /COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(String(nextAdminNotes || data?.admin_notes || ''));
     if (dbStatus === 'approved') {
       if (linkedBookingId) {
         const linkedStatus = status === 'completed'
           ? 'completed'
-          : /COACHING_CHECKED_IN|checked_in:/i.test(String(nextAdminNotes || data?.admin_notes || ''))
+          : checkedIn
             ? 'checked_in'
             : 'confirmed';
         await supabase
           .from('bookings')
-          .update({ status: linkedStatus, updated_at: new Date().toISOString() })
+          .update({
+            status: linkedStatus,
+            ...(acceptedProposal ? {
+              booking_date: acceptedProposal.requestedDate,
+              start_time: acceptedProposal.requestedTime,
+              end_time: String(update.end_time || acceptedProposal.requestedEndTime || oldData?.end_time || data?.end_time),
+            } : {}),
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', linkedBookingId)
-          .in('status', ['pending', 'confirmed', 'pending_verification', 'checked_in']);
+          .in('status', ['pending', 'pending_payment', 'confirmed', 'pending_verification', 'checked_in', 'rescheduled']);
+      }
+      if (linkedBookingId && checkedIn && isValidUuid(staffId) && !/checked_in:/i.test(String(oldData?.admin_notes || ''))) {
+        await supabase.from('staff_operations').insert({
+          staff_id: staffId,
+          booking_id: linkedBookingId,
+          action: 'coaching_check_in',
+          notes: `Coaching session checked in at ${new Date().toISOString()}`,
+        });
+      }
+      if (rescheduleRequested && !/COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(String(oldData?.admin_notes || ''))) {
+        const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', data?.coach_id).maybeSingle();
+        if (linkedBookingId) {
+          await supabase.from('staff_operations').insert({
+            staff_id: isValidUuid(coachRow?.user_id) ? coachRow?.user_id : null,
+            booking_id: linkedBookingId,
+            action: 'coaching_reschedule_requested',
+            notes: `Coach requested reschedule for coaching session ${data.id} at ${new Date().toISOString()}`,
+          });
+        }
+        await notifyUser(
+          data?.user_id,
+          'coaching_reschedule_requested',
+          'Coach requested a reschedule',
+          'Your paid coaching ticket remains active. The front desk will help coordinate a new schedule or process the refund path if no suitable slot is available.',
+          { sessionId: data.id, status: 'reschedule_requested', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+        await notifyUser(
+          coachRow?.user_id,
+          'coaching_reschedule_requested_coach',
+          'Reschedule request sent',
+          'The student and front desk were notified. Keep the ticket active until staff confirms a new slot or refund handling.',
+          { sessionId: data.id, status: 'reschedule_requested', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+      }
+      if (acceptedReschedule && !/COACHING_RESCHEDULE_ACCEPTED/i.test(String(oldData?.admin_notes || ''))) {
+        const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', data?.coach_id).maybeSingle();
+        await notifyUser(
+          coachRow?.user_id,
+          'coaching_reschedule_accepted_coach',
+          'Student accepted the new schedule',
+          'The coaching ticket and linked booking have been moved to the proposed schedule.',
+          { sessionId: data.id, status: 'confirmed', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
       }
       if (oldData?.status !== 'approved') {
         const { data: coachRow } = await supabase.from('coaches').select('name, user_id').eq('id', data?.coach_id).maybeSingle();
@@ -366,15 +536,15 @@ export const coachingSessionService = {
         await notifyUser(
           data?.user_id,
           'coaching_request_approved',
-          'Coach accepted your session',
-          `Your coach accepted your session at ${facilityName}. Please pay at the front desk before check-in.`,
+          'Coaching booking confirmed',
+          `Your downpayment confirmed the coaching session at ${facilityName}. Please present your ticket and settle the remaining balance at the front desk before check-in.`,
           { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
         );
         await notifyUser(
           coachRow?.user_id,
           'coaching_request_approved_coach',
-          'Session accepted',
-          `You accepted the coaching session at ${facilityName}. Please wait for the student to pay at the front desk.`,
+          'Paid coaching session confirmed',
+          `A student paid the downpayment for your available slot at ${facilityName}. Request a reschedule only if you cannot attend.`,
           { sessionId: data.id, status: dbStatus, linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
         );
       }

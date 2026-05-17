@@ -23,6 +23,7 @@ interface AnnouncementsContextType {
   error: string | null;
   refresh: () => Promise<void>;
   clearAnnouncements: () => Promise<void>;
+  clearAnnouncement: (id: string) => Promise<void>;
   clearUserNotifications: () => Promise<void>;
 }
 
@@ -268,6 +269,22 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
     setAnnouncements([]);
   };
 
+  const clearAnnouncement = async (id: string) => {
+    if (id.startsWith('notif:')) {
+      setAnnouncements(prev => {
+        const next = prev.filter(a => a.id !== id);
+        clearedLocalIdsRef.current.add(id);
+        persistClearedIds(clearedLocalIdsRef.current);
+        return next;
+      });
+      return;
+    }
+    try {
+      await apiFetch(`/api/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (e) {}
+    setAnnouncements(prev => prev.filter(a => a.id !== id));
+  };
+
   const clearUserNotifications = async () => {
     if (!user?.id) {
       setAnnouncements(prev => {
@@ -291,7 +308,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const undismissedCount = useMemo(() => announcements.filter(a => !a.dismissed).length, [announcements]);
 
   return (
-    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, clearAnnouncements, clearUserNotifications, undismissedCount, isLoading, error, refresh }}>
+    <AnnouncementsContext.Provider value={{ announcements, addAnnouncement, dismissAnnouncement, clearAnnouncements, clearAnnouncement, clearUserNotifications, undismissedCount, isLoading, error, refresh }}>
       {children}
     </AnnouncementsContext.Provider>
   );

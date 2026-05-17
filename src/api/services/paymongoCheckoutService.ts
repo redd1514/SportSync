@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient.ts';
 import { findUserRow, isUuid } from './userRowQuery.ts';
 import { isCourtSlotAvailable } from './deskBookingService.ts';
+import { coachingSessionService } from './coachingSessionService.ts';
 
 export type CheckoutInput = {
   court: string;
@@ -15,9 +16,17 @@ export type CheckoutInput = {
   ref_code?: string;
   facility_map_id?: string | null;
   downpayment_percentage?: number;
+  loyalty_points_redeemed?: number;
+  loyalty_discount?: number;
   success_url?: string;
   cancel_url?: string;
   source?: string;
+  coach_id?: string;
+  coach_name?: string;
+  coaching_student_id?: string;
+  coach_fee?: number;
+  court_amount?: number;
+  total_due?: number;
 };
 
 function pad2(n: number) {
@@ -50,6 +59,17 @@ function endTimeFromStartAndDuration(startHms: string, durationHours: number): s
 
 function genRefCode(): string {
   return `JRC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+function appendQueryParam(url: string, key: string, value: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set(key, value);
+    return u.toString();
+  } catch {
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+  }
 }
 
 async function resolveUserRowId(userId: string): Promise<string> {
@@ -103,9 +123,17 @@ export async function createPaymongoCourtCheckout(
     ref_code,
     facility_map_id,
     downpayment_percentage = 50,
+    loyalty_points_redeemed = 0,
+    loyalty_discount = 0,
     success_url,
     cancel_url,
     source = 'online_paymongo',
+    coach_id,
+    coach_name,
+    coaching_student_id,
+    coach_fee,
+    court_amount,
+    total_due,
   } = input;
 
   if (!court || !sport || !booking_date || !start_time) {
@@ -133,6 +161,14 @@ export async function createPaymongoCourtCheckout(
   }
 
   const ref = (ref_code || genRefCode()).toUpperCase();
+  const loyaltyPointsRedeemed = Math.max(0, Number(loyalty_points_redeemed || 0));
+  const loyaltyDiscount = Math.max(0, Number(loyalty_discount || 0));
+  if (loyaltyPointsRedeemed > 0) {
+    const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+    if (Number(u?.loyalty_points || 0) < loyaltyPointsRedeemed) {
+      throw new Error('Not enough loyalty points for this reward.');
+    }
+  }
   const pct = Math.min(100, Math.max(1, Number(downpayment_percentage) || 50));
   const downpaymentAmount = Math.round((total * pct) / 100 * 100) / 100;
   const amountCentavos = Math.round(downpaymentAmount * 100);
@@ -153,6 +189,14 @@ export async function createPaymongoCourtCheckout(
     downpaymentAmount,
     totalPrice: total,
     balanceDue: Math.round((total - downpaymentAmount) * 100) / 100,
+    ...(loyaltyPointsRedeemed > 0 ? { loyaltyPointsRedeemed, loyaltyDiscount } : {}),
+    ...(coach_id ? {
+      coachId: String(coach_id),
+      coachName: String(coach_name || '').trim(),
+      coachFee: Math.max(0, Number(coach_fee || 0)),
+      courtAmount: Math.max(0, Number(court_amount ?? total - Number(coach_fee || 0))),
+      totalDue: Math.max(0, Number(total_due ?? total)),
+    } : {}),
     ...(facility_map_id ? { facilityMapId: facility_map_id } : {}),
   });
 
@@ -177,6 +221,20 @@ export async function createPaymongoCourtCheckout(
 
   const bookingId = booking!.id as string;
 
+  if (loyaltyPointsRedeemed > 0) {
+    await supabase.from('loyalty_transactions').insert({
+      user_id: resolvedUserId,
+      points_change: -loyaltyPointsRedeemed,
+      transaction_type: 'redemption',
+      reference_id: bookingId,
+    });
+    const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+    await supabase
+      .from('users')
+      .update({ loyalty_points: Math.max(0, Number(u?.loyalty_points || 0) - loyaltyPointsRedeemed) })
+      .eq('id', resolvedUserId);
+  }
+
   const { data: paymentRow, error: paymentErr } = await supabase
     .from('payments')
     .insert({
@@ -191,14 +249,24 @@ export async function createPaymongoCourtCheckout(
     .single();
 
   if (paymentErr) {
+    if (loyaltyPointsRedeemed > 0) {
+      const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+      await supabase.from('users').update({ loyalty_points: Number(u?.loyalty_points || 0) + loyaltyPointsRedeemed }).eq('id', resolvedUserId);
+      await supabase.from('loyalty_transactions').insert({
+        user_id: resolvedUserId,
+        points_change: loyaltyPointsRedeemed,
+        transaction_type: 'redemption_refund',
+        reference_id: bookingId,
+      });
+    }
     await supabase.from('bookings').delete().eq('id', bookingId);
     throw new Error(paymentErr.message);
   }
 
   const paymentId = paymentRow!.id as string;
   const appOrigin = process.env.APP_URL || 'http://localhost:5173';
-  const baseSuccess = success_url || `${appOrigin}/?payment=success&booking_id=${bookingId}`;
-  const baseCancel = cancel_url || `${appOrigin}/?payment=cancelled&booking_id=${bookingId}`;
+  const baseSuccess = appendQueryParam(success_url || `${appOrigin}/?payment=success`, 'booking_id', bookingId);
+  const baseCancel = appendQueryParam(cancel_url || `${appOrigin}/?payment=cancelled`, 'booking_id', bookingId);
 
   const billingEmail = (authEmail || '').trim() || 'customer@sportsync.local';
 
@@ -252,6 +320,16 @@ export async function createPaymongoCourtCheckout(
   };
 
   if (!pmRes.ok) {
+    if (loyaltyPointsRedeemed > 0) {
+      const { data: u } = await supabase.from('users').select('loyalty_points').eq('id', resolvedUserId).maybeSingle();
+      await supabase.from('users').update({ loyalty_points: Number(u?.loyalty_points || 0) + loyaltyPointsRedeemed }).eq('id', resolvedUserId);
+      await supabase.from('loyalty_transactions').insert({
+        user_id: resolvedUserId,
+        points_change: loyaltyPointsRedeemed,
+        transaction_type: 'redemption_refund',
+        reference_id: bookingId,
+      });
+    }
     await supabase.from('payments').delete().eq('id', paymentId);
     await supabase.from('bookings').delete().eq('id', bookingId);
     const errMsg =
@@ -278,10 +356,39 @@ export async function createPaymongoCourtCheckout(
     })
     .eq('id', paymentId);
 
+  let coachingSessionId: string | undefined;
+  if (coach_id) {
+    const coachFee = Math.max(0, Number(coach_fee || 0));
+    const courtAmount = Math.max(0, Number(court_amount ?? total - coachFee));
+    const totalDue = Math.max(0, Number(total_due ?? total));
+    const proof = `COACHING_BOOKING:${JSON.stringify({
+      linkedBookingId: bookingId,
+      court,
+      courtAmount,
+      coachFee,
+      totalDue,
+      paidBy: 'student',
+      bookingQr: ref,
+    })}`;
+    const session = await coachingSessionService.createSession({
+      coach_id: String(coach_id),
+      user_id: String(coaching_student_id || resolvedUserId),
+      sport_id: undefined,
+      session_date: booking_date,
+      start_time: startNorm,
+      end_time: endNorm,
+      status: 'pending',
+      linked_booking_id: bookingId,
+      payment_proof_url: proof,
+    });
+    coachingSessionId = session.id;
+  }
+
   return {
     checkoutUrl,
     bookingId,
     paymentId,
+    coachingSessionId,
     refCode: ref,
     downpaymentAmount,
     totalPrice: total,

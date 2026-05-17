@@ -14,9 +14,15 @@ export type BookingTicketData = {
   court: string;
   date: string;
   time: string;
+  endTime?: string;
   duration: number;
   amount: number;
+  totalAmount?: number;
+  downpaymentAmount?: number;
+  downpaymentPercentage?: number;
+  balanceDue?: number;
   status?: string;
+  frontDeskInstructions?: string;
 };
 
 function formatTicketDate(date: string) {
@@ -26,6 +32,10 @@ function formatTicketDate(date: string) {
 
 function formatTicketTime(time: string) {
   if (!time) return '—';
+  if (time.includes('|')) {
+    const [start, end] = time.split('|');
+    return `${formatTicketTime(start)} - ${formatTicketTime(end)}`;
+  }
   const [h] = time.split(':').map(Number);
   return `${h % 12 || 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
 }
@@ -40,6 +50,16 @@ export function BookingTicketModal({
   const { scanValue, displayCode } = resolveBookingTicketToken(booking.refCode, booking.id);
   const color = getSportColor(booking.sport);
   const [downloading, setDownloading] = useState(false);
+  const totalAmount = Number(booking.totalAmount ?? booking.amount ?? 0);
+  const balanceSettled = /checked|ongoing|completed/i.test(String(booking.status || ''));
+  const downpaymentAmount =
+    booking.downpaymentAmount != null ? Number(booking.downpaymentAmount) : null;
+  const balanceDue =
+    booking.balanceDue != null
+      ? Number(booking.balanceDue)
+      : downpaymentAmount != null
+        ? Math.max(0, totalAmount - downpaymentAmount)
+        : null;
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -124,12 +144,32 @@ export function BookingTicketModal({
             </div>
             <div className="flex justify-between items-center gap-2">
               <span className="text-gray-500 font-bold uppercase flex-shrink-0" style={{ fontSize: 9, letterSpacing: 0.5 }}>
-                Amount
+                Total
               </span>
               <span className="font-black" style={{ fontSize: 13, color: '#FF8C00' }}>
-                ₱{(booking.amount || 0).toLocaleString()}
+                ₱{totalAmount.toLocaleString()}
               </span>
             </div>
+            {downpaymentAmount != null && (
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-gray-500 font-bold uppercase flex-shrink-0" style={{ fontSize: 9, letterSpacing: 0.5 }}>
+                  Downpayment paid
+                </span>
+                <span className="text-green-300 font-black" style={{ fontSize: 13 }}>
+                  ₱{downpaymentAmount.toLocaleString()}
+                </span>
+              </div>
+            )}
+            {balanceDue != null && (
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-gray-500 font-bold uppercase flex-shrink-0" style={{ fontSize: 9, letterSpacing: 0.5 }}>
+                  {balanceSettled ? 'Balance paid' : 'Balance due'}
+                </span>
+                <span className={`${balanceSettled ? 'text-green-300' : 'text-white'} font-black`} style={{ fontSize: 13 }}>
+                  {balanceSettled ? 'Paid' : `₱${balanceDue.toLocaleString()}`}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="relative flex items-center">
@@ -159,6 +199,13 @@ export function BookingTicketModal({
             </p>
           </div>
         </motion.div>
+
+        {booking.frontDeskInstructions && (
+          <div className="rounded-2xl border px-4 py-3" style={{ background: 'rgba(34,197,94,0.10)', borderColor: 'rgba(34,197,94,0.24)' }}>
+            <p className="text-green-300 font-black" style={{ fontSize: 12 }}>Front desk instructions</p>
+            <p className="mt-1 text-gray-300" style={{ fontSize: 11, lineHeight: 1.5 }}>{booking.frontDeskInstructions}</p>
+          </div>
+        )}
 
         <div className="flex gap-2 sm:gap-3 w-full">
           <button

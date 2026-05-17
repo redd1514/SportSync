@@ -52,6 +52,8 @@ export async function processPendingCoachingLink(bookingId: string): Promise<voi
       refCode?: string;
       acceptedBy?: string;
       bookingId?: string;
+      serverCreatedCoachingSessionId?: string;
+      court?: string;
     };
 
     if (pending.coachingSessionId) {
@@ -91,10 +93,11 @@ export async function processPendingCoachingLink(bookingId: string): Promise<voi
           session_date: sessionDate,
           start_time: `${startNorm}:00`,
           end_time: `${String(endHour).padStart(2, "0")}:00:00`,
-          status: "pending",
+          status: "confirmed",
           linked_booking_id: bookingId,
           payment_proof_url: `COACHING_BOOKING:${JSON.stringify({
             linkedBookingId: bookingId,
+            court: pending.court,
             courtAmount: pending.courtAmount,
             coachFee: pending.coachFee,
             totalDue: pending.totalDue,

@@ -197,6 +197,7 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
     const reason = String((body as any).reason || '').trim();
     const newDate = String((body as any).requested_new_date || '').trim();
     const newStart = String((body as any).requested_new_start_time || '').trim(); // "HH:MM"
+    const newEnd = String((body as any).requested_new_end_time || '').trim();
     if (!userId) return c.json({ error: 'user_id required' }, 400);
     if (!newDate || !newStart) return c.json({ error: 'requested_new_date and requested_new_start_time required' }, 400);
 
@@ -233,7 +234,11 @@ bookingsRouter.post('/:id/request-reschedule', async (c) => {
 
     const normalizedStart = newStart.length >= 5 ? newStart.slice(0, 5) : newStart;
     const requestedStart = `${normalizedStart}:00`;
-    const requestedEnd = addHoursToTime(requestedStart, durHours);
+    const requestedEnd = newEnd ? `${newEnd.slice(0, 5)}:00` : addHoursToTime(requestedStart, durHours);
+    const requestedDuration = (timeToMinutes(requestedEnd) - timeToMinutes(requestedStart)) / 60;
+    if (Math.abs(requestedDuration - durHours) > 0.01) {
+      return c.json({ error: `Reschedule must keep the original ${durHours}-hour duration.` }, 400);
+    }
     const openMin = 7 * 60;
     const closeMin = 23 * 60;
     if (timeToMinutes(requestedStart) < openMin || timeToMinutes(requestedEnd) > closeMin) {
@@ -324,6 +329,20 @@ bookingsRouter.delete('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await bookingService.cancelBooking(id);
+    const { data: linkedSessions } = await supabase
+      .from('coaching_sessions')
+      .select('id, admin_notes')
+      .ilike('notes', `%linked_booking:${id}%`);
+    for (const session of linkedSessions || []) {
+      await supabase
+        .from('coaching_sessions')
+        .update({
+          status: 'cancelled',
+          admin_notes: `${(session as any).admin_notes || ''}\nCOACHING_LINKED_BOOKING_CANCELLED\nlinked_booking_cancelled:${new Date().toISOString()}`.trim(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', (session as any).id);
+    }
 
     // Fetch and return the updated booking
     const { data, error } = await supabase

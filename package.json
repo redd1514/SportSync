@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:all": "npx concurrently -k -n api,web -c blue,green \"npm run api:dev\" \"npm run dev\"",
     "preview": "vite preview",
-    "api:dev": "node --import tsx src/api/index.ts",
+    "api:dev": "tsx watch src/api/index.ts",
     "api:start": "node dist/api/index.js"
   },
   "dependencies": {

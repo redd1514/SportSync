@@ -282,7 +282,7 @@ export function UserCoachingServices({ onNavigate }: { onNavigate: (tab: any, pa
       }
       return true;
     });
-  }, [coaches, selectedSport, showAvailableOnly, searchQuery, myCoachProfile]);
+  }, [coaches, selectedSport, showAvailableOnly, searchQuery]);
 
   const pendingRequest = useMemo(() => {
     if (!user?.id) return null;

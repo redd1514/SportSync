@@ -207,6 +207,12 @@ export const coachApplicationService = {
     if (!data) throw new Error('Application not found');
     if ((status === 'approved' || status === 'rejected') && data.applicant_user_id) {
       const row = data as CoachApplicationRow;
+      if (status === 'approved') {
+        await supabase
+          .from('users')
+          .update({ role: 'user', updated_at: new Date().toISOString() })
+          .eq('id', row.applicant_user_id);
+      }
       await RealtimeEventEmitter.notifyUser(String(row.applicant_user_id || ''), 'coach_application_update', {
         title: status === 'approved' ? 'Coach application approved' : 'Coach application declined',
         message: status === 'approved'

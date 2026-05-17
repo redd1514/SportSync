@@ -29,6 +29,10 @@ export interface Booking {
   court: string;
   status: "pending_payment" | "pending_verification" | "confirmed" | "checked_in" | "cancelled" | "rescheduled" | "completed" | "rejected";
   amount: number;
+  totalAmount?: number;
+  downpaymentAmount?: number;
+  downpaymentPercentage?: number;
+  balanceDue?: number;
   paymentStatus: "paid" | "pending" | "pending_verification" | "rejected";
   paymentProofUrl?: string;
   createdAt: string;
@@ -177,6 +181,7 @@ interface UserContextType {
   clearAuthFlow: () => void;
   refreshBookingsFromApi: () => Promise<void>;
   paymentFlash: string | null;
+  showPaymentFlash: (message: string) => void;
   clearPaymentFlash: () => void;
 }
 
@@ -212,6 +217,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [paymentFlash, setPaymentFlash] = useState<string | null>(null);
+  const previousLoyaltyPointsRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,6 +322,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       court: booking.court || booking.court_id || '',
       status: uiStatus,
       amount: booking.amount || booking.total_price || 0,
+      totalAmount: booking.totalAmount || booking.total_amount || booking.total_price || booking.amount || 0,
+      downpaymentAmount: booking.downpaymentAmount || booking.downpayment_amount,
+      downpaymentPercentage: booking.downpaymentPercentage || booking.downpayment_percentage,
+      balanceDue: booking.balanceDue || booking.balance_due,
       paymentStatus: checkedIn || completed ? 'paid' : (booking.paymentStatus || booking.payment_status || 'pending'),
       paymentProofUrl: booking.paymentProofUrl || booking.payment_proof_url,
       createdAt: booking.createdAt || booking.created_at || new Date().toISOString(),
@@ -380,6 +390,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshBookingsFromApi = useCallback(async () => {
+    if (user?.id && user.role !== "admin" && user.role !== "staff") {
+      const ownBookings = await loadBookingsForUser(user.id);
+      setBookings(ownBookings);
+      return;
+    }
+
     const start = new Date();
     start.setDate(start.getDate() - 14);
     const end = new Date();
@@ -407,24 +423,97 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.error("[UserContext] refreshBookingsFromApi", e);
       setBookings([]);
     }
-  }, []);
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !user?.id) return;
+    const onRefresh = () => {
+      void refreshBookingsFromApi();
+    };
+    const onVisibleRefresh = () => {
+      if (document.visibilityState === "visible") onRefresh();
+    };
+    window.addEventListener("sportsync:bookings-refresh", onRefresh);
+    window.addEventListener("sportsync:notifications-refresh", onRefresh);
+    window.addEventListener("sportsync:coaching-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    document.addEventListener("visibilitychange", onVisibleRefresh);
+    return () => {
+      window.removeEventListener("sportsync:bookings-refresh", onRefresh);
+      window.removeEventListener("sportsync:notifications-refresh", onRefresh);
+      window.removeEventListener("sportsync:coaching-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      document.removeEventListener("visibilitychange", onVisibleRefresh);
+    };
+  }, [user?.id, refreshBookingsFromApi]);
 
   useEffect(() => {
     const { status, bookingId } = readPaymentReturnFromUrl();
     if (!status) return;
+    if (status === "success" && bookingId && !user?.id) return;
     clearPaymentReturnFromUrl();
     void (async () => {
       if (status === "success") {
+        let belongsToCurrentUser = true;
+        if (bookingId && user?.id) {
+          try {
+            const res = await apiFetch(`/api/bookings/${encodeURIComponent(user.id)}`);
+            const rows = (await res.json().catch(() => [])) as Booking[];
+            belongsToCurrentUser = Array.isArray(rows) && rows.some((row) => String(row.id) === String(bookingId));
+          } catch {
+            belongsToCurrentUser = false;
+          }
+        }
         await refreshBookingsFromApi();
+        if (!belongsToCurrentUser) {
+          try {
+            window.sessionStorage.removeItem("sportsync_payment_return_receipt");
+            window.sessionStorage.removeItem("sportsync_payment_return_receipt_ready");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
         if (bookingId) await processPendingCoachingLink(bookingId);
-        setPaymentFlash("Downpayment received — your booking is confirmed. View it in My Bookings.");
+        const hasReturnReceipt =
+          typeof window !== "undefined" &&
+          !!window.sessionStorage.getItem("sportsync_payment_return_receipt");
+        if (hasReturnReceipt) {
+          window.sessionStorage.setItem("sportsync_payment_return_receipt_ready", "1");
+        } else {
+          setPaymentFlash("Downpayment received - your booking is confirmed. View it in My Bookings.");
+        }
+        if (user?.id) {
+          const freshLoyalty = await fetchAuthoritativeLoyaltyPoints(user.id, user.loyaltyPoints || 0);
+          setUser((prev) => prev && prev.id === user.id ? { ...prev, loyaltyPoints: freshLoyalty } : prev);
+        }
       } else {
-        setPaymentFlash("Payment was cancelled. Your slot was not charged — you can try again anytime.");
+        try {
+          window.sessionStorage.removeItem("sportsync_payment_return_receipt");
+          window.sessionStorage.removeItem("sportsync_payment_return_receipt_ready");
+        } catch {
+          /* ignore */
+        }
+        setPaymentFlash("Payment was cancelled. Your slot was not charged - you can try again anytime.");
       }
     })();
-  }, [refreshBookingsFromApi]);
+  }, [refreshBookingsFromApi, user?.id, user?.loyaltyPoints]);
 
+  const showPaymentFlash = useCallback((message: string) => setPaymentFlash(message), []);
   const clearPaymentFlash = useCallback(() => setPaymentFlash(null), []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      previousLoyaltyPointsRef.current = null;
+      return;
+    }
+    const previous = previousLoyaltyPointsRef.current;
+    const current = Number(user.loyaltyPoints || 0);
+    previousLoyaltyPointsRef.current = current;
+    if (previous == null || current <= previous) return;
+    const gained = current - previous;
+    setPaymentFlash(`+${gained} loyalty point${gained === 1 ? "" : "s"} earned. You now have ${current} pts.`);
+  }, [user?.id, user?.loyaltyPoints]);
 
   // 1. Listen for real Supabase sessions when the app loads
 useEffect(() => {
@@ -678,14 +767,28 @@ useEffect(() => {
 
   // 3. Real Supabase Sign Up
   const signUp = async (email: string, password: string, name: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
+    const normalizedEmail = email.trim().toLowerCase();
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/users/email-exists?email=${encodeURIComponent(normalizedEmail)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.exists) {
+        return { error: "An account with this email already exists. Please sign in instead." };
+      }
+    } catch {
+      /* Supabase will still enforce duplicate emails; this is a user-friendly precheck. */
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
       password,
       options: {
         data: { full_name: name },
         emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined
       }
     });
+    if (!error && data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      return { error: "An account with this email already exists. Please sign in instead." };
+    }
     return { error: error?.message || null };
   };
 
@@ -865,6 +968,7 @@ useEffect(() => {
       clearAuthFlow,
       refreshBookingsFromApi,
       paymentFlash,
+      showPaymentFlash,
       clearPaymentFlash,
     }}>
       {children}

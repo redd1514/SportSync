@@ -329,6 +329,13 @@ function TicketVerification() {
     time: string;
     endTime?: string;
     durationHours?: number;
+    courtName?: string;
+    courtAmount?: number;
+    coachFee?: number;
+    totalAmount?: number;
+    downpaymentAmount?: number;
+    downpaymentPercentage?: number;
+    balanceDue?: number;
     status: CoachingRequest['status'];
     adminNotes?: string;
     req: CoachingRequest;
@@ -365,6 +372,13 @@ function TicketVerification() {
     time: req.requestedTime,
     endTime: req.endTime,
     durationHours: req.durationHours,
+    courtName: req.courtName,
+    courtAmount: req.courtAmount,
+    coachFee: req.coachFee,
+    totalAmount: req.totalAmount,
+    downpaymentAmount: req.downpaymentAmount,
+    downpaymentPercentage: req.downpaymentPercentage,
+    balanceDue: req.balanceDue,
     status: req.status,
     adminNotes: req.adminNotes,
     req,
@@ -720,6 +734,17 @@ function TicketVerification() {
     if (!Number.isFinite(h)) return raw.replace(/NaN/i, '00');
     return `${h % 12 || 12}:${String(Number.isFinite(m) ? m : 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
   };
+  const money = (value: unknown) => `₱${Math.max(0, Number(value || 0)).toLocaleString()}`;
+  const resultAny = result && result !== 'notfound' ? (result as any) : null;
+  const ticketTotal = Number(resultAny?.totalAmount ?? resultAny?.amount ?? 0);
+  const ticketDownpayment =
+    resultAny?.downpaymentAmount != null ? Number(resultAny.downpaymentAmount) : null;
+  const ticketBalance =
+    resultAny?.balanceDue != null
+      ? Number(resultAny.balanceDue)
+      : ticketDownpayment != null
+        ? Math.max(0, ticketTotal - ticketDownpayment)
+        : null;
 
   return (
     <div className="bg-[#1A1A1A] rounded-2xl border border-white/5 p-5">
@@ -872,6 +897,9 @@ function TicketVerification() {
                 { label: 'DATE', value: result.date },
                 { label: 'TIME', value: `${formatTime(result.time)}${result.endTime ? ` - ${formatTime(result.endTime)}` : ''}` },
                 { label: 'STATUS', value: coachingCheckedOut ? 'Checked out' : coachingPaymentVerified ? 'Checked in' : 'Ready for payment' },
+                { label: 'TOTAL', value: money(ticketTotal) },
+                ...(ticketDownpayment != null ? [{ label: 'DOWNPAYMENT PAID', value: money(ticketDownpayment) }] : []),
+                ...(ticketBalance != null ? [{ label: 'BALANCE DUE', value: money(ticketBalance) }] : []),
               ].map((f) => (
                 <div key={f.label}>
                   <p className="text-gray-600 font-black" style={{ fontSize: 9, letterSpacing: 0.5 }}>{f.label}</p>
@@ -886,7 +914,9 @@ function TicketVerification() {
                 { label: 'COURT', value: result.court },
                 { label: 'DATE', value: result.date },
                 { label: 'TIME', value: `${formatTime(result.time)} · ${result.duration}h` },
-                { label: result.paymentStatus === 'paid' ? 'AMOUNT PAID' : 'TO COLLECT', value: `₱${result.amount.toLocaleString()}` },
+                { label: 'TOTAL', value: money(ticketTotal) },
+                ...(ticketDownpayment != null ? [{ label: 'DOWNPAYMENT PAID', value: money(ticketDownpayment) }] : []),
+                ...(ticketBalance != null ? [{ label: 'BALANCE DUE', value: money(ticketBalance) }] : []),
               ].map((f) => (
                 <div key={f.label}>
                   <p className="text-gray-600 font-black" style={{ fontSize: 9, letterSpacing: 0.5 }}>{f.label}</p>
@@ -908,8 +938,8 @@ function TicketVerification() {
               <div className="px-4 pb-4 space-y-3">
                 {result.status !== 'confirmed' && result.status !== 'completed' ? (
                   <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2">
-                    <p className="text-amber-200 font-black" style={{ fontSize: 12 }}>Coach has not accepted this session yet.</p>
-                    <p className="text-amber-100/80 mt-1" style={{ fontSize: 11, lineHeight: 1.45 }}>Do not collect payment or check in until the coach confirms the request.</p>
+                    <p className="text-amber-200 font-black" style={{ fontSize: 12 }}>Coaching ticket is not ready for desk processing.</p>
+                    <p className="text-amber-100/80 mt-1" style={{ fontSize: 11, lineHeight: 1.45 }}>Ask the student to confirm the downpayment status before check-in.</p>
                   </div>
                 ) : coachingCheckedOut ? (
                   <div className="rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-center">
@@ -954,19 +984,6 @@ function TicketVerification() {
                       >
                         {checkingIn ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Verifying...</> : <><ShieldCheck size={16} /> Verify & Check In</>}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmAction({
-                          type: 'coaching_reject',
-                          title: 'Reject Coaching Ticket',
-                          desc: `Reject this coaching ticket for ${result.customerName || 'the student'}?`
-                        })}
-                        disabled={checkingIn || rejecting || scanMode === 'check_out'}
-                        className="px-4 py-3 rounded-xl text-red-300 font-black bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
-                        style={{ fontSize: 14, opacity: (checkingIn || rejecting || scanMode === 'check_out') ? 0.55 : 1 }}
-                      >
-                        {rejecting ? <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> : <><XCircle size={16} /> Reject</>}
-                      </button>
                     </div>
                   </>
                 )}
@@ -984,7 +1001,7 @@ function TicketVerification() {
                     onClick={() => setConfirmAction({
                       type: 'check_in',
                       title: 'Confirm Check-in',
-                      desc: `Are you sure you want to check in ${result.customerName || 'the guest'}? Make sure you have collected ₱${result.amount.toLocaleString()}.`
+                      desc: `Are you sure you want to check in ${result.customerName || 'the guest'}? Make sure you have collected ${money(ticketBalance ?? ticketTotal)}.`
                     })}
                     disabled={checkingIn || rejecting || !canCheckIn}
                     className="flex-1 py-3 rounded-xl text-white font-black transition-all flex items-center justify-center gap-2"
@@ -1414,9 +1431,21 @@ const ACTIVITY_ACTION_META: Record<string, { title: string; blurb: string }> = {
     title: 'Check-in',
     blurb: 'Guest checked in with a ticket or QR code.',
   },
+  coaching_check_in: {
+    title: 'Coaching check-in',
+    blurb: 'Front desk verified payment and checked in a coaching ticket.',
+  },
   check_out: {
     title: 'Check-out',
     blurb: 'Guest checked out at the desk after finishing their session.',
+  },
+  coaching_check_out: {
+    title: 'Coaching check-out',
+    blurb: 'Front desk completed a coaching session ticket.',
+  },
+  coaching_reschedule_requested: {
+    title: 'Coaching reschedule requested',
+    blurb: 'Coach asked the front desk to coordinate a new slot or refund path.',
   },
 };
 

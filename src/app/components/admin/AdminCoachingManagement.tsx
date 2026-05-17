@@ -37,6 +37,30 @@ function mapApiToCoachApplication(row: Record<string, unknown>): CoachApplicatio
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_NAME_TO_INDEX: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
+};
+
+const isIsoDate = (value: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+
+const formatAvailabilityLabel = (value: string) =>
+  isIsoDate(value)
+    ? new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : value;
 
 // Custom styled select for hours
 function HourSelect({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
@@ -141,6 +165,8 @@ export function AdminCoachingManagement() {
   const [requestFilter, setRequestFilter] = useState<"all" | "pending" | "confirmed" | "completed" | "rejected">("all");
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>([]);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [hiddenApplicationIds, setHiddenApplicationIds] = useState<string[]>([]);
+  const [clearApplicationsConfirm, setClearApplicationsConfirm] = useState(false);
 
   const loadAdminRequests = useCallback(async () => {
     setRequestsLoading(true);
@@ -242,6 +268,15 @@ export function AdminCoachingManagement() {
       setHiddenSessionIds([]);
     }
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = JSON.parse(localStorage.getItem("sportsync_admin_hidden_coach_applications") || "[]");
+      setHiddenApplicationIds(Array.isArray(stored) ? stored.map(String) : []);
+    } catch {
+      setHiddenApplicationIds([]);
+    }
+  }, []);
   const [appFilter, setAppFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   // Form state
@@ -268,10 +303,16 @@ export function AdminCoachingManagement() {
     setEditingCoach(coach);
     setName(coach.name); setSport(coach.sport);
     setRate(String(coach.hourlyRate ?? '')); setDesc(coach.description ?? '');
-    setDays(Array.isArray(coach.availableDays) ? coach.availableDays : []);
+    const availability = Array.isArray(coach.availableDays) ? coach.availableDays.filter(Boolean) : [];
+    const dateValues = availability.filter(isIsoDate);
+    const weekdayValues = availability
+      .map((value) => DAY_NAME_TO_INDEX[value.trim().toLowerCase()])
+      .filter((value): value is number => value !== undefined);
+    setDays(dateValues);
+    setRecurringDays(Array.from(new Set(weekdayValues)));
     setIsAvail(coach.isAvailable !== false);
     setImage(coach.image || "");
-    setDateMode('specific');
+    setDateMode(dateValues.length > 0 || weekdayValues.length === 0 ? 'specific' : 'recurring');
     const range = coach.timeRange || '08:00 AM - 05:00 PM';
     const [start, end] = range.split(' - ');
     // Convert 12h to 24h
@@ -346,6 +387,20 @@ export function AdminCoachingManagement() {
     }
     setClearConfirmOpen(false);
     setNotice({ type: "success", message: "Inactive coaching rows cleared from this admin view." });
+  };
+  const visibleApplications = useMemo(
+    () => applications.filter((app) => !hiddenApplicationIds.includes(app.id) && (appFilter === "all" || app.status === appFilter)),
+    [applications, appFilter, hiddenApplicationIds],
+  );
+  const clearableApplicationCount = visibleApplications.length;
+  const handleClearVisibleApplications = () => {
+    const next = Array.from(new Set([...hiddenApplicationIds, ...visibleApplications.map((app) => app.id)]));
+    setHiddenApplicationIds(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sportsync_admin_hidden_coach_applications", JSON.stringify(next));
+    }
+    setClearApplicationsConfirm(false);
+    setNotice({ type: "success", message: "Coach applications cleared from this admin view. Coach profiles and user roles were not changed." });
   };
 
   const runRequestAction = async (
@@ -642,7 +697,7 @@ export function AdminCoachingManagement() {
                         <div className="flex flex-wrap gap-1">
                           {(coach.availableDays ?? []).slice(0, 3).map(d => (
                             <span key={d} className="px-2 py-0.5 rounded-md font-black" style={{ fontSize: 10, background: 'rgba(255,255,255,0.06)', color: '#aaa' }}>
-                              {isNaN(Date.parse(d)) ? d : new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {formatAvailabilityLabel(d)}
                             </span>
                           ))}
                           {(coach.availableDays ?? []).length > 3 && (
@@ -679,7 +734,7 @@ export function AdminCoachingManagement() {
               <button key={f} onClick={() => setAppFilter(f)}
                 className="px-3 py-1.5 rounded-xl border font-black capitalize transition-all"
                 style={{ fontSize: 12, background: appFilter === f ? "#F97316" : "#1E1E1F", borderColor: appFilter === f ? "#F97316" : "rgba(255,255,255,0.1)", color: appFilter === f ? "white" : "#666" }}>
-                {f} {f === "all" ? `(${applications.length})` : `(${applications.filter(a => a.status === f).length})`}
+                {f} {f === "all" ? `(${applications.filter(a => !hiddenApplicationIds.includes(a.id)).length})` : `(${applications.filter(a => !hiddenApplicationIds.includes(a.id) && a.status === f).length})`}
               </button>
             ))}
             <button type="button" onClick={() => void loadApplications()}
@@ -687,9 +742,14 @@ export function AdminCoachingManagement() {
               style={{ fontSize: 12, background: "#1E1E1F", borderColor: "rgba(255,255,255,0.1)" }}>
               Refresh
             </button>
+            <button type="button" onClick={() => setClearApplicationsConfirm(true)} disabled={clearableApplicationCount === 0}
+              className="px-3 py-1.5 rounded-xl border font-black transition-all disabled:opacity-40"
+              style={{ fontSize: 12, background: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.25)", color: "#fca5a5" }}>
+              <Trash2 size={12} className="inline mr-1" /> Clear
+            </button>
           </div>
 
-          {applications.filter(a => appFilter === "all" || a.status === appFilter).length === 0 ? (
+          {visibleApplications.length === 0 ? (
             <div className="text-center py-16 rounded-2xl border border-white/5" style={{ background: "#131314" }}>
               <GraduationCap size={36} className="text-gray-700 mx-auto mb-3" />
               <p className="text-gray-500 font-black" style={{ fontSize: 15 }}>No applications yet</p>
@@ -697,7 +757,7 @@ export function AdminCoachingManagement() {
             </div>
           ) : (
             <div className="space-y-3">
-              {applications.filter(a => appFilter === "all" || a.status === appFilter).map((app, i) => {
+              {visibleApplications.map((app, i) => {
                 const sportColor = getSportColor(app.sport);
                 return (
                   <motion.div key={app.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
@@ -955,7 +1015,7 @@ export function AdminCoachingManagement() {
                           <div className="flex flex-wrap gap-1 mt-2">
                             {(days ?? []).slice(0, 5).map(d => (
                               <div key={d} className="flex items-center gap-1 bg-[#252525] rounded-lg px-2 py-1">
-                                <span className="text-gray-300" style={{ fontSize: 10 }}>{new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                <span className="text-gray-300" style={{ fontSize: 10 }}>{formatAvailabilityLabel(d)}</span>
                                 <button type="button" onClick={() => handleDateSelect(d)} className="text-gray-600 hover:text-red-400 transition-colors">
                                   <X size={10} />
                                 </button>
@@ -1039,6 +1099,8 @@ export function AdminCoachingManagement() {
                     if (!patchRes.ok) throw new Error((patchBody as { error?: string }).error || "Could not update application");
                     const mapped = mapApiToCoachApplication(patchBody as Record<string, unknown>);
                     setApplications((prev) => prev.map((a) => (a.id === appConfirm.app.id ? mapped : a)));
+                    window.dispatchEvent(new Event("sportsync:coaching-refresh"));
+                    window.dispatchEvent(new Event("sportsync:notifications-refresh"));
                     setAppConfirm(null);
                   } catch (err: unknown) {
                     setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not approve application' });
@@ -1053,6 +1115,33 @@ export function AdminCoachingManagement() {
           </div>
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {clearApplicationsConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1E1E1F] rounded-3xl p-6 w-full max-w-sm border border-white/10 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-red-500/15 border border-red-500/25">
+                <Trash2 size={22} className="text-red-300" />
+              </div>
+              <h3 className="text-white font-black text-center mb-1" style={{ fontSize: 17 }}>Clear Coach Applications?</h3>
+              <p className="text-gray-400 text-center mb-5" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                This only hides the currently visible application rows from this admin view. It does not remove coach profiles or change coach status.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setClearApplicationsConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-[#252525] text-gray-300 font-black hover:bg-[#303030] transition-colors"
+                  style={{ fontSize: 13 }}>Cancel</button>
+                <button onClick={handleClearVisibleApplications}
+                  className="flex-1 py-2.5 rounded-xl text-white font-black bg-red-500 hover:bg-red-600 transition-colors"
+                  style={{ fontSize: 13 }}>
+                  Clear {clearableApplicationCount}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {deleteCoachTarget && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
