@@ -309,6 +309,7 @@ export function UserMyBookings() {
 
   useEffect(() => {
     localStorage.setItem('jrc_hiddenCompletedIds', JSON.stringify(hiddenCompletedIds));
+    window.dispatchEvent(new Event('sportsync:hidden-completed-bookings-changed'));
   }, [hiddenCompletedIds]);
 
   // Show ALL bookings (upcoming + past + cancelled) for history.

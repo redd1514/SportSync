@@ -49,6 +49,18 @@ function linkedBookingIdFromNotes(notes?: string | null): string | undefined {
   return match?.[1];
 }
 
+function linkedBookingIdFromAdminNotes(adminNotes?: string | null): string | undefined {
+  const matches = [...String(adminNotes || '').matchAll(/COACHING_ACCEPTANCE:(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const latest = matches[matches.length - 1]?.[1];
+  if (!latest) return undefined;
+  try {
+    const parsed = JSON.parse(latest) as Record<string, unknown>;
+    return typeof parsed.linkedBookingId === 'string' ? parsed.linkedBookingId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function isValidUuid(value: string | undefined | null): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 }
@@ -444,7 +456,9 @@ export const coachingSessionService = {
     // Emit realtime event
     await emitRealtimeEvent('coaching_sessions', 'UPDATE', data, oldData);
 
-    const linkedBookingId = linkedBookingIdFromNotes(data?.notes || oldData?.notes);
+    const linkedBookingId =
+      linkedBookingIdFromNotes(data?.notes || oldData?.notes) ||
+      linkedBookingIdFromAdminNotes(data?.admin_notes || oldData?.admin_notes);
     const checkedIn = /COACHING_CHECKED_IN|checked_in:/i.test(String(nextAdminNotes || data?.admin_notes || ''));
     const rescheduleRequested = /COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(String(nextAdminNotes || data?.admin_notes || ''));
     if (dbStatus === 'approved') {

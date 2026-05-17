@@ -517,13 +517,31 @@ export function MobileProfileScreen({ onLogout }: MobileProfileScreenProps) {
     }
   })();
 
-  const [hiddenCompletedIds] = useState<string[]>(() => {
+  const [hiddenCompletedIds, setHiddenCompletedIds] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('jrc_hiddenCompletedIds') || '[]');
     } catch {
       return [];
     }
   });
+
+  useEffect(() => {
+    const refreshHiddenCompletedIds = () => {
+      try {
+        setHiddenCompletedIds(JSON.parse(localStorage.getItem('jrc_hiddenCompletedIds') || '[]'));
+      } catch {
+        setHiddenCompletedIds([]);
+      }
+    };
+    window.addEventListener('storage', refreshHiddenCompletedIds);
+    window.addEventListener('sportsync:hidden-completed-bookings-changed', refreshHiddenCompletedIds);
+    window.addEventListener('focus', refreshHiddenCompletedIds);
+    return () => {
+      window.removeEventListener('storage', refreshHiddenCompletedIds);
+      window.removeEventListener('sportsync:hidden-completed-bookings-changed', refreshHiddenCompletedIds);
+      window.removeEventListener('focus', refreshHiddenCompletedIds);
+    };
+  }, []);
 
   const todayKey = getManilaDateKey();
 

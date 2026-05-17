@@ -151,12 +151,12 @@ export function mapSessionApiRowToCoachingRequest(row: Record<string, unknown>):
 
   // Compute duration from start/end if duration_hours not set
   let durationHours: number | undefined;
-  if (typeof row.duration_hours === "number") {
-    durationHours = row.duration_hours;
-  } else if (row.start_time && row.end_time) {
+  if (row.start_time && row.end_time) {
     const [sh, sm] = String(row.start_time).split(":").map(Number);
     const [eh, em] = String(row.end_time).split(":").map(Number);
     durationHours = Math.round(((eh * 60 + em) - (sh * 60 + sm)) / 60);
+  } else if (typeof row.duration_hours === "number") {
+    durationHours = row.duration_hours;
   }
 
   return {

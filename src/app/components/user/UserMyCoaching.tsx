@@ -539,7 +539,7 @@ function DecisionModal({
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [checkingTimes, setCheckingTimes] = useState(false);
   const { checkAvailability } = useBookingAPI();
-  const durationHours = Math.max(1, Number(req.durationHours || 1));
+  const durationHours = Math.max(1, Number(durationFromTimes(req.requestedTime, req.endTime) || req.durationHours || 1));
   const requestedEndTime = addHoursToTime(requestedTime, durationHours);
 
   useEffect(() => {
@@ -656,7 +656,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
         ? Math.max(0, Number(req.totalAmount || req.coachFee || 0) - Number(req.downpaymentAmount || 0))
         : undefined;
   const totalAmount = Number(req.totalAmount || req.coachFee || 0);
-  const ticketDuration = Math.max(1, Number(req.durationHours || durationFromTimes(req.requestedTime, req.endTime) || 1));
+  const ticketDuration = Math.max(1, Number(durationFromTimes(req.requestedTime, req.endTime) || req.durationHours || 1));
   return (
     <BookingTicketModal
       booking={{
@@ -666,6 +666,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
         court: req.courtName || "Reserved court",
         date: req.requestedDate,
         time: req.requestedTime,
+        endTime: req.endTime,
         duration: ticketDuration,
         amount: totalAmount,
         totalAmount,
@@ -924,7 +925,7 @@ function RescheduleResponseModal({
 }
 
 export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
-  const { user } = useUser();
+  const { user, bookings } = useUser();
   const { requests, coaches, updateRequestStatus, submitCoachReview, findCoachByEmail, refreshRequests, isLoading } = useCoaching();
   const [activeTab, setActiveTab] = useState<"student" | "coach">("student");
   const [ticketReq, setTicketReq] = useState<CoachingRequest | null>(null);
@@ -963,6 +964,14 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
   }, [isLoading, isCoach]);
 
   const currentList = activeTab === "coach" ? coachSessions : studentSessions;
+  const bookingByIdOrRef = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const booking of bookings || []) {
+      if (booking.id) map.set(String(booking.id), booking);
+      if (booking.refCode) map.set(String(booking.refCode), booking);
+    }
+    return map;
+  }, [bookings]);
   const activeStudentSessions = studentSessions.filter((r) => !hiddenCompletedIds.includes(r.id) && !isClearedCoachingStatus(r));
   const activeCoachSessions = coachSessions.filter((r) => !hiddenCompletedIds.includes(r.id) && !isClearedCoachingStatus(r));
   const activeCurrentList = activeTab === "coach" ? activeCoachSessions : activeStudentSessions;
@@ -1152,12 +1161,28 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
               <div className="grid gap-3">
                 {visibleList.map((req) => {
                   const coachForReq = coaches.find((coach) => String(coach.id) === String(req.coachId));
-                  const computedDuration = Math.max(1, Number(req.durationHours || durationFromTimes(req.requestedTime, req.endTime) || 1));
+                  const linkedBooking =
+                    (req.linkedBookingId ? bookingByIdOrRef.get(String(req.linkedBookingId)) : undefined) ||
+                    (req.coachCourtQr ? bookingByIdOrRef.get(String(req.coachCourtQr)) : undefined);
+                  const linkedStartTime = linkedBooking?.time || req.requestedTime;
+                  const linkedDuration = Number(linkedBooking?.duration || 0);
+                  const linkedEndTime =
+                    linkedBooking && linkedDuration > 0
+                      ? addHoursToTime(String(linkedStartTime || "09:00"), linkedDuration)
+                      : req.endTime;
+                  const computedDuration = Math.max(1, Number(durationFromTimes(linkedStartTime, linkedEndTime) || linkedDuration || durationFromTimes(req.requestedTime, req.endTime) || req.durationHours || 1));
                   const fallbackCoachFee = (coachForReq?.hourlyRate || myCoachProfile?.hourlyRate || 0) * computedDuration;
                   const computedCoachFee = Math.max(0, Number(req.coachFee || fallbackCoachFee || 0));
                   const computedTotal = Math.max(0, Number(req.totalAmount || computedCoachFee || 0));
                   const enrichedReq = {
                     ...req,
+                    linkedBookingId: req.linkedBookingId || linkedBooking?.id,
+                    coachCourtQr: req.coachCourtQr || linkedBooking?.refCode,
+                    requestedDate: linkedBooking?.date || req.requestedDate,
+                    requestedTime: linkedStartTime,
+                    endTime: linkedEndTime,
+                    courtName: req.courtName || linkedBooking?.court,
+                    courtId: req.courtId || linkedBooking?.courtId,
                     coachFee: computedCoachFee,
                     courtAmount: req.courtAmount != null ? req.courtAmount : Math.max(0, computedTotal - computedCoachFee),
                     totalAmount: computedTotal,

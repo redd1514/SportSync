@@ -52,6 +52,21 @@ function mapSessionStatusForUi(dbStatus: string, adminNotes?: string | null): st
   return dbStatus;
 }
 
+function linkedBookingIdFromSessionNotes(notes?: string | null, adminNotes?: string | null): string | undefined {
+  const notesMatch = String(notes || '').match(/linked_booking:([0-9a-f-]+)/i);
+  if (notesMatch?.[1]) return notesMatch[1];
+
+  const acceptanceMatches = [...String(adminNotes || '').matchAll(/COACHING_ACCEPTANCE:(\{.*?\})(?=\n[A-Z_]+:|$)/gs)];
+  const latest = acceptanceMatches[acceptanceMatches.length - 1]?.[1];
+  if (!latest) return undefined;
+  try {
+    const parsed = JSON.parse(latest) as Record<string, unknown>;
+    return typeof parsed.linkedBookingId === 'string' ? parsed.linkedBookingId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizeUserRoleForDb(role: unknown): 'user' | 'staff' | 'admin' {
   const r = String(role || 'user')
     .trim()
@@ -381,7 +396,7 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
 
     const linkedBookingIds = Array.from(new Set(
       sessions
-        .map((session: any) => String(session.notes || '').match(/linked_booking:([0-9a-f-]+)/i)?.[1])
+        .map((session: any) => linkedBookingIdFromSessionNotes(session.notes, session.admin_notes))
         .filter(Boolean)
     ));
 
@@ -438,7 +453,7 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
       const coachUser = coach ? userMap.get(coach.user_id) : null;
       const student = userMap.get(session.user_id);
       const notes = typeof session.notes === 'string' ? session.notes : '';
-      const linkedBookingId = notes.match(/linked_booking:([0-9a-f-]+)/i)?.[1];
+      const linkedBookingId = linkedBookingIdFromSessionNotes(notes, session.admin_notes);
       const linkedDetails = linkedBookingId ? bookingDetailMap.get(String(linkedBookingId)) : undefined;
       const pendingLinkedRequest = linkedBookingId ? pendingRequestMap.get(String(linkedBookingId)) : undefined;
       const viewerIsStudent = String(session.user_id) === String(usersTableId);
@@ -455,13 +470,14 @@ usersRouter.get('/:id/coaching-sessions', async (c) => {
       const baseStatus = mapSessionStatusForUi(String(session.status || 'pending'), session.admin_notes);
       const rawCoachFee = Number((linkedDetails as any)?.coachFee || 0);
       const durationHours = (() => {
-        if (session.duration_hours != null && Number(session.duration_hours) > 0) return Number(session.duration_hours);
         const start = String((linkedDetails as any)?.startTime || session.start_time || '').slice(0, 5);
         const end = String((linkedDetails as any)?.endTime || session.end_time || '').slice(0, 5);
         const [sh, sm] = start.split(':').map(Number);
         const [eh, em] = end.split(':').map(Number);
         const diff = (eh * 60 + em) - (sh * 60 + sm);
-        return diff > 0 ? diff / 60 : undefined;
+        if (diff > 0) return diff / 60;
+        if (session.duration_hours != null && Number(session.duration_hours) > 0) return Number(session.duration_hours);
+        return undefined;
       })();
       const fallbackCoachFee = Math.max(0, Number((coach as any)?.hourly_rate || 0) * Math.max(1, Number(durationHours || 1)));
       const coachFee = rawCoachFee > 0 ? rawCoachFee : fallbackCoachFee;

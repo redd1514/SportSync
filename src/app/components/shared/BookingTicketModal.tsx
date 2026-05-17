@@ -14,6 +14,7 @@ export type BookingTicketData = {
   court: string;
   date: string;
   time: string;
+  endTime?: string;
   duration: number;
   amount: number;
   totalAmount?: number;
