@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buildSportSyncAiKnowledge, getPgPool, manilaDateKey } from '../utils/aiContext.js';
 import { extractDateAndTimeFromMessage, normalizeTime24 } from '../utils/messageDateParse.js';
 import { messageLooksLikeBooking, tryConciergeBooking } from '../services/aiBookingService.js';
+import { tryConciergeFaqReply } from '../services/aiConciergeFaq.js';
 import { findUserRow } from '../services/userRowQuery.ts';
 import { isUserRowSuspended, resolveBearer } from '../auth/resolveBearer.ts';
 
@@ -27,12 +28,23 @@ CRITICAL AVAILABILITY RULE:
 PRICING RULE:
 - Always quote rates using hourly_rates / rate_per_hour_php from courts in KNOWLEDGE for the requested date and time.
 - State totals in Philippine Peso (₱). For a 1-hour slot, total ≈ rate_per_hour_php unless the user asks for a different duration.
+- Multiply court rate by duration_hours when the user asks for multiple hours. Add add-ons from addonsBySport (flat or per-hour) to the total.
+- "Magkano" / "how much" questions are price quotes ONLY — do NOT treat them as booking requests unless the user explicitly says to book.
+
+FACILITY FAQ (use facilityFaq in KNOWLEDGE — authoritative):
+- Student discount: fixed rates; loyalty points give 25% off after 10 completed bookings (not a student ID discount).
+- Payment: PayMongo downpayment online to confirm; remaining balance at facility on check-in.
+- Basketball floor: wooden/hardwood (not cement).
+- Rackets/balls: not included in court rent — avail as add-ons (see addonsBySport).
+- Reschedule: My Bookings → Reschedule → staff approval; prefer 24+ hours before session.
+- Operating hours: use businessHours in KNOWLEDGE.
 
 LANGUAGE:
 - If the user writes in Tagalog or Taglish, respond in helpful Taglish/Filipino.
 - If they write in English only, respond in English.
 
 BOOKING:
+- Only create bookings when the user explicitly commands to book/reserve (not when they only ask "magkano", "pwede ba", policy questions, or "pag nag-book ako" hypotheticals).
 - When BOOKING_RESULT shows needsPayment:true, the slot is held as pending until PayMongo downpayment is paid. Tell the user to tap "Pay downpayment" in chat (GCash, card, or Maya). After payment, the booking is confirmed and appears in My Bookings with a QR ticket.
 - When BOOKING_RESULT shows needsLogin, ask them to log in first to complete a booking.
 - When BOOKING_RESULT shows ok:false with error, explain clearly (e.g. slot taken, missing court name).
@@ -125,8 +137,9 @@ export function buildConciergePaymentPendingReply(bookingResult) {
   const down = Number(pay.downpaymentAmount ?? 0);
   const pct = Number(pay.downpaymentPercentage ?? 50);
   const ref = bookingResult.refCode || '';
+  const addons = intent.add_ons ? `\nAdd-ons: ${intent.add_ons}.` : '';
 
-  return `Naka-hold na ang **${court}** sa **${formatManilaDateLong(dateKey)}, ${formatTime12h(time24)}** (${duration} ${hoursLabel}).
+  return `Naka-hold na ang **${court}** sa **${formatManilaDateLong(dateKey)}, ${formatTime12h(time24)}** (${duration} ${hoursLabel}).${addons}
 
 Para ma-confirm ang reservation, kailangan mo munang bayaran ang **${pct}% downpayment (₱${down})** ng total na **₱${total}** via PayMongo (GCash, card, o Maya).
 
@@ -248,8 +261,12 @@ chat.post('/', async (c) => {
     }
 
     const auth = await resolveChatAuth(c, body);
+    const dateOverrides = { today, explicitDate, explicitTime };
+
+    let reply = tryConciergeFaqReply(message, knowledge, dateOverrides);
+
     let bookingResult = null;
-    if (messageLooksLikeBooking(message)) {
+    if (!reply && messageLooksLikeBooking(message)) {
       if (auth?.userId) {
         const userRow = await findUserRow(auth.userId);
         const returnBaseUrl =
@@ -263,28 +280,29 @@ chat.post('/', async (c) => {
             body.userName || userRow?.full_name || auth.email || 'Customer',
           ),
           customerPhone: String(userRow?.phone || body.userPhone || ''),
-          dateOverrides: { today, explicitDate, explicitTime },
+          dateOverrides,
           returnBaseUrl,
+          addonsBySport: knowledge.addonsBySport,
         });
       } else {
         bookingResult = await tryConciergeBooking({
           message,
           courts: knowledge.courts,
           userId: null,
-          dateOverrides: { today, explicitDate, explicitTime },
+          dateOverrides,
+          addonsBySport: knowledge.addonsBySport,
         });
       }
     }
 
-    let reply;
-    if (bookingResult?.needsPayment) {
+    if (!reply && bookingResult?.needsPayment) {
       reply = buildConciergePaymentPendingReply(bookingResult);
-    } else if (bookingResult?.ok) {
+    } else if (!reply && bookingResult?.ok) {
       reply = buildConciergeBookingSuccessReply(bookingResult);
-    } else if (bookingResult?.needsLogin) {
+    } else if (!reply && bookingResult?.needsLogin) {
       reply =
         'Para makapag-book sa chat, mag-log in muna. Pagkatapos, sabihin lang ulit ang court, petsa, oras, at tagal ng session.';
-    } else if (bookingResult && !bookingResult.skipped && bookingResult.error) {
+    } else if (!reply && bookingResult && !bookingResult.skipped && bookingResult.error) {
       reply = bookingResult.error;
     }
 

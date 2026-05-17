@@ -3,6 +3,7 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
+  addonLineTotal,
   calcCourtPriceFromSettings,
   fetchSystemCourtRates,
   getPgPool,
@@ -12,9 +13,6 @@ import { extractDateAndTimeFromMessage, normalizeTime24 } from '../utils/message
 import { normalizeStartTime } from './deskBookingService.ts';
 import { createPaymongoCourtCheckout } from './paymongoCheckoutService.ts';
 
-const BOOKING_INTENT_RE =
-  /\b(book|booking|reserve|reservation|mag-?book|i-?book|gusto\s+kong\s+mag-?book|magpa-?book|pa-?book|schedule|iskedyul)\b/i;
-
 const DURATION_RE =
   /\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|oras|h)\b|(?:for|ng)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|oras)\b/i;
 
@@ -23,8 +21,54 @@ function normalizeGeminiApiKey(raw) {
   return String(raw).trim().replace(/^\uFEFF/, '');
 }
 
+/** Informational questions — answer only, do not create bookings. */
+export function messageIsInformationalQuery(message) {
+  const m = String(message || '').trim();
+  const lower = m.toLowerCase();
+
+  if (/\b(magkano|how\s+much|hm\b|presyo|gagastos|aabutin|magkano\s+aabutin)\b/i.test(lower)) return true;
+  if (/\b(pwede\s+ba|may\s+.+\s+ba|kailangan\s+ba|mayroon\s+ba|meron\s+ba)\b/i.test(lower) && /\?/.test(m))
+    return true;
+  if (/\b(palitan|reschedule|baguhin\s+ang\s+oras)\b/i.test(lower) && /\?/.test(m)) return true;
+  if (/\b(student\s+discount|discount\s+sa\s+student|estudyante)\b/i.test(lower)) return true;
+  if (
+    /\b(oras|open|close|bukas|nagbubukas|nagsasara|operating\s+hours)\b/i.test(lower) &&
+    (/\?/.test(m) || /\b(anong|what)\b/i.test(lower))
+  )
+    return true;
+  if (/\b(fully\s+booked|punong-puno|punong\s+puno|booked\s+ba)\b/i.test(lower) && /\?/.test(m)) return true;
+  if (/\b(sementado|wooden|hardwood|floor|cimento)\b/i.test(lower) && /\?/.test(m)) return true;
+  if (/\b(magbayad\s+agad|bayad\s+sa\s+facility|pay\s+on\s+site)\b/i.test(lower)) return true;
+  if (/\b(kasama|included)\b/i.test(lower) && /\b(racket|raket|bola|ball)\b/i.test(lower)) return true;
+
+  if (/\b(pag|kapag|kung)\s+(?:ako\s+)?(?:ay\s+)?nag-?book\b/i.test(lower) && /\?/.test(m)) return true;
+
+  return false;
+}
+
+/** Explicit booking command (not "booking ko" in a policy question). */
+export function messageHasExplicitBookingCommand(message) {
+  const lower = String(message || '').toLowerCase();
+  if (/^\s*(book|reserve|mag-?book|i-?book)\b/i.test(lower)) return true;
+  if (/\bgusto\s+kong\s+mag-?book\b/i.test(lower)) return true;
+  if (/\b(magpa-?book|pa-?book)\b/i.test(lower)) return true;
+  if (/\b(iskedyul|schedule)\s+(me\s+)?(a\s+)?(the\s+)?(basketball|volleyball|badminton|court)/i.test(lower))
+    return true;
+  if (/\b(book|reserve)\s+(me\s+)?(a\s+)?(the\s+)?(basketball|volleyball|badminton|pickleball|billiard|table)/i.test(lower))
+    return true;
+  if (/\b(book|reserve)\s+(basketball|volleyball|badminton|pickleball|billiard|table)\s*\d/i.test(lower))
+    return true;
+  if (/\bmag-?book\s+(ako\s+)?(ng\s+)?/i.test(lower) && !/\bpag\s+(?:ako\s+)?(?:ay\s+)?nag-?book\b/i.test(lower))
+    return true;
+  if (/\b(add|dagdag|idagdag)\b.*\b(add.?on|racket|raket)\b/i.test(lower) && /\b(book|reserve|mag-?book)\b/i.test(lower))
+    return true;
+  return false;
+}
+
 export function messageLooksLikeBooking(message) {
-  return BOOKING_INTENT_RE.test(String(message || ''));
+  const m = String(message || '');
+  if (messageIsInformationalQuery(m) && !messageHasExplicitBookingCommand(m)) return false;
+  return messageHasExplicitBookingCommand(m);
 }
 
 export function parseDurationHours(message) {
@@ -174,7 +218,62 @@ export function matchCourtFromMessage(message, courts) {
   return best;
 }
 
-function parseAddonsFromMessage(message) {
+const ADDON_KEYWORDS = [
+  { re: /\b(racket|raket)\b/i, ids: ['racket'] },
+  { re: /\b(shuttle|shuttlecock)\b/i, ids: ['shuttle_f', 'shuttle_p'] },
+  { re: /\bball\b|\bbola\b/i, ids: ['ball', 'ball_r'] },
+  { re: /\bpaddle\b/i, ids: ['paddle'] },
+  { re: /\b(light|ilaw|lights)\b/i, ids: ['lights'] },
+  { re: /\bscoreboard\b/i, ids: ['scoreboard'] },
+  { re: /\b(ac|aircon|air con)\b/i, ids: ['aircon'] },
+];
+
+/**
+ * Match add-ons from message against sport catalog; returns labels and peso total.
+ * @param {Record<string, Array<{ id: string; label: string; price: number; perHour?: boolean; note?: string }>>} addonsBySport
+ */
+export function resolveAddonsFromMessage(message, sportName, durationHours, addonsBySport) {
+  const sport = String(sportName || '').trim();
+  const catalog = addonsBySport?.[sport] || [];
+  const lower = String(message || '').toLowerCase();
+  const wantsAddon =
+    /\b(add.?on|addon|dagdag|idagdag|kasama|with|including)\b/i.test(lower) ||
+    ADDON_KEYWORDS.some((k) => k.re.test(lower));
+  if (!wantsAddon || !catalog.length) {
+    return { labels: [], total: 0, summary: '' };
+  }
+
+  const matched = [];
+  const seen = new Set();
+  for (const kw of ADDON_KEYWORDS) {
+    if (!kw.re.test(lower)) continue;
+    for (const id of kw.ids) {
+      const addon = catalog.find((a) => a.id === id);
+      if (addon && !seen.has(addon.id)) {
+        seen.add(addon.id);
+        const amount = addonLineTotal(addon, durationHours);
+        matched.push({ label: addon.label, amount, addon });
+      }
+    }
+  }
+
+  if (matched.length === 0 && /\b(racket|raket)\b/i.test(lower)) {
+    const racket = catalog.find((a) => /racket/i.test(a.label));
+    if (racket) {
+      const amount = addonLineTotal(racket, durationHours);
+      matched.push({ label: racket.label, amount, addon: racket });
+    }
+  }
+
+  const total = matched.reduce((s, x) => s + x.amount, 0);
+  const summary = matched.map((x) => x.label).join(' | ');
+  return { labels: matched, total, summary };
+}
+
+function parseAddonsFromMessage(message, sportName, durationHours, addonsBySport) {
+  if (sportName && addonsBySport) {
+    return resolveAddonsFromMessage(message, sportName, durationHours, addonsBySport).summary;
+  }
   const parts = [];
   const lower = String(message || '').toLowerCase();
   if (/ball|bola/.test(lower)) parts.push('Ball rental');
@@ -189,30 +288,41 @@ function parseAddonsFromMessage(message) {
 /**
  * Rule-based extraction (fast path).
  */
-export function extractBookingIntentRules(message, courts, dateOverrides = {}) {
+export function extractBookingIntentRules(message, courts, dateOverrides = {}, addonsBySport = null) {
   if (!messageLooksLikeBooking(message)) {
     return { wantsToBook: false };
   }
   const { date, time } = extractDateAndTimeFromMessage(message, dateOverrides);
+  const duration = parseDurationHours(message);
   const court = matchCourtFromMessage(message, courts);
   if (!court) {
+    const sportGuess =
+      (/\bbadminton\b/i.test(message) && 'Badminton') ||
+      (/\bbasketball\b/i.test(message) && 'Basketball') ||
+      null;
+    const addonInfo = sportGuess
+      ? resolveAddonsFromMessage(message, sportGuess, duration, addonsBySport || {})
+      : { summary: parseAddonsFromMessage(message) };
     return {
       wantsToBook: true,
       booking_date: date,
       start_time: time || '12:00',
-      duration_hours: parseDurationHours(message),
-      add_ons: parseAddonsFromMessage(message),
+      duration_hours: duration,
+      add_ons: addonInfo.summary || parseAddonsFromMessage(message),
+      addon_total_php: addonInfo.total || 0,
       missing: ['court'],
     };
   }
+  const addonInfo = resolveAddonsFromMessage(message, court.sport_name, duration, addonsBySport || {});
   return {
     wantsToBook: true,
     court_name: court.court_name,
     sport: court.sport_name,
     booking_date: date,
     start_time: time || '12:00',
-    duration_hours: parseDurationHours(message),
-    add_ons: parseAddonsFromMessage(message),
+    duration_hours: duration,
+    add_ons: addonInfo.summary || parseAddonsFromMessage(message, court.sport_name, duration, addonsBySport),
+    addon_total_php: addonInfo.total || 0,
     missing: [],
   };
 }
@@ -220,9 +330,9 @@ export function extractBookingIntentRules(message, courts, dateOverrides = {}) {
 /**
  * Gemini JSON extraction when rules miss court/time.
  */
-export async function extractBookingIntentWithGemini(message, courts, dateOverrides = {}) {
+export async function extractBookingIntentWithGemini(message, courts, dateOverrides = {}, addonsBySport = null) {
   const apiKey = normalizeGeminiApiKey(process.env.GEMINI_API_KEY);
-  if (!apiKey) return extractBookingIntentRules(message, courts, dateOverrides);
+  if (!apiKey) return extractBookingIntentRules(message, courts, dateOverrides, addonsBySport);
 
   const courtList = (courts || [])
     .map((c) => `${c.court_name} (${c.sport_name})`)
@@ -252,31 +362,37 @@ User message: ${message}`;
     const result = await model.generateContent(prompt, { timeout: 45_000 });
     const raw = result.response?.text();
     const parsed = JSON.parse(raw || '{}');
-    const rules = extractBookingIntentRules(message, courts, dateOverrides);
+    const rules = extractBookingIntentRules(message, courts, dateOverrides, addonsBySport);
     const schedule = extractDateAndTimeFromMessage(message, dateOverrides);
+    const sport = parsed.sport || rules.sport || null;
+    const duration = Number(parsed.duration_hours) || rules.duration_hours || 1;
+    const addonInfo = sport
+      ? resolveAddonsFromMessage(message, sport, duration, addonsBySport || {})
+      : { summary: rules.add_ons || '', total: rules.addon_total_php || 0 };
     return {
-      wantsToBook: Boolean(parsed.wantsToBook ?? rules.wantsToBook),
+      wantsToBook: messageLooksLikeBooking(message) && Boolean(parsed.wantsToBook ?? rules.wantsToBook),
       court_name: parsed.court_name || rules.court_name || null,
-      sport: parsed.sport || rules.sport || null,
+      sport,
       booking_date: schedule.date || rules.booking_date,
       start_time: schedule.time
         ? normalizeTime24(schedule.time)
         : parsed.start_time
           ? normalizeTime24(parsed.start_time)
           : rules.start_time,
-      duration_hours: Number(parsed.duration_hours) || rules.duration_hours || 1,
-      add_ons: parsed.add_ons || rules.add_ons || '',
+      duration_hours: duration,
+      add_ons: addonInfo.summary || parsed.add_ons || rules.add_ons || '',
+      addon_total_php: addonInfo.total || rules.addon_total_php || 0,
       missing: [],
     };
   } catch {
-    return extractBookingIntentRules(message, courts, dateOverrides);
+    return extractBookingIntentRules(message, courts, dateOverrides, addonsBySport);
   }
 }
 
-async function resolveIntent(message, courts, dateOverrides) {
-  const rules = extractBookingIntentRules(message, courts, dateOverrides);
+async function resolveIntent(message, courts, dateOverrides, addonsBySport = null) {
+  const rules = extractBookingIntentRules(message, courts, dateOverrides, addonsBySport);
   if (rules.wantsToBook && rules.court_name && rules.start_time) return rules;
-  const gemini = await extractBookingIntentWithGemini(message, courts, dateOverrides);
+  const gemini = await extractBookingIntentWithGemini(message, courts, dateOverrides, addonsBySport);
   if (!gemini.court_name) {
     gemini.missing = ['court'];
   } else if (!gemini.start_time) {
@@ -287,7 +403,7 @@ async function resolveIntent(message, courts, dateOverrides) {
   return gemini;
 }
 
-function computeTotalPrice(courtRates, intent) {
+function computeTotalPrice(courtRates, intent, addonsBySport = null) {
   const rate = calcCourtPriceFromSettings(
     courtRates,
     intent.sport,
@@ -295,7 +411,19 @@ function computeTotalPrice(courtRates, intent) {
     intent.start_time,
   );
   const hours = intent.duration_hours || 1;
-  return Math.round(rate * hours);
+  const courtSubtotal = Math.round(rate * hours);
+  let addonTotal = Number(intent.addon_total_php) || 0;
+  if (!addonTotal && intent.sport && addonsBySport) {
+    const resolved = resolveAddonsFromMessage(
+      intent._sourceMessage || '',
+      intent.sport,
+      hours,
+      addonsBySport,
+    );
+    addonTotal = resolved.total;
+    if (!intent.add_ons && resolved.summary) intent.add_ons = resolved.summary;
+  }
+  return courtSubtotal + addonTotal;
 }
 
 /**
@@ -311,6 +439,7 @@ export async function tryConciergeBooking({
   customerPhone,
   dateOverrides = {},
   returnBaseUrl,
+  addonsBySport = null,
 }) {
   if (!messageLooksLikeBooking(message)) {
     return { ok: false, skipped: true };
@@ -324,8 +453,9 @@ export async function tryConciergeBooking({
     };
   }
 
-  let intent = await resolveIntent(message, courts, dateOverrides);
+  let intent = await resolveIntent(message, courts, dateOverrides, addonsBySport);
   intent = applyMessageScheduleToIntent(message, intent, dateOverrides);
+  intent._sourceMessage = message;
   if (!intent.wantsToBook) {
     return { ok: false, skipped: true };
   }
@@ -362,7 +492,18 @@ export async function tryConciergeBooking({
   } catch (e) {
     return { ok: false, error: e?.message || 'Could not load pricing', intent };
   }
-  const total = computeTotalPrice(courtRates, intent);
+  if (intent.sport && addonsBySport) {
+    const addonResolved = resolveAddonsFromMessage(
+      message,
+      intent.sport,
+      intent.duration_hours || 1,
+      addonsBySport,
+    );
+    intent.addon_total_php = addonResolved.total;
+    if (addonResolved.summary) intent.add_ons = addonResolved.summary;
+  }
+
+  const total = computeTotalPrice(courtRates, intent, addonsBySport);
   const startNorm = normalizeStartTime(intent.start_time);
   const duration = intent.duration_hours || 1;
   const base = typeof returnBaseUrl === 'string' ? returnBaseUrl.trim().replace(/\/$/, '') : '';

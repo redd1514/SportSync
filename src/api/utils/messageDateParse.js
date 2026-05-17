@@ -102,7 +102,7 @@ function parseRelativeDate(text, todayKey) {
   const lower = text.toLowerCase();
   if (/\b(bukas|tomorrow|next day)\b/.test(lower)) return addManilaDays(todayKey, 1);
   if (/\b(yesterday|kahapon)\b/.test(lower)) return addManilaDays(todayKey, -1);
-  if (/\b(today|ngayon|ngayong araw|this day)\b/.test(lower)) return todayKey;
+  if (/\b(today|ngayon|ngayong araw|ngayong gabi|this day|tonight)\b/.test(lower)) return todayKey;
   const inDays = lower.match(/\b(?:in|after)\s+(\d+)\s+days?\b/);
   if (inDays) return addManilaDays(todayKey, parseInt(inDays[1], 10));
   return null;
@@ -110,6 +110,9 @@ function parseRelativeDate(text, todayKey) {
 
 function parseTimeFromText(text) {
   const lower = text.toLowerCase();
+  if (/\b(ngayong gabi|tonight|this evening|mamayang gabi)\b/.test(lower)) {
+    return '19:00';
+  }
   const patterns = [
     /\b(?:at|@|ng|alas[- ]?)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i,
     /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i,

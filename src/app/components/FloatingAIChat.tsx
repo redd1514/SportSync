@@ -57,6 +57,14 @@ function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[])
   if (/table tennis|ping/.test(q) && /rate|price|cost|how much/.test(q))
     return { text: 'Table Tennis is ₱100/hr flat. Paddles and balls included. Open daily 7AM–12MN.', link: { label: 'Book Table Tennis', action: 'booking' } };
 
+  if (/student\s+discount|discount\s+sa\s+student|estudyante/.test(q))
+    return { text: 'Walang separate student discount — fixed ang rate card. Loyalty: 10 completed bookings = 25% off court fees sa susunod na booking.' };
+  if (/magkano|aabutin|presyo/.test(q) && !/\b(book|reserve|mag-?book)\s+(me|ako|ng)/.test(q))
+    return { text: 'Para sa exact total, sabihin ang sport, petsa, oras, at ilang oras (hal. "Magkano 3 hours basketball ngayong gabi?"). Ibibigay ko ang estimate — hindi pa booking hangga\'t hindi mo sinabing "Book…".' };
+  if (/sementado|wooden|floor/.test(q) && /basketball/.test(q))
+    return { text: 'Ang basketball court namin ay wooden/hardwood floor (hindi sementado).' };
+  if (/magbayad\s+agad|bayad\s+sa\s+facility|sa\s+facility/.test(q))
+    return { text: 'Online/AI bookings: PayMongo downpayment (GCash, card, Maya) para ma-confirm. Ang balance, bayad sa facility/front desk upon check-in.' };
   if (/price|rate|cost|fee|how much/.test(q))
     return {
       text: '2026 Rates at JRC Ballpark:\n\nBasketball / Volleyball\n• Weekday Day (7AM–5PM): ₱450/hr\n• Weekday Evening (5PM–12MN): ₱750/hr\n• Weekend Day: ₱550/hr\n• Weekend Evening: ₱850/hr\n\nBadminton / Pickleball: ₱300/hr flat\nBilliards / Table Tennis: ₱100/hr flat\n\nAll rates include facility access. Add-ons available at booking.',
@@ -81,6 +89,11 @@ function getAIResponse(input: string, facilityInfo?: any, courtStatuses?: any[])
   if (/cancel|cancell/.test(q))
     return {
       text: 'To cancel a booking:\n\n1. Go to "My Bookings" in Profile\n2. Find the booking you want to cancel\n3. Tap "Request Cancellation"\n4. Select your reason and submit\n\nStaff will review within 24 hours.',
+      link: { label: 'Go to My Bookings', action: 'mybookings' },
+    };
+  if ((/reschedule|palitan|change.*date|move.*booking|palitan\s+ang\s+oras/.test(q)) && /\?/.test(q))
+    return {
+      text: 'Oo, pwede kang mag-request ng reschedule:\n\n1. Pumunta sa "My Bookings" sa Profile\n2. Hanapin ang upcoming booking\n3. Tap "Reschedule"\n4. Pumili ng bagong petsa at oras\n\nKailangan ng staff approval. Mas mainam 24+ oras bago ang session.',
       link: { label: 'Go to My Bookings', action: 'mybookings' },
     };
   if (/reschedule|change.*date|move.*booking/.test(q))

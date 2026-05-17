@@ -7,6 +7,50 @@ import pg from 'pg';
 const { Pool } = pg;
 
 const SYSTEM_SETTINGS_KV_KEY = 'system_settings_v1';
+const SPORT_ADDONS_KV_KEY = 'sport_addons_v1';
+
+/** Default add-ons when KV is empty (mirrors sportsData.ts). */
+export const DEFAULT_SPORT_ADDONS = {
+  Basketball: [
+    { id: 'lights', label: 'Lights', price: 300, note: 'Evening sessions' },
+    { id: 'aircon', label: 'Aircon', price: 1500, note: 'per hour', perHour: true },
+    { id: 'ball', label: 'Ball Rental', price: 100 },
+    { id: 'scoreboard', label: 'Scoreboard', price: 300 },
+  ],
+  Volleyball: [
+    { id: 'lights', label: 'Lights', price: 300, note: 'Evening sessions' },
+    { id: 'aircon', label: 'Aircon', price: 1500, note: 'per hour', perHour: true },
+    { id: 'ball', label: 'Ball Rental', price: 100 },
+    { id: 'scoreboard', label: 'Scoreboard', price: 300 },
+  ],
+  Badminton: [
+    { id: 'racket', label: 'Racket Rental', price: 50 },
+    { id: 'shuttle_f', label: 'Shuttlecock (Feather, sale)', price: 50 },
+    { id: 'shuttle_p', label: 'Shuttlecock (Plastic, rent)', price: 50 },
+  ],
+  Pickleball: [
+    { id: 'paddle', label: 'Paddle Rental', price: 75, note: '₱50–100' },
+    { id: 'ball_r', label: 'Ball (rent)', price: 50 },
+    { id: 'ball_s', label: 'Ball (sale)', price: 100 },
+  ],
+  Billiards: [],
+  'Table Tennis': [],
+};
+
+/** Static facility facts for concierge FAQs (not in DB). */
+export const FACILITY_FAQ = {
+  studentDiscount:
+    'Walang separate student discount — fixed ang rate card. Pwede mong gamitin ang loyalty points (10 completed bookings = 25% off court fees sa susunod na booking).',
+  paymentPolicy:
+    'Para sa online at AI chat bookings: kailangan ang PayMongo downpayment (GCash, card, o Maya) para ma-confirm. Ang natitirang balance, bayad sa facility/front desk upon check-in.',
+  basketballFloor: 'Ang basketball court ay wooden/hardwood floor (hindi sementado).',
+  equipmentIncluded:
+    'Hindi kasama ang racket at bola sa court rental — kailangan i-avail bilang add-ons sa booking (hal. Racket Rental ₱50 sa Badminton). Billiards: kasama ang cues at balls.',
+  reschedulePolicy:
+    'Oo, pwede mag-request ng reschedule: My Bookings → piliin ang booking → Reschedule → bagong petsa/oras. Kailangan ng staff approval; mas mainam 24+ hours bago ang session.',
+  tennisNote:
+    'Walang dedicated tennis court — kung table tennis ang tinutukoy, paddles/balls ay through add-ons kung available; kung badminton, racket/shuttlecock add-ons.',
+};
 
 /** Default rates when hourly_rates rows and KV settings are missing. */
 const DEFAULT_COURT_RATES = {
@@ -123,6 +167,37 @@ export async function fetchSystemCourtRates(pool) {
     downpaymentPercentage: 50,
     source: 'defaults',
   };
+}
+
+/**
+ * @param {pg.Pool} pool
+ */
+export async function fetchSportAddons(pool) {
+  try {
+    const res = await pool.query(`SELECT value FROM app_kv_store WHERE key = $1 LIMIT 1`, [
+      SPORT_ADDONS_KV_KEY,
+    ]);
+    const value = res.rows[0]?.value;
+    if (value?.addonsBySport && typeof value.addonsBySport === 'object') {
+      return { addonsBySport: { ...DEFAULT_SPORT_ADDONS, ...value.addonsBySport }, source: 'app_kv_store' };
+    }
+  } catch (e) {
+    console.warn('[aiContext] could not load sport_addons_v1:', e?.message || e);
+  }
+  return { addonsBySport: DEFAULT_SPORT_ADDONS, source: 'defaults' };
+}
+
+/** @param {{ perHour?: boolean; note?: string }} addon */
+export function isAddonPerHour(addon) {
+  if (addon.perHour === true) return true;
+  const n = String(addon.note || '').toLowerCase();
+  return /\bper\s*hour\b|\b\/\s*hr\b|\bhourly\b|\bper\s*hr\b/.test(n);
+}
+
+/** @param {Array<{ label: string; price: number; perHour?: boolean; note?: string }>} addons */
+export function addonLineTotal(addon, durationHours) {
+  const hours = Math.max(1, durationHours || 1);
+  return isAddonPerHour(addon) ? addon.price * hours : addon.price;
 }
 
 /**
@@ -306,8 +381,14 @@ export async function buildSportSyncAiKnowledge(pool, opts) {
   const requestedDate = opts.requestedDate ?? today;
   const requestedTime = opts.requestedTime ?? '12:00';
 
-  const [{ courtRates, businessHours, source }, courtsRaw, existingBookingsRaw] = await Promise.all([
+  const [
+    { courtRates, businessHours, downpaymentPercentage, source },
+    { addonsBySport, source: addonsSource },
+    courtsRaw,
+    existingBookingsRaw,
+  ] = await Promise.all([
     fetchSystemCourtRates(p),
+    fetchSportAddons(p),
     fetchActiveCourtsWithRates(p),
     fetchConfirmedBookingsForDate(p, requestedDate),
   ]);
@@ -321,6 +402,8 @@ export async function buildSportSyncAiKnowledge(pool, opts) {
     ? filterBookingsOverlappingTime(existingBookings, requestedTime)
     : existingBookings;
 
+  const activeCourtCount = courts.length;
+
   return {
     generatedAt: new Date().toISOString(),
     timezone: 'Asia/Manila',
@@ -329,13 +412,23 @@ export async function buildSportSyncAiKnowledge(pool, opts) {
     requestedTime,
     businessHours,
     pricingSource: source,
+    addonsSource,
+    addonsBySport,
+    courtRates,
+    downpaymentPercentage,
+    facilityFaq: FACILITY_FAQ,
     pricingBySport,
     courts,
+    activeCourtCount,
     /** Primary availability list for Gemini — empty array means no conflicts on file for that date. */
     existingBookings,
     bookingsOnRequestedDateCount: existingBookings.length,
     bookingsOverlappingRequestedTime: overlappingAtRequestedTime,
     availabilityRule:
       'If a specific court and time slot is NOT listed in existingBookings (no overlapping start_time–end_time), the court is AVAILABLE for that slot.',
+    fullyBookedHint:
+      existingBookings.length >= activeCourtCount && activeCourtCount > 0
+        ? 'All tracked courts have at least one confirmed booking on this date — many slots may still be open at other times.'
+        : 'Not all courts are booked on this date based on confirmed bookings alone.',
   };
 }
