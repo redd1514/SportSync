@@ -5,8 +5,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { usePWAUpdate, usePWAOnlineStatus, usePWAInstallation } from '../hooks/usePWAUpdate';
-import { AlertCircle, Download, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
+import { usePWAUpdate, usePWAOnlineStatus } from '../hooks/usePWAUpdate';
+import { usePWAInstall } from '../hooks/usePWAInstall';
+import { Download, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 
 /**
@@ -16,28 +17,27 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 export function PWANotificationManager() {
   const { isUpdateAvailable, skipWaiting } = usePWAUpdate();
   const { isOnline } = usePWAOnlineStatus();
-  const { isInstalled, isStandalone } = usePWAInstallation();
+  const { isInstalled, isStandalone, isInstallable, handleInstallClick, dismissInstallPrompt } =
+    usePWAInstall();
 
   return (
     <>
-      {/* Update Available Notification */}
       {isUpdateAvailable && <UpdateNotification onSkipWaiting={skipWaiting} />}
 
-      {/* Offline Status Notification */}
       {!isOnline && <OfflineNotification />}
 
-      {/* Online Status Notification */}
       {isOnline && !isStandalone && <OnlineNotification />}
 
-      {/* Install Prompt (only for new users) */}
-      {!isInstalled && <InstallPrompt />}
+      {isInstallable && !isInstalled && (
+        <InstallPromptBanner
+          onInstall={handleInstallClick}
+          onDismiss={dismissInstallPrompt}
+        />
+      )}
     </>
   );
 }
 
-/**
- * Update Notification Component
- */
 function UpdateNotification({ onSkipWaiting }: { onSkipWaiting: () => void }) {
   const [dismissed, setDismissed] = useState(false);
 
@@ -54,12 +54,14 @@ function UpdateNotification({ onSkipWaiting }: { onSkipWaiting: () => void }) {
           </div>
           <div className="flex gap-2 flex-shrink-0">
             <button
+              type="button"
               onClick={() => setDismissed(true)}
               className="px-3 py-1 text-sm font-medium text-blue-600 hover:bg-blue-100 rounded transition-colors"
             >
               Later
             </button>
             <button
+              type="button"
               onClick={onSkipWaiting}
               className="px-3 py-1 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors"
             >
@@ -72,9 +74,6 @@ function UpdateNotification({ onSkipWaiting }: { onSkipWaiting: () => void }) {
   );
 }
 
-/**
- * Offline Status Notification
- */
 function OfflineNotification() {
   return (
     <Alert className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-md bg-orange-50 border-orange-200 shadow-lg z-50">
@@ -87,9 +86,6 @@ function OfflineNotification() {
   );
 }
 
-/**
- * Online Status Notification (only when returning online)
- */
 function OnlineNotification() {
   const [show, setShow] = useState(false);
 
@@ -112,52 +108,23 @@ function OnlineNotification() {
   );
 }
 
-/**
- * Install Prompt Component
- * Shows a custom install prompt for first-time users
- */
-function InstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [installed, setInstalled] = useState(false);
+function InstallPromptBanner({
+  onInstall,
+  onDismiss,
+}: {
+  onInstall: () => Promise<'accepted' | 'dismissed' | 'unavailable'>;
+  onDismiss: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowPrompt(true);
-    };
-
-    const handleAppInstalled = () => {
-      setInstalled(true);
-      setDeferredPrompt(null);
-      setShowPrompt(false);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const handleInstall = async () => {
-    if (!deferredPrompt) return;
-
-    (deferredPrompt as any).prompt();
-    const { outcome } = await (deferredPrompt as any).userChoice;
-
-    if (outcome === 'accepted') {
-      setInstalled(true);
+  const onInstallClick = async () => {
+    setBusy(true);
+    try {
+      await onInstall();
+    } finally {
+      setBusy(false);
     }
-
-    setDeferredPrompt(null);
-    setShowPrompt(false);
   };
-
-  if (!showPrompt || installed) return null;
 
   return (
     <Alert className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-md bg-indigo-50 border-indigo-200 shadow-lg z-50">
@@ -170,16 +137,20 @@ function InstallPrompt() {
           </div>
           <div className="flex gap-2 flex-shrink-0">
             <button
-              onClick={() => setShowPrompt(false)}
-              className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-100 rounded transition-colors"
+              type="button"
+              onClick={onDismiss}
+              disabled={busy}
+              className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-100 rounded transition-colors disabled:opacity-50"
             >
               No Thanks
             </button>
             <button
-              onClick={handleInstall}
-              className="px-3 py-1 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded transition-colors"
+              type="button"
+              onClick={onInstallClick}
+              disabled={busy}
+              className="px-3 py-1 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 rounded transition-colors disabled:opacity-50"
             >
-              Install
+              {busy ? 'Installing…' : 'Install'}
             </button>
           </div>
         </div>

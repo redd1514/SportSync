@@ -1,5 +1,25 @@
-import { getApiBaseUrl } from './apiBase';
+import { apiUrl, getApiBaseUrl } from './apiBase';
 import { supabase } from './supabase/client';
+
+/** Avoid `res.json()` on Vercel/HTML 404 pages ("The page could not be found"). */
+export async function readApiJson<T = unknown>(res: Response): Promise<T> {
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (ct.includes('application/json')) {
+    return res.json() as Promise<T>;
+  }
+  const text = await res.text();
+  if (text.trimStart().startsWith('<') || /not found/i.test(text.slice(0, 80))) {
+    throw new Error(
+      `API returned HTML instead of JSON (${res.status}). ` +
+        'Ensure Vercel deploy ran `build` (api bundle) and env vars include SUPABASE_SERVICE_ROLE_KEY.',
+    );
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+  }
+}
 
 const DEMO_API_JWT_KEY = 'sportsync_api_jwt';
 
@@ -52,12 +72,12 @@ export async function ensureApiAuthForUser(user: {
 
 /** Mint a SportSync API JWT after demo `/api/users/sync` (requires `SPORTSYNC_API_JWT_SECRET` on the API). */
 export async function exchangeDemoApiToken(params: { authId: string; email: string }): Promise<{ error: string | null }> {
-  const res = await fetch(`${getApiBaseUrl()}/api/auth/token`, {
+  const res = await fetch(apiUrl('/api/auth/token'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ auth_id: params.authId, email: params.email }),
   });
-  const data = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
+  const data = await readApiJson<{ access_token?: string; error?: string }>(res).catch(() => ({}));
   if (!res.ok || !data.access_token) {
     clearDemoApiToken();
     if (data.error) console.warn('[api] Demo token exchange failed:', data.error);
@@ -69,10 +89,11 @@ export async function exchangeDemoApiToken(params: { authId: string; email: stri
 
 /** Authenticated fetch to the Node API (Supabase access_token or demo API JWT). */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const p = path.startsWith('/') ? path : `/${path}`;
-  const url = `${getApiBaseUrl()}${p}`;
+  const url = apiUrl(path.startsWith('/') ? path : `/${path}`);
   const headers = new Headers(init?.headers ?? {});
   const token = await getAccessTokenForApi();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   return fetch(url, { ...init, headers });
 }
+
+export { getApiBaseUrl };

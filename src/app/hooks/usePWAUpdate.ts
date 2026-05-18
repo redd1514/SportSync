@@ -83,38 +83,38 @@ export function usePWAUpdate() {
 }
 
 /**
- * Hook to check if app is running in standalone mode (installed)
+ * Hook to check if app is running in standalone mode (installed).
+ * For install UI, prefer `usePWAInstall` (captures deferred prompt safely).
  */
 export function usePWAInstallation() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // Check if running in standalone mode
-    const standalone = window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true ||
+    const read = () =>
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true ||
       document.referrer.includes('android-app://');
 
-    setIsStandalone(standalone);
-    setIsInstalled(standalone);
-
-    // Listen for install events
-    const handleBeforeInstallPrompt = () => {
-      setIsInstalled(false);
+    const sync = () => {
+      const standalone = read();
+      setIsStandalone(standalone);
+      setIsInstalled(standalone);
     };
 
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setIsStandalone(true);
+    sync();
+
+    const onInstalled = () => {
+      sync();
       console.log('[PWA] App installed successfully');
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('appinstalled', onInstalled);
+    window.matchMedia('(display-mode: standalone)').addEventListener('change', sync);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('appinstalled', onInstalled);
+      window.matchMedia('(display-mode: standalone)').removeEventListener('change', sync);
     };
   }, []);
 
