@@ -21,6 +21,7 @@ interface AddonsContextType {
   /** Custom sports added by admin */
   customSports: SportMeta[];
   addCustomSport: (sport: SportMeta) => void;
+  updateCustomSport: (name: string, data: Partial<SportMeta>) => void;
   deleteCustomSport: (name: string) => void;
   /** All sports (default + custom) */
   allSportNames: string[];
@@ -129,6 +130,10 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateCustomSport = (name: string, data: Partial<SportMeta>) => {
+    setCustomSports(prev => prev.map(s => s.name === name ? { ...s, ...data, name: data.name || s.name } : s));
+  };
+
   const deleteCustomSport = (name: string) => {
     setCustomSports(prev => prev.filter(s => s.name !== name));
     setAddonsBySport(prev => { const n = { ...prev }; delete n[name]; return n; });
@@ -140,7 +145,7 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   return (
     <AddonsContext.Provider value={{
       addonsBySport, updateAddon, addAddon, deleteAddon,
-      customSports, addCustomSport, deleteCustomSport, allSportNames,
+      customSports, addCustomSport, updateCustomSport, deleteCustomSport, allSportNames,
       isLoading, error
     }}>
       {children}

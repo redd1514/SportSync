@@ -12,7 +12,7 @@ import { getLocalDateString } from '../../utils/date';
 import { apiFetch } from '../../utils/authenticatedFetch';
 import { genRefCode } from '../../../shared/ticketRef';
 import { downloadTicketQrPng } from '../../../shared/qrDownload';
-import { useFacilityMap, getSportMapColor, LiveStatus, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
+import { useFacilityMap, getSportMapColor, resolveCourtSportColor, LiveStatus, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
 import type { CourtBlock } from '../../contexts/FacilityMapContext';
 import { useUser, Booking } from '../../contexts/UserContext';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
@@ -41,11 +41,10 @@ const STATUS_COLORS: Record<LiveStatus, { fill: string; stroke: string; label: s
   maintenance: { fill: '#374151', stroke: '#4b5563', label: 'Maintenance' },
 };
 
-function getCourtColors(liveStatus: LiveStatus, sport: string): { fill: string; stroke: string } {
+function getCourtColors(liveStatus: LiveStatus, sportColor: string): { fill: string; stroke: string } {
   if (liveStatus === 'maintenance') return { fill: '#374151', stroke: '#4b5563' };
   if (liveStatus === 'occupied')    return { fill: '#991b1b', stroke: '#b91c1c' };
-  const sc = getSportMapColor(sport);
-  return { fill: sc, stroke: sc };
+  return { fill: sportColor, stroke: sportColor };
 }
 
 const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -1150,6 +1149,7 @@ interface FacilityMapViewerProps {
 
 export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapId, onMapChange, onExitCoachingReservation }: FacilityMapViewerProps) {
   const { maps, getCourtLiveStatus, isLoading: mapsLoading } = useFacilityMap();
+  const { customSports } = useAddons();
   const { createDeskBooking } = useBookingAPI();
   const { bookings, addBooking, user, calcCourtPrice, refreshBookingsFromApi, updateUser } = useUser();
 
@@ -1638,13 +1638,17 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="absolute z-10 rounded-2xl p-3.5 pointer-events-none"
               style={{ left: tooltipPos.x, top: tooltipPos.y, background: 'rgba(20,20,20,0.97)', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 8px 28px rgba(0,0,0,0.6)', width: 220 }}>
+              {(() => {
+                const hoveredColor = resolveCourtSportColor(hoveredBlock, customSports);
+                return (
+              <>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: `${getSportMapColor(hoveredBlock.sport)}20` }}>
-                  <SportIcon sport={hoveredBlock.sport} size={16} color={getSportMapColor(hoveredBlock.sport)} strokeWidth={2} />
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: `${hoveredColor}20` }}>
+                  <SportIcon sport={hoveredBlock.sport} size={16} color={hoveredColor} strokeWidth={2} />
                 </div>
                 <div>
                   <span className="text-white font-black" style={{ fontSize: 13 }}>{hoveredBlock.name}</span>
-                  <p style={{ fontSize: 10, color: getSportMapColor(hoveredBlock.sport), fontWeight: 700 }}>{hoveredBlock.sport}</p>
+                  <p style={{ fontSize: 10, color: hoveredColor, fontWeight: 700 }}>{hoveredBlock.sport}</p>
                 </div>
                 <div className="ml-auto">
                   <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: `${STATUS_COLORS[hoveredStatus].fill}20` }}>
@@ -1678,6 +1682,9 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
                 </div>
               )}
               <p className="text-gray-600 mt-1" style={{ fontSize: 9 }}>{SPORTS_INFO.find(s => s.name === hoveredBlock.sport)?.priceLabel || 'Custom rate'}</p>
+              </>
+                );
+              })()}
             </motion.div>
           )}
         </AnimatePresence>
@@ -1703,7 +1710,8 @@ export function FacilityMapViewer({ mode, compact = false, prefill, selectedMapI
               {publishedLayout.map(b => {
                 const sportLocked = isCoachReservation && b.sport !== prefill?.sport;
                 const liveStatus = sportLocked ? 'maintenance' : courtStatuses[b.id] || 'available';
-                const courtColors = sportLocked ? { fill: '#374151', stroke: '#4b5563', label: 'Unavailable' } : getCourtColors(liveStatus, b.sport);
+                const sportColor = resolveCourtSportColor(b, customSports);
+                const courtColors = sportLocked ? { fill: '#374151', stroke: '#4b5563', label: 'Unavailable' } : getCourtColors(liveStatus, sportColor);
                 const isHovered   = hoveredId === b.id;
                 const isClickable = liveStatus === 'available' && !sportLocked;
                 const clipId = `court-clip-${String(b.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;

@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, Edit2, X, Check, Eye, EyeOff } from "lucide-react";
+import {
+  Plus, Edit2, X, Check, Eye, EyeOff, LayoutDashboard, CalendarDays,
+  Activity, GraduationCap, Users, Megaphone, ShieldCheck, UserCog,
+  Mail, KeyRound, AtSign, BadgeCheck,
+} from "lucide-react";
 import { StaffAccount } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
 import { useStaffAPI } from "../../hooks/useStaffAPI";
@@ -12,6 +16,15 @@ const MODULES = [
   "User Account Management",
   "Announcements",
 ];
+
+const MODULE_META: Record<string, { icon: any; color: string; desc: string }> = {
+  Dashboard: { icon: LayoutDashboard, color: "#F97316", desc: "Live overview and KPIs" },
+  "Booking Management": { icon: CalendarDays, color: "#38BDF8", desc: "Bookings, QR, and calendar work" },
+  "Court Status": { icon: Activity, color: "#22C55E", desc: "Check-in, check-out, and court flow" },
+  "Coaching Requests": { icon: GraduationCap, color: "#A855F7", desc: "Coach payments and requests" },
+  "User Account Management": { icon: Users, color: "#FBBF24", desc: "Customer records and access" },
+  Announcements: { icon: Megaphone, color: "#EC4899", desc: "Publish notices and alerts" },
+};
 
 function isStaffPayload(x: unknown): x is StaffAccount {
   if (!x || typeof x !== "object") return false;
@@ -273,56 +286,56 @@ export function RoleManagementAdmin() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-[#1A1A1A] w-full max-w-xl rounded-3xl border border-white/10 overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-white/5 flex justify-between items-center flex-shrink-0">
-              <h3 className="text-xl font-black text-white">
-                {editingId ? "Edit Staff Account" : "Create Staff Account"}
-              </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white transition-colors">
-                <X className="w-6 h-6" />
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#181819] w-full max-w-3xl rounded-3xl border border-white/10 overflow-hidden max-h-[92vh] flex flex-col shadow-2xl shadow-black/50">
+            <div className="p-6 border-b border-white/5 flex justify-between items-start gap-4 flex-shrink-0" style={{ background: "linear-gradient(135deg,rgba(255,140,0,0.10),rgba(0,71,171,0.08),transparent)" }}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(255,140,0,0.16)", border: "1px solid rgba(255,140,0,0.28)" }}>
+                  <UserCog className="w-6 h-6 text-[#FF8C00]" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-xl font-black text-white">
+                    {editingId ? "Edit Staff Account" : "Create Staff Account"}
+                  </h3>
+                  <p className="text-gray-500 mt-1" style={{ fontSize: 12 }}>
+                    Configure identity, role, and exact module access for JRC SportSync.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsModalOpen(false)} className="w-10 h-10 rounded-2xl bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-400">Full Name</label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
-                    placeholder="e.g. Juan Staff"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-400">Email Address</label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
-                    placeholder="staff@jrc.com"
-                  />
-                </div>
-              </div>
+            <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[
+                  { key: "name", label: "Full Name", placeholder: "e.g. Juan Staff", type: "text", icon: BadgeCheck },
+                  { key: "email", label: "Email Address", placeholder: "staff@jrc.com", type: "email", icon: Mail },
+                  { key: "username", label: "Username", placeholder: "jstaff", type: "text", icon: AtSign },
+                ].map((field) => {
+                  const Icon = field.icon;
+                  return (
+                    <label key={field.key} className="group rounded-2xl p-3 border border-white/8 bg-[#101011] focus-within:border-[#FF8C00]/60 transition-colors">
+                      <span className="flex items-center gap-2 text-gray-500 font-black uppercase mb-2" style={{ fontSize: 10 }}>
+                        <Icon className="w-3.5 h-3.5 text-[#FF8C00]" /> {field.label}
+                      </span>
+                      <input
+                        type={field.type}
+                        value={(formData as any)[field.key]}
+                        onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
+                        className="w-full bg-transparent text-white placeholder:text-gray-700 focus:outline-none font-bold"
+                        style={{ fontSize: 14 }}
+                        placeholder={field.placeholder}
+                      />
+                    </label>
+                  );
+                })}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-400">Username</label>
-                  <input
-                    type="text"
-                    value={formData.username}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
-                    placeholder="jstaff"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-400">
-                    Password {editingId && <span className="text-gray-600 font-normal">(optional)</span>}
-                  </label>
+                <label className="group rounded-2xl p-3 border border-white/8 bg-[#101011] focus-within:border-[#FF8C00]/60 transition-colors">
+                  <span className="flex items-center gap-2 text-gray-500 font-black uppercase mb-2" style={{ fontSize: 10 }}>
+                    <KeyRound className="w-3.5 h-3.5 text-[#FF8C00]" /> Password {editingId && <span className="normal-case text-gray-600">(optional)</span>}
+                  </span>
                   <div className="relative">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -330,56 +343,99 @@ export function RoleManagementAdmin() {
                       autoComplete="new-password"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00] pr-10"
+                      className="w-full bg-transparent text-white placeholder:text-gray-700 focus:outline-none pr-10 font-bold"
+                      style={{ fontSize: 14 }}
                       placeholder={editingId ? "Leave blank to keep current" : "At least 6 characters"}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                    >
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                </div>
+                </label>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-gray-400">Role</label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value as "staff" | "admin" })}
-                  className="w-full bg-[#0D0D0D] border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:border-[#FF8C00]"
-                >
-                  <option value="staff">Staff (facility operations)</option>
-                  <option value="admin">Admin (full access)</option>
-                </select>
+              <div className="space-y-3">
+                <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Role</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    { value: "staff" as const, title: "Staff", desc: "Facility operations with selected modules", icon: ShieldCheck, color: "#38BDF8" },
+                    { value: "admin" as const, title: "Admin", desc: "Full system access and configuration", icon: UserCog, color: "#FF8C00" },
+                  ].map((role) => {
+                    const active = formData.role === role.value;
+                    const Icon = role.icon;
+                    return (
+                      <button
+                        key={role.value}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, role: role.value })}
+                        className="rounded-2xl p-4 border text-left transition-all"
+                        style={{ background: active ? `${role.color}16` : "#101011", borderColor: active ? `${role.color}55` : "rgba(255,255,255,0.08)" }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${role.color}18`, color: role.color }}>
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-white font-black" style={{ fontSize: 14 }}>{role.title}</p>
+                            <p className="text-gray-500" style={{ fontSize: 11 }}>{role.desc}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {formData.role === "staff" && (
                 <div className="space-y-3">
-                  <label className="text-sm font-semibold text-gray-400">Module Access</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {MODULES.map((mod) => (
-                      <label
-                        key={mod}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-[#0D0D0D] border border-white/5 cursor-pointer hover:border-white/20 transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={formData.permissions.includes(mod)}
-                          onChange={() => handleTogglePermission(mod)}
-                          className="w-4 h-4 rounded text-[#FF8C00] bg-black border-white/20 focus:ring-[#FF8C00]"
-                        />
-                        <span className="text-sm text-gray-300">{mod}</span>
-                      </label>
-                    ))}
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Module Access</p>
+                      <p className="text-gray-600 mt-1" style={{ fontSize: 11 }}>Choose what this staff account can operate.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData(f => ({ ...f, permissions: f.permissions.length === MODULES.length ? [] : [...MODULES] }))}
+                      className="px-3 py-1.5 rounded-xl border border-white/10 text-gray-300 hover:text-white hover:bg-white/5 font-black"
+                      style={{ fontSize: 11 }}
+                    >
+                      {formData.permissions.length === MODULES.length ? "Clear All" : "Select All"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {MODULES.map((mod) => {
+                      const meta = MODULE_META[mod];
+                      const Icon = meta.icon;
+                      const checked = formData.permissions.includes(mod);
+                      return (
+                        <button
+                          key={mod}
+                          type="button"
+                          onClick={() => handleTogglePermission(mod)}
+                          className="rounded-2xl p-3 border text-left transition-all"
+                          style={{ background: checked ? `${meta.color}14` : "#101011", borderColor: checked ? `${meta.color}45` : "rgba(255,255,255,0.08)" }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${meta.color}18`, color: meta.color }}>
+                              <Icon className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-white font-black truncate" style={{ fontSize: 13 }}>{mod}</p>
+                              <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{meta.desc}</p>
+                            </div>
+                            <span className="w-5 h-5 rounded-md flex items-center justify-center border" style={{ background: checked ? meta.color : "transparent", borderColor: checked ? meta.color : "rgba(255,255,255,0.18)" }}>
+                              {checked && <Check className="w-3.5 h-3.5 text-white" />}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="p-6 border-t border-white/5 flex gap-4 flex-shrink-0">
+            <div className="p-6 border-t border-white/5 flex gap-4 flex-shrink-0 bg-[#151516]">
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="flex-1 py-3 rounded-xl font-bold text-white bg-white/5 hover:bg-white/10 transition-colors"

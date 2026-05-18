@@ -8,6 +8,7 @@ import {
 import { resolveUserRowId } from './bookingService';
 import { awardLoyaltyPointForCompletedBooking } from './loyaltyService.ts';
 import { resolveCourtId as resolveOrCreateCourtId } from './courtService.ts';
+import { RealtimeEventEmitter } from './realtimeEventEmitter.ts';
 
 const BOOKING_SELECT = `
       id,
@@ -65,6 +66,44 @@ export function normalizeStartTime(t: string): string {
 function toMinutesHms(t: string): number {
   const [h, m] = String(t || '00:00').slice(0, 8).split(':').map((x) => parseInt(x, 10));
   return (h || 0) * 60 + (m || 0);
+}
+
+function formatTimeLabel(value?: string | null): string {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  const hour = Number(match[1]);
+  const minute = match[2];
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minute} ${suffix}`;
+}
+
+async function notifyBookingUser(
+  booking: {
+    id?: string;
+    user_id?: string | null;
+    booking_date?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+    courts?: { name?: string | null } | null;
+  },
+  eventType: string,
+  title: string,
+  message: string,
+) {
+  if (!booking?.user_id || !booking?.id) return;
+  const timeRange = [formatTimeLabel(booking.start_time), formatTimeLabel(booking.end_time)].filter(Boolean).join(' - ');
+  await RealtimeEventEmitter.notifyUser(String(booking.user_id), eventType, {
+    title,
+    message,
+    type: 'update',
+    bookingId: booking.id,
+    courtName: booking.courts?.name,
+    date: booking.booking_date,
+    time: timeRange || undefined,
+    targetTab: 'booking',
+    targetSub: 'mybookings',
+  });
 }
 
 /** True when no confirmed/pending booking overlaps [start, end) on court+date. */
@@ -328,7 +367,7 @@ export async function getAllBookingsFiltered(filters?: {
 export async function checkInBooking(bookingId: string, staffId?: string | null) {
   const { data: cur, error: curErr } = await supabase
     .from('bookings')
-    .select('id,status')
+    .select('id,status,user_id,booking_date,start_time,end_time,courts(name)')
     .eq('id', bookingId)
     .maybeSingle();
   if (curErr) throw curErr;
@@ -358,6 +397,13 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
       notes: null,
     });
   }
+
+  await notifyBookingUser(
+    cur as any,
+    'booking_checked_in',
+    'Booking checked in',
+    'Front desk has checked you in. Enjoy your session.',
+  );
 
   return fetchBookingById(bookingId);
 }
@@ -413,7 +459,7 @@ export async function refundLoyaltyRedemptionForUnstartedBooking(bookingId: stri
 export async function checkOutBooking(bookingId: string, staffId?: string | null) {
   const { data: cur, error: curErr } = await supabase
     .from('bookings')
-    .select('id,status,user_id')
+    .select('id,status,user_id,booking_date,start_time,end_time,courts(name)')
     .eq('id', bookingId)
     .maybeSingle();
   if (curErr) throw curErr;
@@ -455,6 +501,13 @@ export async function checkOutBooking(bookingId: string, staffId?: string | null
       notes: null,
     });
   }
+
+  await notifyBookingUser(
+    cur as any,
+    'booking_checked_out',
+    'Booking checked out',
+    'Front desk has checked you out. Thanks for playing at JRC SportSync.',
+  );
 
   return fetchBookingById(bookingId);
 }

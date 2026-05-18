@@ -37,6 +37,54 @@ const SPORTS = [
   { sport: 'Table Tennis', defaultW: 110, defaultH: 65,  color: '#06b6d4', desc: '2.74×1.52 m' },
 ];
 
+const CUSTOM_COURT_SWATCHES = [
+  '#FF8C00', '#0047AB', '#22c55e', '#06b6d4',
+  '#ec4899', '#f59e0b', '#ef4444', '#14b8a6',
+  '#8b5cf6', '#64748b', '#f97316', '#84cc16',
+  '#0ea5e9', '#eab308', '#10b981', '#f43f5e',
+];
+
+const normalizeHexColor = (value: string) => {
+  const raw = value.trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(raw)) return `#${raw.split('').map(ch => ch + ch).join('')}`;
+  if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw}`;
+  return null;
+};
+
+const hslToHex = (h: number, s: number, l: number) => {
+  const saturation = s / 100;
+  const lightness = l / 100;
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = lightness - c / 2;
+  const [r1, g1, b1] =
+    h < 60 ? [c, x, 0] :
+    h < 120 ? [x, c, 0] :
+    h < 180 ? [0, c, x] :
+    h < 240 ? [0, x, c] :
+    h < 300 ? [x, 0, c] : [c, 0, x];
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`;
+};
+
+const hexToHue = (hex: string) => {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const r = parseInt(normalized.slice(1, 3), 16) / 255;
+  const g = parseInt(normalized.slice(3, 5), 16) / 255;
+  const b = parseInt(normalized.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) return 0;
+  const hue = max === r
+    ? 60 * (((g - b) / delta) % 6)
+    : max === g
+      ? 60 * ((b - r) / delta + 2)
+      : 60 * ((r - g) / delta + 4);
+  return Math.round((hue + 360) % 360);
+};
+
 const CANVAS_PRESETS = [
   { label: 'Small',  desc: 'Boutique gym',    w: 900,  h: 600  },
   { label: 'Medium', desc: 'Mid-size center', w: 1400, h: 900  },
@@ -478,20 +526,40 @@ function EmptyMapState({ onNew }: { onNew:()=>void }) {
 
 /* ─── Inspector Panel ────────────────────────────────────────────── */
 function InspectorPanel({ block, canvasW, canvasH, allBlocks, onUpdate, onDelete, onDuplicate, onClose,
-  onBringToFront, onBringForward, onSendBackward, onSendToBack, customSports,
+  onBringToFront, onBringForward, onSendBackward, onSendToBack, customSports, onCustomSportColorChange,
 }: {
   block: CourtBlock; canvasW:number; canvasH:number; allBlocks: CourtBlock[];
   onUpdate:(p:Partial<CourtBlock>)=>void;
   onDelete:()=>void; onDuplicate:()=>void; onClose:()=>void;
   onBringToFront:()=>void; onBringForward:()=>void; onSendBackward:()=>void; onSendToBack:()=>void;
   customSports: { name:string; color:string }[];
+  onCustomSportColorChange:(sportName:string,color:string)=>void;
 }) {
   const isBuiltIn = SPORTS.some(s => s.sport === block.sport);
   const isCustom  = !isBuiltIn;
   const color = resolveCourtSportColor(block, customSports);
   const [localName, setLocalName] = useState(block.name);
   const [localSport, setLocalSport] = useState(block.sport);
+  const [customHex, setCustomHex] = useState(color);
+  const [customHue, setCustomHue] = useState(() => hexToHue(color) ?? 210);
   useEffect(()=>{ setLocalName(block.name); setLocalSport(block.sport); },[block.id, block.name, block.sport]);
+  useEffect(()=>{
+    setCustomHex(color);
+    const nextHue = hexToHue(color);
+    if (nextHue !== null) setCustomHue(nextHue);
+  },[color]);
+  const normalizedCustomHex = normalizeHexColor(customHex);
+  const customPaletteColors = useMemo(() => {
+    const saturationSteps = [92, 82, 72, 62, 48];
+    const lightnessSteps = [36, 46, 56, 66, 76];
+    return saturationSteps.flatMap((sat, row) =>
+      lightnessSteps.map(light => hslToHex(customHue, sat, light + (row === 4 ? 4 : 0)))
+    );
+  }, [customHue]);
+  const applyCustomColor = (nextColor: string) => {
+    setCustomHex(nextColor);
+    onCustomSportColorChange(block.sport, nextColor);
+  };
 
   const NumField = ({ label, valKey, min, max }: { label:string; valKey:'x'|'y'|'width'|'height'; min:number; max:number }) => (
     <div>
@@ -549,15 +617,97 @@ function InspectorPanel({ block, canvasW, canvasH, allBlocks, onUpdate, onDelete
             {isCustom ? 'SPORT NAME' : 'SPORT TYPE'}
           </p>
           {isCustom ? (
-            <input
-              value={localSport}
-              onChange={e=>setLocalSport(e.target.value)}
-              onBlur={()=>{ if(localSport.trim()) onUpdate({ sport:localSport.trim() }); }}
-              onKeyDown={e=>{ if(e.key==='Enter'&&localSport.trim()){ onUpdate({ sport:localSport.trim() }); (e.target as HTMLElement).blur(); } }}
-              placeholder="e.g. Squash, Archery..."
-              className="w-full rounded-xl px-3 py-2.5 text-white focus:outline-none"
-              style={{ fontSize:13, fontWeight:700, background:'rgba(255,255,255,0.06)', border:`1px solid ${color}40` }}
-            />
+            <div className="space-y-2">
+              <input
+                value={localSport}
+                onChange={e=>setLocalSport(e.target.value)}
+                onBlur={()=>{ if(localSport.trim()) onUpdate({ sport:localSport.trim() }); }}
+                onKeyDown={e=>{ if(e.key==='Enter'&&localSport.trim()){ onUpdate({ sport:localSport.trim() }); (e.target as HTMLElement).blur(); } }}
+                placeholder="e.g. Squash, Archery..."
+                className="w-full rounded-xl px-3 py-2.5 text-white focus:outline-none"
+                style={{ fontSize:13, fontWeight:700, background:'rgba(255,255,255,0.06)', border:`1px solid ${color}40` }}
+              />
+              <div className="rounded-xl p-2.5 space-y-2.5" style={{ background:'rgba(255,255,255,0.04)', border:`1px solid ${color}35` }}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-gray-500 font-black" style={{ fontSize:9, letterSpacing:.6 }}>COURT COLOR</p>
+                  <span className="font-black" style={{ fontSize:9, color }}>{color.toUpperCase()}</span>
+                </div>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {CUSTOM_COURT_SWATCHES.map(swatch=>(
+                    <button
+                      key={swatch}
+                      type="button"
+                      onClick={()=>applyCustomColor(swatch)}
+                      className="h-6 rounded-lg transition-all"
+                      style={{ background:swatch, border:`2px solid ${color.toLowerCase()===swatch.toLowerCase()?'#fff':'rgba(255,255,255,0.12)'}` }}
+                      title={swatch}
+                    />
+                  ))}
+                </div>
+                <div className="rounded-xl p-2 space-y-2" style={{ background:'rgba(0,0,0,0.18)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="flex items-center justify-between">
+                    <p className="text-gray-500 font-black" style={{ fontSize:8, letterSpacing:.6 }}>MORE COLORS</p>
+                    <span className="text-gray-600 font-black" style={{ fontSize:8 }}>{customHue}°</span>
+                  </div>
+                  <div
+                    className="rounded-full p-1"
+                    style={{ background:'linear-gradient(90deg,#ef4444,#f97316,#eab308,#22c55e,#06b6d4,#2563eb,#8b5cf6,#ec4899,#ef4444)' }}
+                  >
+                    <input
+                      type="range"
+                      min={0}
+                      max={359}
+                      value={customHue}
+                      onChange={e=>setCustomHue(Number(e.target.value))}
+                      className="w-full block cursor-pointer"
+                      style={{ accentColor:hslToHex(customHue, 86, 56), height:10 }}
+                      aria-label="Custom hue"
+                    />
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {customPaletteColors.map((paletteColor, index)=>(
+                      <button
+                        key={`${paletteColor}-${index}`}
+                        type="button"
+                        onClick={()=>applyCustomColor(paletteColor)}
+                        className="h-6 rounded-lg transition-all"
+                        style={{
+                          background:paletteColor,
+                          border:`2px solid ${color.toLowerCase()===paletteColor.toLowerCase()?'#fff':'rgba(255,255,255,0.1)'}`,
+                          boxShadow:color.toLowerCase()===paletteColor.toLowerCase()?`0 0 0 2px ${paletteColor}44`:'none',
+                        }}
+                        title={paletteColor}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 rounded-xl p-1.5" style={{ background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                  <div
+                    className="w-8 h-8 rounded-lg flex-shrink-0"
+                    style={{ background:normalizedCustomHex || color, boxShadow:`0 0 18px ${(normalizedCustomHex || color)}55` }}
+                  />
+                  <input
+                    value={customHex}
+                    onChange={e=>setCustomHex(e.target.value)}
+                    onKeyDown={e=>{
+                      if(e.key==='Enter'&&normalizedCustomHex) applyCustomColor(normalizedCustomHex);
+                    }}
+                    placeholder="#0EA5E9"
+                    className="min-w-0 flex-1 bg-transparent text-white focus:outline-none font-black"
+                    style={{ fontSize:11 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!normalizedCustomHex}
+                    onClick={()=>normalizedCustomHex&&applyCustomColor(normalizedCustomHex)}
+                    className="px-2.5 py-1.5 rounded-lg font-black transition-all disabled:opacity-35"
+                    style={{ fontSize:9, color:normalizedCustomHex?'#020617':'#777', background:normalizedCustomHex || 'rgba(255,255,255,0.08)' }}
+                  >
+                    APPLY
+                  </button>
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="grid grid-cols-3 gap-1.5">
               {SPORTS.map(t => {
@@ -662,7 +812,7 @@ function InspectorPanel({ block, canvasW, canvasH, allBlocks, onUpdate, onDelete
 /* ─── Main Builder ───────────────────────────────────────────────── */
 export function FacilityMapBuilder() {
   const { maps, createMap, updateMapBlocks, publishMap, deleteMap, updateMapMeta } = useFacilityMap();
-  const { allSportNames, customSports, addCustomSport, deleteCustomSport } = useAddons();
+  const { allSportNames, customSports, addCustomSport, updateCustomSport, deleteCustomSport } = useAddons();
 
   /* ── which map is being edited ── */
   const [editingMapId, setEditingMapId] = useState<string|null>(null);
@@ -683,6 +833,7 @@ export function FacilityMapBuilder() {
   /* ── Custom sport palette input ── */
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customSportInput, setCustomSportInput] = useState('');
+  const [customSportColor, setCustomSportColor] = useState('#0ea5e9');
   
   /* ── Clipboard ── */
   const clipboardRef = useRef<CourtBlock | null>(null);
@@ -726,6 +877,20 @@ export function FacilityMapBuilder() {
       return next;
     });
   },[pushHistory]);
+
+  const addCustomSportFromPalette = useCallback(() => {
+    const name = customSportInput.trim();
+    if (!name) return;
+    addCustomSport({ name, color: customSportColor, pricingType:'flat', flatPrice:300, priceLabel:'₱300/hr' });
+    setCustomSportInput('');
+    setCustomSportColor('#0ea5e9');
+    setShowCustomInput(false);
+  }, [addCustomSport, customSportColor, customSportInput]);
+
+  const handleCustomSportColorChange = useCallback((sportName:string, color:string) => {
+    updateCustomSport(sportName, { color });
+    mutate(prev => prev.map(b => b.sport === sportName ? { ...b, customColor: color } : b));
+  }, [mutate, updateCustomSport]);
 
   /* ── selection ── */
   const [selectedId,  setSelectedId]  = useState<string|null>(null);
@@ -1522,12 +1687,12 @@ export function FacilityMapBuilder() {
                       onDragStart={e=>{ e.dataTransfer.setData('courtTemplate',JSON.stringify(csTemplate)); e.dataTransfer.effectAllowed='copy'; }}
                       className="rounded-xl p-2.5 cursor-grab active:cursor-grabbing select-none transition-colors"
                       style={{background:`${cs.color}0d`,border:`1px solid ${cs.color}22`}}>
-                      <div className="flex items-center gap-2 mb-1.5">
+                      <div className="flex items-start gap-2 mb-2 pr-5">
                         <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{background:`${cs.color}22`}}>
                           <span style={{fontSize:11,fontWeight:900,color:cs.color}}>{cs.name.slice(0,2).toUpperCase()}</span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-white font-black truncate" style={{fontSize:11}}>{cs.name}</p>
+                          <p className="text-white font-black" style={{fontSize:11,lineHeight:1.15,wordBreak:'break-word'}}>{cs.name}</p>
                           <p className="text-gray-500" style={{fontSize:9}}>Custom · {cs.priceLabel}</p>
                         </div>
                         {/* Delete custom sport */}
@@ -1535,7 +1700,7 @@ export function FacilityMapBuilder() {
                           draggable={false}
                           onClick={e=>{ e.stopPropagation(); deleteCustomSport(cs.name); }}
                           title="Delete sport type"
-                          className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
+                          className="absolute right-2 top-2 w-5 h-5 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
                           style={{color:'#ef4444'}}>
                           <Trash2 size={10}/>
                         </button>
@@ -1564,10 +1729,7 @@ export function FacilityMapBuilder() {
                       value={customSportInput}
                       onChange={e=>setCustomSportInput(e.target.value)}
                       onKeyDown={e=>{
-                        if(e.key==='Enter'&&customSportInput.trim()){
-                          addCustomSport({name:customSportInput.trim(),color:'#8b5cf6',pricingType:'flat',flatPrice:300,priceLabel:'₱300/hr'});
-                          setCustomSportInput(''); setShowCustomInput(false);
-                        }
+                        if(e.key==='Enter'&&customSportInput.trim()) addCustomSportFromPalette();
                         if(e.key==='Escape'){setCustomSportInput('');setShowCustomInput(false);}
                       }}
                       placeholder="e.g. Squash, Archery..."
@@ -1577,10 +1739,10 @@ export function FacilityMapBuilder() {
                     />
                     <div className="flex gap-1">
                       <button
-                        onClick={()=>{ if(customSportInput.trim()){addCustomSport({name:customSportInput.trim(),color:'#8b5cf6',pricingType:'flat',flatPrice:300,priceLabel:'₱300/hr'});setCustomSportInput('');setShowCustomInput(false); }}}
+                        onClick={addCustomSportFromPalette}
                         className="flex-1 py-1 rounded-lg text-white font-black transition-all"
-                        style={{fontSize:9,background:'#8b5cf6',letterSpacing:.5}}>ADD</button>
-                      <button onClick={()=>{setCustomSportInput('');setShowCustomInput(false);}}
+                        style={{fontSize:9,background:customSportColor,letterSpacing:.5}}>ADD</button>
+                      <button onClick={()=>{setCustomSportInput('');setCustomSportColor('#0ea5e9');setShowCustomInput(false);}}
                         className="px-2 py-1 rounded-lg text-gray-500 hover:text-white transition-all"
                         style={{fontSize:9,background:'rgba(255,255,255,0.04)'}}>✕</button>
                     </div>
@@ -1591,7 +1753,7 @@ export function FacilityMapBuilder() {
             <div className="border-t border-white/6 px-3 py-2 flex-shrink-0 space-y-1">
               <p className="text-gray-700 font-black mb-0.5" style={{fontSize:8,letterSpacing:1}}>ON CANVAS</p>
               {allSportNames.map(sName=>{ const cnt=blocks.filter(b=>b.sport===sName).length; if(!cnt) return null;
-                const color=getSportMapColor(sName);
+                const color=customSports.find(cs=>cs.name===sName)?.color || getSportMapColor(sName);
                 return (<div key={sName} className="flex items-center justify-between">
                   <span className="text-gray-500" style={{fontSize:10}}>{sName}</span>
                   <span className="font-black" style={{fontSize:11,color}}>{cnt}</span>
@@ -1615,6 +1777,7 @@ export function FacilityMapBuilder() {
                 onSendBackward={()=>sendBackward(selectedBlock.id)}
                 onSendToBack={()=>sendToBack(selectedBlock.id)}
                 customSports={customSports}
+                onCustomSportColorChange={handleCustomSportColorChange}
               />
             )}
           </AnimatePresence>
