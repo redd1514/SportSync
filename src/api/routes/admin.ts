@@ -709,7 +709,48 @@ adminRouter.put('/staff/:id/deactivate', async (c) => {
   }
 });
 
-/** POST /api/admin/sports — persist a sport (+ optional courts) for payments and bookings */
+/** DELETE /api/admin/staff/:id - permanently remove staff/admin account from Auth + public.users. */
+adminRouter.delete('/staff/:id', async (c) => {
+  try {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return c.json(
+        {
+          error: 'SUPABASE_SERVICE_ROLE_KEY must be set on the API server to delete staff accounts.',
+          code: 'SERVICE_ROLE_REQUIRED',
+        },
+        503,
+      );
+    }
+
+    const id = c.req.param('id');
+    const { data: row, error: fErr } = await supabase
+      .from('users')
+      .select('id, auth_id, role')
+      .eq('id', id)
+      .maybeSingle();
+    if (fErr) throw fErr;
+    if (!row?.id) return c.json({ error: 'Not found' }, 404);
+    if (row.role !== 'staff' && row.role !== 'admin') {
+      return c.json({ error: 'This account is not staff or admin' }, 400);
+    }
+
+    const { error: dErr } = await supabase.from('users').delete().eq('id', row.id);
+    if (dErr) throw dErr;
+
+    if (row.auth_id) {
+      const { error: aErr } = await supabase.auth.admin.deleteUser(String(row.auth_id));
+      if (aErr) console.error('[Admin API] staff auth delete:', aErr.message);
+    }
+
+    return c.json({ id: row.id, deleted: true });
+  } catch (e: any) {
+    console.error('[Admin API] staff delete:', e?.message);
+    return c.json({ error: e?.message || 'Failed to delete staff' }, 400);
+  }
+});
+
+
+/** POST /api/admin/sports - persist a sport (+ optional courts) for payments and bookings */
 adminRouter.post('/sports', async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));

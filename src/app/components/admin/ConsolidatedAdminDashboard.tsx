@@ -1122,15 +1122,6 @@ function MasterCalendarTab() {
           <h2 className="text-white" style={{ fontSize: 26, fontWeight: 900 }}>Master Calendar</h2>
           <p className="text-gray-500" style={{ fontSize: 13 }}>Manage all bookings and schedules</p>
         </div>
-        <div className="flex gap-3 flex-wrap">
-          <button onClick={() => {
-            setBulkError('');
-            setBulkForm(f => ({ ...f, court: f.court || courtOptions[0]?.name || '' }));
-            setShowBulkBooking(true);
-          }} className="flex items-center gap-2 bg-[#FF8C00] text-white px-4 py-2 rounded-xl hover:bg-[#e67e00] transition-colors font-black" style={{ fontSize: 13 }}>
-            <Calendar size={16} /> Liga/Bulk Booking
-          </button>
-        </div>
       </div>
 
       {/* Manual booking success flash */}

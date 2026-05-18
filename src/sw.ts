@@ -7,7 +7,7 @@ import { clientsClaim } from 'workbox-core';
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { ExpirationPlugin } from 'workbox-expiration';
-import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
+import { CacheFirst, NetworkFirst } from 'workbox-strategies';
 
 self.skipWaiting();
 clientsClaim();
@@ -79,19 +79,9 @@ registerRoute(
   })
 );
 
-// CSS and JS - Stale While Revalidate
-registerRoute(
-  ({ request }) => request.destination === 'style' || request.destination === 'script',
-  new StaleWhileRevalidate({
-    cacheName: 'static-resources',
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 100,
-        maxAgeSeconds: 24 * 60 * 60, // 1 day
-      }),
-    ],
-  })
-);
+// Built CSS/JS assets are precached with hashed filenames by vite-plugin-pwa.
+// Avoid a runtime stale-while-revalidate cache here: after a Vercel deploy, an
+// old app shell can otherwise ask for chunks that no longer exist.
 
 // Handle offline mode
 self.addEventListener('fetch', (event: FetchEvent) => {
