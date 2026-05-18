@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Home, Map, Users, User as UserIcon, Wifi, Battery, Signal,
+  Home, Map, Users, User as UserIcon,
   CalendarDays, BookMarked, GraduationCap, Pencil,
 } from "lucide-react";
 import { PremiumMobileHome }       from "./PremiumMobileHome";
@@ -33,27 +33,6 @@ const mainTabs = [
 ];
 
 /* ── Status bar ── */
-function PremiumStatusBar() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 30000);
-    return () => clearInterval(t);
-  }, []);
-  const h = time.getHours(), m = time.getMinutes().toString().padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM"; const dh = h % 12 || 12;
-  return (
-    <div className="flex items-center justify-between px-5 h-10 flex-shrink-0"
-      style={{ background: "#0D0D0D", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-      <span className="font-black" style={{ fontSize: 13, color: "#E8E8EA" }}>{dh}:{m} {ampm}</span>
-      <div className="flex items-center gap-1.5">
-        <Signal  size={12} style={{ color: "#E8E8EA", opacity: 0.7 }} />
-        <Wifi    size={12} style={{ color: "#E8E8EA", opacity: 0.7 }} />
-        <Battery size={12} style={{ color: "#E8E8EA", opacity: 0.7 }} />
-      </div>
-    </div>
-  );
-}
-
 /* ── Bottom nav ── */
 function BottomNav({ active, onChange }: { active: MainTab; onChange: (t: MainTab) => void }) {
   return (
@@ -218,7 +197,6 @@ export function ConsolidatedMobileAppShell({ onLogout }: ConsolidatedMobileAppSh
 
   return (
     <div className="w-screen h-screen flex flex-col overflow-hidden" style={{ background: "#0D0D0D" }}>
-      <PremiumStatusBar />
       <PaymentFlashBanner />
       <div className="flex-1 overflow-hidden relative min-h-0">
         <AnimatePresence mode="wait">
