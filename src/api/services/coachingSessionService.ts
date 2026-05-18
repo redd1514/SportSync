@@ -491,6 +491,23 @@ export const coachingSessionService = {
           notes: `Coaching session checked in at ${new Date().toISOString()}`,
         });
       }
+      if (checkedIn && !/COACHING_CHECKED_IN|checked_in:/i.test(String(oldData?.admin_notes || ''))) {
+        const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', data?.coach_id).maybeSingle();
+        await notifyUser(
+          data?.user_id,
+          'coaching_session_checked_in',
+          'Coaching session checked in',
+          'Front desk has checked in your coaching session. Enjoy your lesson.',
+          { sessionId: data.id, status: 'ongoing', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+        await notifyUser(
+          coachRow?.user_id,
+          'coaching_session_checked_in_coach',
+          'Student checked in',
+          'Front desk has checked in your coaching session.',
+          { sessionId: data.id, status: 'ongoing', linkedBookingId, targetTab: 'coaching', targetSub: 'mycoaching' },
+        );
+      }
       if (rescheduleRequested && !/COACHING_RESCHEDULE_(REQUESTED|PROPOSED)/i.test(String(oldData?.admin_notes || ''))) {
         const { data: coachRow } = await supabase.from('coaches').select('user_id').eq('id', data?.coach_id).maybeSingle();
         if (linkedBookingId) {
@@ -611,11 +628,26 @@ export const coachingSessionService = {
     if (sErr) throw sErr;
     if (!session) throw new Error('Coaching session not found');
     if (String(session.user_id) !== reviewer_id) throw new Error('Only the student can review this coach.');
-    if (!/COACHING_CHECKED_OUT|checked_out:/i.test(String(session.admin_notes || ''))) {
+    const linkedBookingId =
+      linkedBookingIdFromNotes(session.notes) ||
+      linkedBookingIdFromAdminNotes(session.admin_notes);
+    let linkedBookingCompleted = false;
+    if (linkedBookingId) {
+      const { data: linkedBooking } = await supabase
+        .from('bookings')
+        .select('status')
+        .eq('id', linkedBookingId)
+        .maybeSingle();
+      linkedBookingCompleted = String(linkedBooking?.status || '') === 'completed';
+    }
+    if (
+      session.status !== 'completed' &&
+      !linkedBookingCompleted &&
+      !/COACHING_CHECKED_OUT|checked_out:/i.test(String(session.admin_notes || ''))
+    ) {
       throw new Error('Reviews open after front desk checkout.');
     }
     const cleanRating = Math.max(1, Math.min(5, Math.round(Number(rating || 0))));
-    const linkedBookingId = linkedBookingIdFromNotes(session.notes);
     await supabase.from('reviews').insert({
       reviewer_id,
       coach_id: session.coach_id,

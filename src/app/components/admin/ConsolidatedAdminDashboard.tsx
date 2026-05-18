@@ -983,6 +983,7 @@ function FacilityMapBuilderTab() {
 function MasterCalendarTab() {
   const { addBooking, cancellationRequests, updateCancellationRequest, updateBooking, bookings, user, calcCourtPrice } = useUser();
   const { requests, updateRequestStatus } = useCoaching();
+  const { maps } = useFacilityMap();
   const { createDeskBooking } = (useBookingAPI as any)();
   const [showManualBooking, setShowManualBooking] = useState(false);
   const [showBulkBooking, setShowBulkBooking] = useState(false);
@@ -996,8 +997,35 @@ function MasterCalendarTab() {
   const [pendingAction, setPendingAction] = useState<{ id: string; approved: boolean } | null>(null);
 
   const pendingCancellations = cancellationRequests.filter(r => r.status === 'pending').length;
-  const sportOptions = ['Basketball', 'Volleyball', 'Badminton', 'Pickleball', 'Billiards', 'Table Tennis'];
-  const courtOptions = ALL_COURTS.filter((court) => court.sport === bulkForm.sport);
+  const publishedCourtOptions = useMemo(() => {
+    const courts: { id: string; name: string; sport: string; mapId?: string }[] = [];
+    maps.filter(m => m.isPublished).forEach(m => {
+      m.blocks.forEach(block => {
+        if (block.status === 'maintenance') return;
+        if (!courts.some(c => c.name === block.name)) {
+          courts.push({ id: block.id, name: block.name, sport: block.sport, mapId: m.id });
+        }
+      });
+    });
+    return courts.length ? courts : ALL_COURTS;
+  }, [maps]);
+  const sportOptions = useMemo(
+    () => Array.from(new Set(publishedCourtOptions.map(court => court.sport))),
+    [publishedCourtOptions],
+  );
+  const courtOptions = publishedCourtOptions.filter((court) => court.sport === bulkForm.sport);
+  const selectedBulkCourt = courtOptions.find(court => court.name === bulkForm.court);
+
+  useEffect(() => {
+    if (!sportOptions.includes(bulkForm.sport) && sportOptions[0]) {
+      const firstCourt = publishedCourtOptions.find(court => court.sport === sportOptions[0]);
+      setBulkForm(f => ({ ...f, sport: sportOptions[0], court: firstCourt?.name || '' }));
+      return;
+    }
+    if (bulkForm.sport && !courtOptions.some(court => court.name === bulkForm.court)) {
+      setBulkForm(f => ({ ...f, court: courtOptions[0]?.name || '' }));
+    }
+  }, [bulkForm.sport, bulkForm.court, courtOptions, publishedCourtOptions, sportOptions]);
 
   const handleManualBooking = () => {
     const name = manualForm.customerName || 'Walk-in Customer';
@@ -1024,12 +1052,15 @@ function MasterCalendarTab() {
     setBulkError('');
     let current = new Date(start);
     let count = 0;
+    let skipped = 0;
+    let attempts = 0;
     const inc = bulkForm.recurringPattern === 'weekly' ? 7 : 14;
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const staffId = user?.id && uuidRe.test(user.id) ? user.id : undefined;
 
     try {
-      while (current <= end && count < 20) {
+      while (current <= end && attempts < 20) {
+        attempts++;
         const date = current.toISOString().split('T')[0];
         const amount = Math.round(calcCourtPrice(bulkForm.sport, date, bulkForm.time.slice(0, 5)) * bulkForm.duration);
         try {
@@ -1045,17 +1076,23 @@ function MasterCalendarTab() {
             source: 'bulk_liga',
             add_ons: `Bulk/Liga booking (${bulkForm.recurringPattern})`,
             staff_id: staffId,
+            facility_map_id: selectedBulkCourt?.mapId,
           });
           if (out?.booking) addBooking(out.booking as any);
+          count++;
         } catch (err) {
-          console.error('[AdminCalendar] bulk desk booking failed, local fallback', err);
-          addBooking({ id: `BK${Date.now()}_${count}`, sport: bulkForm.sport, date, time: bulkForm.time, duration: bulkForm.duration, court: bulkForm.court, status: 'confirmed', amount, paymentStatus: 'paid', createdAt: new Date().toISOString(), customerName: 'Liga Booking', addOns: 'Bulk/Liga booking' });
+          console.warn('[AdminCalendar] bulk desk booking skipped', err);
+          skipped++;
         }
         current = new Date(current.setDate(current.getDate() + inc));
-        count++;
+      }
+      if (count === 0) {
+        setBulkError(skipped > 0 ? 'No bulk bookings were created. The selected recurring slots may already be booked or unavailable.' : 'No dates matched this recurrence.');
+        return;
       }
       setShowBulkBooking(false);
-      setBulkSuccess(`Created ${count} recurring booking${count !== 1 ? 's' : ''} for ${bulkForm.sport}.`);
+      setBulkSuccess(`Created ${count} recurring booking${count !== 1 ? 's' : ''} for ${bulkForm.sport}${skipped ? ` (${skipped} skipped)` : ''}.`);
+      window.dispatchEvent(new Event('sportsync:bookings-refresh'));
       setTimeout(() => setBulkSuccess(''), 6000);
     } finally {
       setBulkBusy(false);
@@ -1233,15 +1270,23 @@ function MasterCalendarTab() {
       {/* Bulk Booking Modal */}
       {showBulkBooking && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1A1A1A] rounded-3xl p-6 max-w-md w-full border border-white/10 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-white font-black" style={{ fontSize: 18 }}>Liga/Bulk Booking</h3>
-              <button onClick={() => setShowBulkBooking(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+          <div className="bg-[#181819] rounded-3xl max-w-3xl w-full border border-white/10 max-h-[92vh] overflow-hidden flex flex-col shadow-2xl shadow-black/50">
+            <div className="flex items-center justify-between gap-4 p-6 border-b border-white/8" style={{ background: 'linear-gradient(135deg,rgba(255,140,0,0.12),rgba(34,197,94,0.06),transparent)' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-orange-500/15 border border-orange-400/25 flex items-center justify-center">
+                  <Calendar size={22} className="text-orange-300" />
+                </div>
+                <div>
+                  <h3 className="text-white font-black" style={{ fontSize: 20 }}>Liga/Bulk Booking</h3>
+                  <p className="text-gray-500" style={{ fontSize: 12 }}>Create recurring league reservations on the published facility map.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowBulkBooking(false)} className="w-10 h-10 rounded-2xl bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 flex items-center justify-center"><X size={18} /></button>
             </div>
-            <div className="space-y-4">
+            <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
               <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Sport</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {sportOptions.map(s => {
                     const active = bulkForm.sport === s;
                     const color = getSportColor(s);
@@ -1262,7 +1307,7 @@ function MasterCalendarTab() {
               </div>
               <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Court</label>
-                <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
                   {courtOptions.map(court => {
                     const active = bulkForm.court === court.name;
                     const color = getSportColor(bulkForm.sport);
@@ -1275,30 +1320,38 @@ function MasterCalendarTab() {
                       </button>
                     );
                   })}
+                  {courtOptions.length === 0 && (
+                    <div className="col-span-full rounded-2xl border border-yellow-400/20 bg-yellow-400/10 p-3 text-yellow-100 font-black" style={{ fontSize: 12 }}>
+                      No published courts found for this sport.
+                    </div>
+                  )}
                 </div>
               </div>
-              <div>
-                <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>START DATE & TIME</p>
-                <CustomDateTimePicker
-                  selectedDate={bulkForm.startDate}
-                  selectedTime={bulkForm.time}
-                  onDateChange={d => setBulkForm(f => ({ ...f, startDate: d }))}
-                  onTimeChange={t => setBulkForm(f => ({ ...f, time: t }))}
-                  minDate={new Date().toISOString().split('T')[0]}
-                  accentColor="#FF8C00"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>START DATE & TIME</p>
+                  <CustomDateTimePicker
+                    selectedDate={bulkForm.startDate}
+                    selectedTime={bulkForm.time}
+                    onDateChange={d => setBulkForm(f => ({ ...f, startDate: d }))}
+                    onTimeChange={t => setBulkForm(f => ({ ...f, time: t }))}
+                    minDate={new Date().toISOString().split('T')[0]}
+                    accentColor="#FF8C00"
+                  />
+                </div>
+                <div>
+                  <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>END DATE</p>
+                  <CustomDateTimePicker
+                    selectedDate={bulkForm.endDate}
+                    selectedTime={bulkEndTime}
+                    onDateChange={d => setBulkForm(f => ({ ...f, endDate: d }))}
+                    onTimeChange={setBulkEndTime}
+                    minDate={bulkForm.startDate || new Date().toISOString().split('T')[0]}
+                    accentColor="#FF8C00"
+                  />
+                </div>
               </div>
-              <div>
-                <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>END DATE</p>
-                <CustomDateTimePicker
-                  selectedDate={bulkForm.endDate}
-                  selectedTime={bulkEndTime}
-                  onDateChange={d => setBulkForm(f => ({ ...f, endDate: d }))}
-                  onTimeChange={setBulkEndTime}
-                  minDate={bulkForm.startDate || new Date().toISOString().split('T')[0]}
-                  accentColor="#FF8C00"
-                />
-              </div>
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-4">
               <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Pattern</label>
                 <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#101010] p-1 border border-white/8">
@@ -1318,10 +1371,29 @@ function MasterCalendarTab() {
                   })}
                 </div>
               </div>
+              <div>
+                <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Duration</label>
+                <div className="flex items-center gap-2 rounded-2xl bg-[#101010] border border-white/8 p-2">
+                  <button type="button" onClick={() => setBulkForm(f => ({ ...f, duration: Math.max(1, f.duration - 1) }))} className="w-9 h-9 rounded-xl bg-white/5 text-gray-300 hover:text-white font-black">-</button>
+                  <div className="flex-1 text-center">
+                    <p className="text-white font-black" style={{ fontSize: 18 }}>{bulkForm.duration}h</p>
+                    <p className="text-gray-600" style={{ fontSize: 10 }}>per booking</p>
+                  </div>
+                  <button type="button" onClick={() => setBulkForm(f => ({ ...f, duration: Math.min(8, f.duration + 1) }))} className="w-9 h-9 rounded-xl bg-white/5 text-gray-300 hover:text-white font-black">+</button>
+                </div>
+              </div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-[#101011] p-4">
+                <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Preview</p>
+                <p className="text-white font-black mt-1" style={{ fontSize: 14 }}>{bulkForm.court || 'Choose a court'} · {bulkForm.sport}</p>
+                <p className="text-gray-400 mt-1" style={{ fontSize: 12 }}>
+                  {bulkForm.startDate || 'Start date'} to {bulkForm.endDate || 'End date'} · {bulkForm.time || 'Start time'} · {bulkForm.recurringPattern === 'weekly' ? 'Every week' : 'Every 2 weeks'}
+                </p>
+              </div>
               {bulkError && <p className="text-red-400 font-black" style={{ fontSize: 12 }}>{bulkError}</p>}
               <button
                 onClick={() => void handleBulkBooking()}
-                disabled={bulkBusy}
+                disabled={bulkBusy || !bulkForm.court}
                 className="w-full bg-[#FF8C00] text-white py-3 rounded-xl font-black hover:bg-[#e67e00] transition-colors disabled:opacity-60 disabled:cursor-wait flex items-center justify-center gap-2"
                 style={{ fontSize: 14 }}
               >
