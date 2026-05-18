@@ -18,6 +18,9 @@ interface UpdateEvent extends Event {
 let registration: ServiceWorkerRegistration | null = null;
 let updateCheckInterval: ReturnType<typeof setInterval> | null = null;
 
+/** Emitted by vite-plugin-pwa (injectManifest) at build/dev time */
+const SERVICE_WORKER_URL = '/sw.js';
+
 /**
  * Register the service worker and set up update detection
  */
@@ -28,9 +31,8 @@ export async function registerServiceWorker(config: PWAConfig = {}): Promise<Ser
   }
 
   try {
-    registration = await navigator.serviceWorker.register('/service-worker.js', {
+    registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL, {
       scope: '/',
-      type: 'module',
     });
 
     console.log('[PWA] Service Worker registered successfully:', registration);

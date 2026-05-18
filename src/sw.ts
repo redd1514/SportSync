@@ -3,10 +3,14 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
+import { clientsClaim } from 'workbox-core';
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { ExpirationPlugin } from 'workbox-expiration';
-import { CacheFirst, NetworkFirst, NetworkOnly, StaleWhileRevalidate } from 'workbox-strategies';
+import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
+
+self.skipWaiting();
+clientsClaim();
 
 // Cleanup old caches
 cleanupOutdatedCaches();

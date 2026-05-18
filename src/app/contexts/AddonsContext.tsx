@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { SPORT_ADDONS as INITIAL_SPORT_ADDONS, AddOn } from "../components/sportsData";
 import { fetchAppData, putAppData } from "../utils/appDataClient";
+import { apiFetch } from "../utils/authenticatedFetch";
 
 const SPORT_ADDONS_KV_KEY = "sport_addons_v1";
 
@@ -64,6 +65,14 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
         }
         if (remote && Array.isArray(remote.customSports)) {
           setCustomSports(remote.customSports);
+          for (const sport of remote.customSports) {
+            if (!sport?.name) continue;
+            void apiFetch('/api/admin/sports', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: sport.name, description: `${sport.name} courts` }),
+            }).catch(() => undefined);
+          }
         }
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load add-ons");
@@ -111,6 +120,13 @@ export function AddonsProvider({ children }: { children: ReactNode }) {
   const addCustomSport = (sport: SportMeta) => {
     setCustomSports(prev => [...prev, sport]);
     setAddonsBySport(prev => ({ ...prev, [sport.name]: [] }));
+    void apiFetch('/api/admin/sports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: sport.name, description: `${sport.name} courts` }),
+    }).catch((e: unknown) => {
+      console.warn('[Addons] Could not persist sport to database:', e instanceof Error ? e.message : e);
+    });
   };
 
   const deleteCustomSport = (name: string) => {

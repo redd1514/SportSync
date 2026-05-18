@@ -44,6 +44,27 @@ export function isTerminalBookingStatus(status: unknown): boolean {
   return s === 'completed' || s === 'cancelled' || s === 'rejected';
 }
 
+/** Unpaid bookings hold the slot in DB but should not show as occupied on the facility map. */
+export function bookingOccupiesCourtOnMap(booking: {
+  status?: unknown;
+  paymentStatus?: unknown;
+}): boolean {
+  const raw = String(booking.status || '').toLowerCase();
+  if (['cancelled', 'completed', 'rejected'].includes(raw)) return false;
+  if (mapDbStatusToUiStatus(booking.status) === 'pending_payment') return false;
+  if (String(booking.paymentStatus || '').toLowerCase() === 'pending') return false;
+  return true;
+}
+
+export function bookingNeedsOnlinePayment(booking: {
+  status?: unknown;
+  paymentStatus?: unknown;
+}): boolean {
+  const ui = mapDbStatusToUiStatus(booking.status);
+  const pay = String(booking.paymentStatus || '').toLowerCase();
+  return ui === 'pending_payment' && pay === 'pending';
+}
+
 function manilaMinutesFromTime24(time24: unknown): number | null {
   const t = normalizeBookingTime(time24);
   if (!t) return null;

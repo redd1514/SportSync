@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
 import { paymentService } from '../services/paymentService.ts';
 import { resolveBearer } from '../auth/resolveBearer.ts';
-import { createPaymongoCourtCheckout } from '../services/paymongoCheckoutService.ts';
+import {
+  createPaymongoCourtCheckout,
+  resumePaymongoCourtCheckout,
+} from '../services/paymongoCheckoutService.ts';
 
 const paymentsRouter = new Hono();
 
@@ -20,6 +23,32 @@ paymentsRouter.post('/checkout', async (c) => {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Payment initialization failed';
     console.error('[payments/checkout]', message);
+    return c.json({ error: message }, 400);
+  }
+});
+
+/** Resume PayMongo checkout for an existing unpaid court booking */
+paymentsRouter.post('/resume', async (c) => {
+  try {
+    const auth = await resolveBearer(c.req.header('Authorization'));
+    if (!auth) {
+      return c.json({ error: 'Unauthorized. Please sign in again.' }, 401);
+    }
+
+    const body = await c.req.json();
+    const bookingId = String(body.booking_id || body.bookingId || '').trim();
+    if (!bookingId) {
+      return c.json({ error: 'booking_id is required' }, 400);
+    }
+
+    const result = await resumePaymongoCourtCheckout(auth.userId, auth.email, bookingId, {
+      success_url: body.success_url,
+      cancel_url: body.cancel_url,
+    });
+    return c.json(result, 200);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Payment initialization failed';
+    console.error('[payments/resume]', message);
     return c.json({ error: message }, 400);
   }
 });

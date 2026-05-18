@@ -4,7 +4,7 @@ import {
   CheckCircle, Eye, EyeOff, User, Shield, Lock, Mail, ArrowRight,
   Sparkles, Play, GraduationCap, Trophy, Zap, Star,
 } from "lucide-react";
-import img from "figma:asset/3c72242160182623c7af77022e5fe780472ce13b.png";
+import { APP_LOGO_SRC } from "../constants/branding";
 import { useUser } from "../contexts/UserContext";
 
 interface MobileAuthProps {
@@ -336,8 +336,8 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
         <div className="relative z-10 flex items-center gap-3 p-10">
           <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
             {/* Replaced the div logo with an img tag */}
-            <img 
-              src="/pwa-icons/icon-72x72.png" // Update this path and filename
+            <img
+              src={APP_LOGO_SRC}
               alt="JRC Logo"
               className="w-9 h-9 rounded-xl flex-shrink-0 object-cover shadow-lg"
             />
@@ -428,7 +428,7 @@ export function MobileAuth({ onLoginSuccess }: MobileAuthProps) {
                 <motion.div className="absolute inset-[-8px] rounded-full border-2 border-dashed"
                   style={{ borderColor: `${ORANGE}40` }}
                   animate={{ rotate: 360 }} transition={{ duration: 12, repeat: Infinity, ease: "linear" }} />
-                <img src={img} alt="JRC" className="w-16 h-16 rounded-full object-cover" style={{ border: `3px solid ${ORANGE}` }} />
+                <img src={APP_LOGO_SRC} alt="JRC" className="w-16 h-16 rounded-xl object-cover" style={{ border: `3px solid ${ORANGE}` }} />
               </div>
               <h1 className="font-black" style={{ fontSize: 24, letterSpacing: -0.5 }}>
                 <span style={{ color: TP }}>JRC </span>

@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { CustomDateTimePicker } from './shared/CustomDateTimePicker';
 import { formatManilaDateLabel, getManilaDateKey } from '../utils/manilaDate';
 import {
+  bookingNeedsOnlinePayment,
   displayRefCode,
   formatTimeAMPM,
   isTerminalBookingStatus,
@@ -20,6 +21,10 @@ import {
   mergeBookingRows,
   normalizeBookingForDisplay,
 } from '../utils/bookingDisplay';
+import {
+  redirectToPayMongoCheckout,
+  resumeCourtBookingPayment,
+} from '../services/paymongoPayment';
 
 // Helper functions
 const getSportFromCourtId = (courtId: string): string => {
@@ -295,6 +300,7 @@ export function UserMyBookings() {
   const [showClearModal, setShowClearModal] = useState(false);
   const [showClearCompletedModal, setShowClearCompletedModal] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
   const [hiddenCompletedIds, setHiddenCompletedIds] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('jrc_hiddenCompletedIds') || '[]');
@@ -431,6 +437,22 @@ export function UserMyBookings() {
     setLocalPendingRequests([]);
     setShowClearModal(false);
     toast.success('Local pending markers cleared.');
+  };
+
+  const handlePayBooking = async (booking: { id: string; downpaymentAmount?: number; downpaymentPercentage?: number }) => {
+    if (!user?.id || !user.email) {
+      toast.error('Please sign in to complete payment.');
+      return;
+    }
+    setPayingBookingId(booking.id);
+    try {
+      const result = await resumeCourtBookingPayment(booking.id, { id: user.id, email: user.email });
+      redirectToPayMongoCheckout(result.checkoutUrl);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start payment.');
+    } finally {
+      setPayingBookingId(null);
+    }
   };
 
   const upcomingBookings = userBookings.filter((b) => {
@@ -630,8 +652,15 @@ export function UserMyBookings() {
     const isPast = booking.status === 'completed' || booking.status === 'cancelled';
     const isPendingReq = booking.cancellationRequested || localPendingRequests.includes(booking.id) || !!booking.pendingChangeRequest;
     const isOngoing = booking.checkInStatus === 'checked_in' || booking.status === 'checked_in' || booking.status === 'ongoing';
-    const canModify = !isPast && !isPendingReq && !isOngoing && booking.status !== 'pending' && booking.status !== 'pending_verification';
+    const needsPayment = bookingNeedsOnlinePayment(booking);
+    const canModify = !isPast && !isPendingReq && !isOngoing && !needsPayment && booking.status !== 'pending' && booking.status !== 'pending_verification';
     const pendingReq = booking.pendingChangeRequest;
+    const payAmount = Number(booking.downpaymentAmount ?? 0);
+    const payPct = Number(booking.downpaymentPercentage ?? 50);
+    const payLabel =
+      payAmount > 0
+        ? `Pay ₱${payAmount.toLocaleString()} (${payPct}% down)`
+        : 'Pay';
 
     const { scanValue, displayCode } = resolveBookingTicketToken(booking.refCode, booking.id);
 
@@ -749,6 +778,31 @@ export function UserMyBookings() {
                   </div>
                 )}
               </div>
+            )}
+
+            {needsPayment && (
+              <button
+                type="button"
+                disabled={payingBookingId === booking.id}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handlePayBooking(booking);
+                }}
+                className="w-full py-3 rounded-xl font-black flex items-center justify-center gap-2 text-white transition-opacity disabled:opacity-60 relative z-40"
+                style={{
+                  fontSize: 12,
+                  background: 'linear-gradient(135deg,#FF8C00,#cc7000)',
+                  boxShadow: '0 2px 10px rgba(255,140,0,0.35)',
+                }}
+              >
+                {payingBookingId === booking.id ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <CreditCard size={14} />
+                )}
+                {payingBookingId === booking.id ? 'Opening checkout…' : payLabel}
+              </button>
             )}
 
             {canModify && (
@@ -1206,7 +1260,22 @@ export function UserMyBookings() {
 
       <AnimatePresence>
         {ticketBooking && (
-          <BookingTicketModal booking={ticketBooking} onClose={() => setTicketBooking(null)} />
+          <BookingTicketModal
+            booking={ticketBooking}
+            onClose={() => setTicketBooking(null)}
+            needsPayment={bookingNeedsOnlinePayment(ticketBooking)}
+            paying={payingBookingId === ticketBooking.id}
+            payLabel={
+              Number(ticketBooking.downpaymentAmount ?? 0) > 0
+                ? `Pay ₱${Number(ticketBooking.downpaymentAmount).toLocaleString()}`
+                : 'Pay'
+            }
+            onPay={
+              bookingNeedsOnlinePayment(ticketBooking)
+                ? () => void handlePayBooking(ticketBooking)
+                : undefined
+            }
+          />
         )}
       </AnimatePresence>
 

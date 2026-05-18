@@ -709,6 +709,30 @@ adminRouter.put('/staff/:id/deactivate', async (c) => {
   }
 });
 
+/** POST /api/admin/sports — persist a sport (+ optional courts) for payments and bookings */
+adminRouter.post('/sports', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const name = String(body.name || '').trim();
+    const description = body.description != null ? String(body.description) : null;
+    const courtNames = Array.isArray(body.courts)
+      ? body.courts.map((c: unknown) => String(c || '').trim()).filter(Boolean)
+      : [];
+    if (!name) return c.json({ error: 'name is required' }, 400);
+
+    const { ensureSportByName } = await import('../services/sportService.ts');
+    const { ensureCourtByName } = await import('../services/courtService.ts');
+    const sport = await ensureSportByName(name, description);
+    const courts: Array<{ id: string; name: string }> = [];
+    for (const courtName of courtNames) {
+      courts.push(await ensureCourtByName(courtName, sport.name));
+    }
+    return c.json({ ...sport, courts }, 201);
+  } catch (e: any) {
+    return c.json({ error: e?.message || 'Failed to save sport' }, 400);
+  }
+});
+
 export default adminRouter;
 
 

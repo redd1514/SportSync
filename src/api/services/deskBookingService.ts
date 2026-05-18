@@ -6,6 +6,8 @@ import {
   parseBookingNotes,
 } from '../utils/bookingMap';
 import { resolveUserRowId } from './bookingService';
+import { awardLoyaltyPointForCompletedBooking } from './loyaltyService.ts';
+import { resolveCourtId as resolveOrCreateCourtId } from './courtService.ts';
 
 const BOOKING_SELECT = `
       id,
@@ -130,57 +132,8 @@ async function ensureWalkInUserId(): Promise<string> {
   return data!.id as string;
 }
 
-async function resolveCourtId(courtName: string, sportName: string): Promise<string | null> {
-  const name = courtName.trim();
-  if (!name) return null;
-
-  const { data: rows, error } = await supabase
-    .from('courts')
-    .select('id, name, sports!inner(name)')
-    .ilike('name', name);
-
-  if (error) throw error;
-  if (!rows?.length) {
-    const numMatch = name.match(/^(.+?)\s+(\d+)$/i);
-    if (numMatch) {
-      const { data: fuzzy, error: fuzzyErr } = await supabase
-        .from('courts')
-        .select('id, name, sports!inner(name)')
-        .ilike('name', `${numMatch[1].trim()} ${numMatch[2]}`);
-      if (fuzzyErr) throw fuzzyErr;
-      if (fuzzy?.length) {
-        const bySport = fuzzy.find(
-          (r: { sports?: Array<{ name?: string }> | { name?: string } }) => {
-            const sportMatch = Array.isArray(r.sports)
-              ? r.sports[0]?.name
-              : r.sports?.name;
-            return String(sportMatch || '').toLowerCase() === sportName.trim().toLowerCase();
-          },
-        );
-        if (bySport?.id) return bySport.id as string;
-        if (fuzzy.length === 1) return fuzzy[0].id as string;
-      }
-    }
-    return null;
-  }
-  if (rows.length === 1) return rows[0].id as string;
-  const bySport = rows.find((r: { sports?: Array<{ name?: string }> | { name?: string } }) => {
-    const sportMatch = Array.isArray(r.sports) ? r.sports[0]?.name : r.sports?.name;
-    return sportMatch === sportName;
-  });
-  if (bySport?.id) return bySport.id as string;
-  throw new Error(
-    `Multiple database courts share the name "${name}". Match sport "${sportName}" or add a facility column to courts.`,
-  );
-}
-
 export async function createDeskBooking(input: DeskBookingInput) {
-  const courtId = await resolveCourtId(input.court, input.sport);
-  if (!courtId) {
-    throw new Error(
-      `Court not found in database: "${input.court}". Run migration 002_seed_facility_courts.sql to seed courts.`
-    );
-  }
+  const courtId = await resolveOrCreateCourtId(input.court, input.sport);
 
   const ref = (input.ref_code || genRefCode()).toUpperCase();
   const startNorm = normalizeStartTime(input.start_time);
@@ -492,7 +445,7 @@ export async function checkOutBooking(bookingId: string, staffId?: string | null
 
   if (uErr) throw uErr;
 
-  await ensureLoyaltyPointForCompletedBooking(bookingId);
+  await awardLoyaltyPointForCompletedBooking(bookingId);
 
   if (isValidUuid(staffId)) {
     await supabase.from('staff_operations').insert({
@@ -504,44 +457,6 @@ export async function checkOutBooking(bookingId: string, staffId?: string | null
   }
 
   return fetchBookingById(bookingId);
-}
-
-async function ensureLoyaltyPointForCompletedBooking(bookingId: string) {
-  const { data: booking, error: bookingErr } = await supabase
-    .from('bookings')
-    .select('id,user_id,status')
-    .eq('id', bookingId)
-    .maybeSingle();
-  if (bookingErr || !booking?.user_id || booking.status !== 'completed') return;
-
-  const { data: existing } = await supabase
-    .from('loyalty_transactions')
-    .select('id')
-    .eq('reference_id', bookingId)
-    .in('transaction_type', ['booking', 'booking_completed'])
-    .limit(1);
-  if ((existing || []).length > 0) return;
-
-  const { error: txErr } = await supabase
-    .from('loyalty_transactions')
-    .insert({
-      user_id: booking.user_id,
-      points_change: 1,
-      transaction_type: 'booking_completed',
-      reference_id: booking.id,
-    });
-  if (txErr) return;
-
-  const { data: userRow } = await supabase
-    .from('users')
-    .select('loyalty_points')
-    .eq('id', booking.user_id)
-    .maybeSingle();
-
-  await supabase
-    .from('users')
-    .update({ loyalty_points: Number(userRow?.loyalty_points || 0) + 1 })
-    .eq('id', booking.user_id);
 }
 
 export async function listStaffOperationsRecent(limit = 250) {

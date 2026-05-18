@@ -43,9 +43,17 @@ function formatTicketTime(time: string) {
 export function BookingTicketModal({
   booking,
   onClose,
+  needsPayment = false,
+  onPay,
+  paying = false,
+  payLabel,
 }: {
   booking: BookingTicketData;
   onClose: () => void;
+  needsPayment?: boolean;
+  onPay?: () => void;
+  paying?: boolean;
+  payLabel?: string;
 }) {
   const { scanValue, displayCode } = resolveBookingTicketToken(booking.refCode, booking.id);
   const color = getSportColor(booking.sport);
@@ -93,6 +101,20 @@ export function BookingTicketModal({
         onClick={(e) => e.stopPropagation()}
         className="flex flex-col items-stretch gap-3 w-full max-w-[min(100%,22rem)] my-auto"
       >
+        {needsPayment && (
+          <motion.div
+            className="w-full rounded-2xl border px-4 py-3"
+            style={{ background: 'rgba(255,140,0,0.10)', borderColor: 'rgba(255,140,0,0.28)' }}
+          >
+            <p className="text-[#FF8C00] font-black" style={{ fontSize: 12 }}>
+              Payment required
+            </p>
+            <p className="mt-1 text-gray-300" style={{ fontSize: 11, lineHeight: 1.5 }}>
+              Complete your downpayment to confirm this court reservation. The slot stays open on the map until payment is received.
+            </p>
+          </motion.div>
+        )}
+
         <motion.div
           className="w-full rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)]"
           style={{ background: '#111' }}
@@ -208,14 +230,29 @@ export function BookingTicketModal({
         )}
 
         <div className="flex gap-2 sm:gap-3 w-full">
-          <button
-            type="button"
-            disabled={downloading}
-            onClick={() => void handleDownload()}
-            className="flex-1 bg-white text-black py-3 sm:py-3.5 rounded-2xl font-black text-sm hover:bg-gray-100 transition-colors disabled:opacity-60"
-          >
-            {downloading ? 'Preparing…' : 'Download Ticket'}
-          </button>
+          {needsPayment && onPay ? (
+            <button
+              type="button"
+              disabled={paying}
+              onClick={() => onPay()}
+              className="flex-1 py-3 sm:py-3.5 rounded-2xl font-black text-sm text-white transition-opacity disabled:opacity-60"
+              style={{
+                background: 'linear-gradient(135deg,#FF8C00,#cc7000)',
+                boxShadow: '0 2px 12px rgba(255,140,0,0.35)',
+              }}
+            >
+              {paying ? 'Opening checkout…' : payLabel || 'Pay'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={downloading}
+              onClick={() => void handleDownload()}
+              className="flex-1 bg-white text-black py-3 sm:py-3.5 rounded-2xl font-black text-sm hover:bg-gray-100 transition-colors disabled:opacity-60"
+            >
+              {downloading ? 'Preparing…' : 'Download Ticket'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

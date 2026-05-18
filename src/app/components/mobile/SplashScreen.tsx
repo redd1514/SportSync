@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import img from "figma:asset/3c72242160182623c7af77022e5fe780472ce13b.png";
+import { APP_LOGO_SRC } from "../../constants/branding";
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -101,7 +101,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
               <div className="absolute inset-[-4px] rounded-full bg-[#FF8C00]/20 blur-md" />
               {/* Logo */}
               <div className="relative w-24 h-24 rounded-full border-4 border-[#FF8C00] overflow-hidden shadow-2xl shadow-orange-500/40">
-                <img src={img} alt="JRC SportSync" className="w-full h-full object-cover" />
+                <img src={APP_LOGO_SRC} alt="JRC SportSync" className="w-full h-full object-cover" />
               </div>
             </motion.div>
 

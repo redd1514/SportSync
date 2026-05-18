@@ -33,7 +33,7 @@ const FACILITY_CLOSE_HOUR = 23;
 
 type CoachingDisplayStatus = CoachingRequest["status"] | "ongoing";
 
-function fmt12(t: string) {
+function fmt12(t?: string) {
   const raw = String(t || "09:00").trim();
   const match12 = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
   if (match12) {
@@ -286,7 +286,7 @@ function SessionCard({
               <div className="rounded-lg p-2.5 border" style={{ background: SURF2, borderColor: BORDER }}>
                 <div className="flex items-center gap-2" style={{ color: TS, fontSize: 12 }}>
                   <Clock size={13} />
-                  <span>{fmt12(req.requestedTime)}{req.endTime ? ` - ${fmt12(req.endTime)}` : ""}</span>
+                  <span>{fmt12(req.requestedTime ?? "")}{req.endTime ? ` - ${fmt12(req.endTime ?? "")}` : ""}</span>
                 </div>
               </div>
             </div>
@@ -588,7 +588,7 @@ function DecisionModal({
             ["Student", req.userName],
             ["Sport", req.sport],
             ["Date", dateLabel(req.requestedDate)],
-            ["Time", `${fmt12(req.requestedTime)}${req.endTime ? ` - ${fmt12(req.endTime)}` : ""}`],
+            ["Time", `${fmt12(req.requestedTime ?? "")}${req.endTime ? ` - ${fmt12(req.endTime ?? "")}` : ""}`],
             ["Court", req.courtName || "Reserved court"],
             ["Total", amountLabel(req.totalAmount || req.coachFee)],
           ].map(([label, value]) => (
@@ -704,7 +704,7 @@ function TicketModal({ req, onClose }: { req: CoachingRequest; onClose: () => vo
             </div>
             <div className="rounded-2xl p-3" style={{ background: SURF }}>
               <p style={{ color: TS, fontSize: 10, fontWeight: 800 }}>TIME</p>
-              <p className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(req.requestedTime)}{req.endTime ? ` - ${fmt12(req.endTime)}` : ""}</p>
+              <p className="text-white font-black" style={{ fontSize: 12 }}>{fmt12(req.requestedTime ?? "")}{req.endTime ? ` - ${fmt12(req.endTime ?? "")}` : ""}</p>
             </div>
           </div>
           <div className="rounded-2xl p-3" style={{ background: SURF }}>
@@ -1032,7 +1032,7 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
               </button>
             </div>
           </div>
-
+          
           <div className="rounded-3xl border p-4 flex items-center min-h-[96px]" style={{ background: myCoachProfile ? `${BLUE}10` : SURF, borderColor: myCoachProfile ? `${BLUE}35` : BORDER }}>
             {myCoachProfile ? (
               <div className="flex items-center gap-3 min-w-0">

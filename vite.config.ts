@@ -35,11 +35,16 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      // Use generateSW strategy instead - simpler, auto-generates service worker
-      strategies: 'generateSW',
-      
-      // Auto-register and update service worker
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      // main.tsx registers via usePWA.ts (avoid duplicate registerSW.js injection)
+      injectRegister: false,
       registerType: 'autoUpdate',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
       
       // Manifest configuration
       manifest: {
@@ -126,66 +131,12 @@ export default defineConfig({
         ],
       },
       
-      // Service worker configuration
-      workbox: {
-        // Runtime caching strategies
-        runtimeCaching: [
-          // API calls - network first for real-time data
-          {
-            urlPattern: /^https:\/\/(api\.example\.com|your-api\.vercel\.app)\/.*$/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 5 * 60, // 5 minutes
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          // Static assets - cache first
-          {
-            urlPattern: /^https:\/\/[^/]*\/.*\.(js|css|woff2|ttf)$/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'assets-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
-              },
-            },
-          },
-          // Images - cache first with size limit
-          {
-            urlPattern: /^https:\/\/[^/]*\/.*\.(png|jpg|jpeg|gif|webp|svg)$/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'images-cache',
-              expiration: {
-                maxEntries: 60,
-                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
-              },
-            },
-          },
-        ],
-        
-        // Skip caching for certain requests
-        navigateFallback: '/index.html',
-        cleanupOutdatedCaches: true,
-      },
-      
-      // DevOptions for development
       devOptions: {
-        enabled: false, // Set to true to test PWA in dev mode
+        enabled: true,
         navigateFallback: 'index.html',
         suppressWarnings: true,
         type: 'module',
       },
-      
-      // Disable PWA in dev to avoid caching issues during development
-      disable: process.env.NODE_ENV === 'development' || false,
     }),
   ],
   resolve: {

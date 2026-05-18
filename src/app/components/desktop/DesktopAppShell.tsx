@@ -23,6 +23,7 @@ import { FloatingAIChat } from "../FloatingAIChat";
 import { PaymentFlashBanner } from "../shared/PaymentFlashBanner";
 import { UserHomePage } from "../user/UserHomePage";
 import { CoachApplicationForm } from "../user/CoachApplicationForm";
+import { APP_LOGO_SRC } from "../../constants/branding";
 import { useCoaching } from "../../contexts/CoachingContext";
 import { PhotoAvatar, loadProfilePhoto, onProfilePhotoUpdated } from "../shared/ProfilePhotoPicker";
 import { useUserAPI } from "../../hooks/useUserAPI";
@@ -582,8 +583,8 @@ export function DesktopAppShell({ onLogout }: DesktopAppShellProps) {
           <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
               <div className="flex items-center gap-2.5" style={{ overflow: "hidden" }}>
                   {/* Replaced the div logo with an img tag */}
-                  <img 
-                    src="/pwa-icons/icon-48x48.png" 
+                  <img
+                    src={APP_LOGO_SRC}
                     alt="JRC Logo"
                     className="w-9 h-9 rounded-xl flex-shrink-0 object-cover shadow-lg"
                   />

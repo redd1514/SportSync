@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.ts';
 import { findUserRow, isUuid } from './userRowQuery.ts';
 import { isCourtSlotAvailable } from './deskBookingService.ts';
 import { coachingSessionService } from './coachingSessionService.ts';
+import { resolveCourtId as resolveOrCreateCourtId } from './courtService.ts';
 
 export type CheckoutInput = {
   court: string;
@@ -79,27 +80,6 @@ async function resolveUserRowId(userId: string): Promise<string> {
   throw new Error('User profile not found. Please sign out and sign in again.');
 }
 
-async function resolveCourtId(courtName: string, sportName: string): Promise<string> {
-  const name = courtName.trim();
-  const { data: rows, error } = await supabase
-    .from('courts')
-    .select('id, name, sports!inner(name)')
-    .ilike('name', name);
-
-  if (error) throw error;
-  if (!rows?.length) {
-    throw new Error(`Court not found: "${name}". Seed courts in the database first.`);
-  }
-  if (rows.length === 1) return rows[0].id as string;
-
-  const bySport = rows.find((r: { sports?: { name?: string } | { name?: string }[] }) => {
-    const sportMatch = Array.isArray(r.sports) ? r.sports[0]?.name : r.sports?.name;
-    return String(sportMatch || '').toLowerCase() === sportName.trim().toLowerCase();
-  });
-  if (bySport?.id) return bySport.id as string;
-  throw new Error(`Multiple courts named "${name}" — specify sport.`);
-}
-
 export async function createPaymongoCourtCheckout(
   authUserId: string,
   authEmail: string,
@@ -149,7 +129,7 @@ export async function createPaymongoCourtCheckout(
   }
 
   const resolvedUserId = await resolveUserRowId(authUserId);
-  const courtId = await resolveCourtId(court, sport);
+  const courtId = await resolveOrCreateCourtId(court, sport);
   const startNorm = normalizeStartTime(start_time);
   const endNorm = endTimeFromStartAndDuration(startNorm, duration);
 
@@ -389,6 +369,196 @@ export async function createPaymongoCourtCheckout(
     bookingId,
     paymentId,
     coachingSessionId,
+    refCode: ref,
+    downpaymentAmount,
+    totalPrice: total,
+    downpaymentPercentage: pct,
+    balanceDue: Math.round((total - downpaymentAmount) * 100) / 100,
+  };
+}
+
+function parseBookingNotes(notes: string | null | undefined): Record<string, unknown> {
+  try {
+    return notes ? (JSON.parse(notes) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+type BookingRowForResume = {
+  id: string;
+  user_id: string;
+  booking_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  total_price: number | null;
+  notes: string | null;
+  qr_code_token: string | null;
+  courts?: { name?: string; sports?: { name?: string } | { name?: string }[] | null } | null;
+};
+
+/** New PayMongo session for an existing unpaid court booking (e.g. AI concierge). */
+export async function resumePaymongoCourtCheckout(
+  authUserId: string,
+  authEmail: string,
+  bookingId: string,
+  urls?: { success_url?: string; cancel_url?: string },
+) {
+  const paymongoSecret = String(process.env.PAYMONGO_SECRET_KEY || '').trim();
+  if (!paymongoSecret) {
+    throw new Error('PayMongo is not configured on the server (PAYMONGO_SECRET_KEY).');
+  }
+
+  const resolvedUserId = await resolveUserRowId(authUserId);
+
+  const { data: booking, error: bookingErr } = await supabase
+    .from('bookings')
+    .select(
+      `id, user_id, booking_date, start_time, end_time, status, total_price, notes, qr_code_token,
+       courts ( name, sports ( name ) )`,
+    )
+    .eq('id', bookingId)
+    .maybeSingle();
+
+  if (bookingErr) throw new Error(bookingErr.message);
+  const row = booking as BookingRowForResume | null;
+  if (!row) throw new Error('Booking not found');
+  if (String(row.user_id) !== resolvedUserId) {
+    throw new Error('You can only pay for your own bookings.');
+  }
+  if (String(row.status || '').toLowerCase() !== 'pending') {
+    throw new Error('This booking is no longer awaiting payment.');
+  }
+
+  const meta = parseBookingNotes(row.notes);
+  const total = Math.max(0, Number(meta.totalPrice ?? row.total_price ?? 0));
+  if (total <= 0) throw new Error('Booking total is invalid.');
+
+  const pct = Math.min(100, Math.max(1, Number(meta.downpaymentPercentage) || 50));
+  const downpaymentAmount =
+    meta.downpaymentAmount != null
+      ? Math.round(Number(meta.downpaymentAmount) * 100) / 100
+      : Math.round((total * pct) / 100 * 100) / 100;
+  const amountCentavos = Math.round(downpaymentAmount * 100);
+  if (amountCentavos < 100) throw new Error('Downpayment must be at least ₱1.00');
+
+  const ref = String(row.qr_code_token || meta.refCode || genRefCode()).toUpperCase();
+  const courtName = String(row.courts?.name || meta.court || 'Court');
+  const sportRel = row.courts?.sports;
+  const sportName = String(
+    (Array.isArray(sportRel) ? sportRel[0]?.name : sportRel?.name) || meta.sport || 'Sports',
+  );
+  const startLabel = String(row.start_time || '').slice(0, 5);
+
+  const { data: paymentRows, error: payListErr } = await supabase
+    .from('payments')
+    .select('id, status')
+    .eq('booking_id', bookingId)
+    .in('status', ['pending', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (payListErr) throw new Error(payListErr.message);
+
+  let paymentId = paymentRows?.[0]?.id as string | undefined;
+  if (!paymentId) {
+    const { data: created, error: createPayErr } = await supabase
+      .from('payments')
+      .insert({
+        user_id: resolvedUserId,
+        booking_id: bookingId,
+        amount: downpaymentAmount,
+        payment_method: 'paymongo',
+        status: 'pending',
+        transaction_id: `PM-${ref}-${Date.now()}`,
+      })
+      .select('id')
+      .single();
+    if (createPayErr) throw new Error(createPayErr.message);
+    paymentId = created!.id as string;
+  }
+
+  const appOrigin = process.env.APP_URL || 'http://localhost:5173';
+  const baseSuccess = appendQueryParam(urls?.success_url || `${appOrigin}/?payment=success`, 'booking_id', bookingId);
+  const baseCancel = appendQueryParam(urls?.cancel_url || `${appOrigin}/?payment=cancelled`, 'booking_id', bookingId);
+  const billingEmail = (authEmail || '').trim() || 'customer@sportsync.local';
+
+  const checkoutPayload = {
+    data: {
+      attributes: {
+        billing: {
+          name: String(meta.customerName || 'Sportsync Customer'),
+          email: billingEmail,
+        },
+        send_email_receipt: false,
+        show_description: true,
+        show_line_items: true,
+        line_items: [
+          {
+            amount: amountCentavos,
+            currency: 'PHP',
+            name: `${sportName} court downpayment (${pct}%)`,
+            quantity: 1,
+            description: `${courtName} · ${row.booking_date} ${startLabel} · ${ref}`.slice(0, 255),
+          },
+        ],
+        payment_method_types: ['gcash', 'card', 'paymaya'],
+        description: `Sportsync downpayment (${pct}% of PHP ${total})`,
+        statement_descriptor: 'SPORTSYNC',
+        success_url: baseSuccess,
+        cancel_url: baseCancel,
+        reference_number: ref,
+        metadata: {
+          bookingId: String(bookingId),
+          paymentId: String(paymentId),
+          refCode: String(ref),
+          type: 'court_downpayment',
+        },
+      },
+    },
+  };
+
+  const pmRes = await fetch('https://api.paymongo.com/v1/checkout_sessions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${paymongoSecret}:`).toString('base64')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(checkoutPayload),
+  });
+
+  const pmData = (await pmRes.json().catch(() => ({}))) as {
+    data?: { id?: string; attributes?: { checkout_url?: string } };
+    errors?: Array<{ detail?: string; title?: string; code?: string }>;
+  };
+
+  if (!pmRes.ok) {
+    const errMsg =
+      pmData?.errors?.[0]?.detail ||
+      pmData?.errors?.[0]?.title ||
+      pmData?.errors?.[0]?.code ||
+      `PayMongo rejected checkout (HTTP ${pmRes.status})`;
+    throw new Error(errMsg);
+  }
+
+  const checkoutUrl = pmData?.data?.attributes?.checkout_url;
+  const sessionId = pmData?.data?.id;
+  if (!checkoutUrl) throw new Error('PayMongo did not return a checkout URL');
+
+  await supabase
+    .from('payments')
+    .update({
+      paymongo_reference_id: sessionId,
+      status: 'processing',
+      amount: downpaymentAmount,
+    })
+    .eq('id', paymentId);
+
+  return {
+    checkoutUrl,
+    bookingId,
+    paymentId,
     refCode: ref,
     downpaymentAmount,
     totalPrice: total,

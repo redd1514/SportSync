@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, ReactNode, useEffect 
 
 import { getLocalDateString } from '../utils/date';
 import { fetchAppData, putAppData } from '../utils/appDataClient';
+import { bookingOccupiesCourtOnMap } from '../utils/bookingDisplay';
 
 /* ─── Types ─────────────────────────────────────────────────────── */
 export interface CourtBlock {
@@ -44,7 +45,7 @@ interface FacilityMapContextType {
   getCourtLiveStatus: (
     courtName: string,
     hour: number,
-    bookings: { court: string; date: string; time: string; duration: number; status: string; facilityMapId?: string | null }[],
+    bookings: { court: string; date: string; time: string; duration: number; status: string; paymentStatus?: string; facilityMapId?: string | null }[],
     mapId?: string,
     selectedDate?: string,
   ) => LiveStatus;
@@ -344,8 +345,8 @@ export function FacilityMapProvider({ children }: { children: ReactNode }) {
     const checkDate = selectedDate || today;
 
     const isOccupied = bookings.some(b => {
-      if (b.status === 'cancelled' || b.status === 'completed' || b.status === 'rejected') return false;
       if (b.date !== checkDate) return false;
+      if (!bookingOccupiesCourtOnMap(b)) return false;
       if (!bookingAppliesToPublishedMap(b, courtName, mapId, publishedMaps)) return false;
 
       const [bHour] = b.time.split(':').map(Number);

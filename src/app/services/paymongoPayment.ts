@@ -130,3 +130,39 @@ export async function initiateCourtBookingPayment(
 export function redirectToPayMongoCheckout(checkoutUrl: string) {
   window.location.href = checkoutUrl;
 }
+
+export async function resumeCourtBookingPayment(
+  bookingId: string,
+  authUser?: PaymentAuthUser | null,
+): Promise<CourtBookingPaymentResult> {
+  await resolvePaymentAccessToken(authUser);
+
+  const base = paymentReturnBaseUrl();
+  const success_url = `${base}?payment=success`;
+  const cancel_url = `${base}?payment=cancelled`;
+
+  const res = await apiFetch('/api/payments/resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      booking_id: bookingId,
+      success_url,
+      cancel_url,
+    }),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as CourtBookingPaymentResult & {
+    error?: string;
+    message?: string;
+  };
+
+  if (!res.ok) {
+    throw new Error(extractApiError(data, res.status));
+  }
+
+  if (!data.checkoutUrl) {
+    throw new Error('PayMongo checkout URL was not returned');
+  }
+
+  return data;
+}

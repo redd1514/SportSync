@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { supabase } from './supabaseClient';
+import { ensureSportByName } from './sportService.ts';
 
 function toStableUuid(input: string): string {
   const hex = createHash('sha256').update(input).digest('hex').slice(0, 32);
@@ -42,21 +43,8 @@ function buildMetaJson(availableDays: string[], timeRange: string): string {
 }
 
 async function resolveSportId(sportName: string): Promise<string> {
-  const q = sportName.trim();
-  const { data: exact } = await supabase.from('sports').select('id').eq('name', q).maybeSingle();
-  if (exact?.id) return exact.id;
-
-  const { data: rows } = await supabase.from('sports').select('id, name').eq('is_active', true).limit(200);
-  const lower = q.toLowerCase();
-  const hit =
-    rows?.find((s: { name: string }) => s.name?.toLowerCase() === lower) ||
-    rows?.find((s: { name: string }) => lower.includes(s.name?.toLowerCase())) ||
-    rows?.find((s: { name: string }) => s.name?.toLowerCase().includes(lower));
-  if (hit?.id) return hit.id;
-
-  throw new Error(
-    `No sport named "${sportName}" in the sports table. Add it in Supabase (Table editor → sports) or run the seed migration.`
-  );
+  const sport = await ensureSportByName(sportName);
+  return sport.id;
 }
 
 async function findOrCreateCoachUser(params: {

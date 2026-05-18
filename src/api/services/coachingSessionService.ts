@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.ts';
 import { resolveUserRowId } from './bookingService.ts';
 import { emitRealtimeEvent } from '../middleware/realtimeMiddleware.ts';
 import { RealtimeEventEmitter } from './realtimeEventEmitter.ts';
+import { awardLoyaltyForCoachingSessionCompletion } from './loyaltyService.ts';
 
 function defaultEndTimeFromStart(start: string): string {
   const parts = String(start || '09:00:00').split(':').map((p) => parseInt(p, 10));
@@ -571,6 +572,11 @@ export const coachingSessionService = {
             action: 'coaching_check_out',
             notes: `Coaching session checked out at ${new Date().toISOString()}`,
           });
+        }
+        try {
+          await awardLoyaltyForCoachingSessionCompletion(data);
+        } catch (loyaltyErr) {
+          console.warn('[coaching] loyalty award skipped:', (loyaltyErr as Error)?.message || loyaltyErr);
         }
       }
     } else if (dbStatus === 'rejected' || dbStatus === 'cancelled') {
