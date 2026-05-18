@@ -25,6 +25,7 @@ import { AdminBookingCalendar } from './AdminBookingCalendar';
 import { useBookingAPI } from '../../hooks/useBookingAPI';
 import { ALL_COURTS, SPORTS_INFO } from '../sportsData';
 import { useFacilityMap, getSportMapColor, bookingAppliesToPublishedMap } from '../../contexts/FacilityMapContext';
+import { useStaffLiveOperationsKPIs } from '../../hooks/useStaffLiveOperationsKPIs';
 import type { CourtBlock } from '../../contexts/FacilityMapContext';
 import { getSportColor, SportIcon } from '../SportIcons';
 import { FacilityMapViewer } from '../shared/FacilityMapViewer';
@@ -597,6 +598,7 @@ function TicketVerification() {
       const updated = await checkInBooking(result.id, staffId);
       updateBooking(result.id, updated);
       setResult({ ...result, ...updated, checkInStatus: 'checked_in', checkInTime: updated.checkInTime || t, status: 'checked_in' as any });
+      window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
     } catch (e: any) {
       setActionError(e?.message || 'Check-in failed. Please try again.');
       setCheckingIn(false);
@@ -2222,13 +2224,10 @@ function LiveOperations() {
     target: 'available' | 'maintenance';
     blockedCount: number;
   } | null>(null);
-  const [operationsData, setOperationsData] = useState<{
-    bookingsCount: number;
-    revenue: number;
-    activeCourts: number;
-    pendingRequests: number;
-  } | null>(null);
-  const [opsHydrated, setOpsHydrated] = useState(false);
+
+  const todayStr = getManilaDateKey();
+  const { data: operationsData, hydrated: opsHydrated, isConnected: opsRealtimeConnected } =
+    useStaffLiveOperationsKPIs(todayStr);
 
   const publishedMaps = useMemo(() => maps.filter((m) => m.isPublished), [maps]);
   const activeMap = selectedMapId
@@ -2236,73 +2235,40 @@ function LiveOperations() {
     : publishedMaps[0];
   const publishedLayout = activeMap?.blocks ?? [];
 
-  const loadLiveOperations = useCallback(async () => {
-    const todayStr = getManilaDateKey();
-    const currentMinutes = toMinutesOfDay(getManilaTimeKey());
-    try {
-      const res = await apiFetch(`/api/staff/operations?date=${encodeURIComponent(todayStr)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = (await res.json()) as {
-        bookingsCount?: number;
-        revenue?: number;
-        pendingRequests?: number;
-      };
-      const bookingsCount = Number(d.bookingsCount ?? 0);
-      const revenue = Number(d.revenue ?? 0);
-      const pendingRequests = Number(d.pendingRequests ?? 0);
-
-      const activeCourtNames = new Set<string>();
-      for (const booking of bookings) {
-        if (booking.date !== todayStr) continue;
-        if (booking.status !== 'confirmed') continue;
-        const startMinutes = toMinutesOfDay(booking.time || '00:00');
-        const durationMins = Math.max(1, Math.round(Number(booking.duration ?? 1) * 60));
-        const endMinutes = startMinutes + durationMins;
-        if (currentMinutes < startMinutes || currentMinutes >= endMinutes) continue;
-        const courtName = String(booking.court || '').trim();
-        if (!courtName) continue;
-        if (
-          !bookingAppliesToPublishedMap(
-            { court: courtName, facilityMapId: booking.facilityMapId },
-            courtName,
-            activeMap?.id,
-            publishedMaps,
-          )
-        ) {
-          continue;
-        }
-        activeCourtNames.add(courtName);
-      }
-
-      setOperationsData({
-        bookingsCount,
-        revenue,
-        activeCourts: activeCourtNames.size,
-        pendingRequests,
-      });
-      setOpsHydrated(true);
-    } catch (err) {
-      console.error('Failed to load live operations:', err);
-      setOperationsData({ bookingsCount: 0, revenue: 0, activeCourts: 0, pendingRequests: 0 });
-      setOpsHydrated(true);
-    }
-  }, [activeMap?.id, publishedMaps, bookings]);
-
   useEffect(() => {
     void refreshBookingsFromApi();
   }, [refreshBookingsFromApi]);
 
-  useEffect(() => {
-    void loadLiveOperations();
-    const id = window.setInterval(() => {
-      void loadLiveOperations();
-    }, 45_000);
-    return () => window.clearInterval(id);
-  }, [loadLiveOperations]);
+  const activeCourtsOnMap = useMemo(() => {
+    const currentMinutes = toMinutesOfDay(getManilaTimeKey());
+    const activeCourtNames = new Set<string>();
+    for (const booking of bookings) {
+      if (booking.date !== todayStr) continue;
+      if (booking.status !== 'confirmed') continue;
+      const startMinutes = toMinutesOfDay(booking.time || '00:00');
+      const durationMins = Math.max(1, Math.round(Number(booking.duration ?? 1) * 60));
+      const endMinutes = startMinutes + durationMins;
+      if (currentMinutes < startMinutes || currentMinutes >= endMinutes) continue;
+      const courtName = String(booking.court || '').trim();
+      if (!courtName) continue;
+      if (
+        !bookingAppliesToPublishedMap(
+          { court: courtName, facilityMapId: booking.facilityMapId },
+          courtName,
+          activeMap?.id,
+          publishedMaps,
+        )
+      ) {
+        continue;
+      }
+      activeCourtNames.add(courtName);
+    }
+    return activeCourtNames.size;
+  }, [bookings, todayStr, activeMap?.id, publishedMaps]);
 
   const todayBookingsCount = opsHydrated ? (operationsData?.bookingsCount ?? 0) : null;
   const totalRevToday = opsHydrated ? (operationsData?.revenue ?? 0) : null;
-  const openCourts = opsHydrated ? (operationsData?.activeCourts ?? 0) : null;
+  const openCourts = opsHydrated ? activeCourtsOnMap : null;
   const pendingCancellations = opsHydrated ? (operationsData?.pendingRequests ?? 0) : null;
 
   const sportGroups = publishedLayout
@@ -2352,7 +2318,15 @@ function LiveOperations() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-white" style={{ fontSize: 26, fontWeight: 900 }}>Live Operations</h2>
-          <p className="text-gray-400" style={{ fontSize: 13 }}>Real-time court status and today's overview</p>
+          <p className="text-gray-400 flex items-center gap-2" style={{ fontSize: 13 }}>
+            Real-time court status and today&apos;s overview
+            {opsRealtimeConnected && (
+              <span className="inline-flex items-center gap-1 text-green-400 font-bold" style={{ fontSize: 11 }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                Live
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-1 bg-[#1A1A1A] rounded-xl p-1 border border-white/8">
           {([['map','Live Map',Map],['list','Court List',Activity],['verify','Verify',ScanLine]] as [string,string,any][]).map(([id,label,Icon]) => (

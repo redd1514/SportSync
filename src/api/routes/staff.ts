@@ -1,9 +1,49 @@
 import { Hono } from 'hono';
 import { supabase } from '../services/supabaseClient.ts';
 import { listStaffOperationsRecent, refundLoyaltyRedemptionForUnstartedBooking } from '../services/deskBookingService.ts';
+import { computeTodayRevenueForBookingDate } from '../services/staffOperationsKpiService.ts';
 import { RealtimeEventEmitter } from '../services/realtimeEventEmitter.ts';
+import { manilaDateKey } from '../utils/aiContext.js';
 
 const staffRouter = new Hono();
+
+const MANILA_TZ = 'Asia/Manila';
+
+function toMinutesHms(t: string): number {
+  const [h, m] = String(t || '00:00').slice(0, 8).split(':').map((x) => parseInt(x, 10));
+  return (h || 0) * 60 + (m || 0);
+}
+
+function getManilaTimeMinutes(): number {
+  const timeStr = new Intl.DateTimeFormat('en-GB', {
+    timeZone: MANILA_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date());
+  return toMinutesHms(timeStr);
+}
+
+async function countActiveCourtsForDate(date: string): Promise<number> {
+  if (date !== manilaDateKey()) return 0;
+  const nowM = getManilaTimeMinutes();
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('court_id, start_time, end_time')
+    .eq('booking_date', date)
+    .eq('status', 'confirmed');
+  if (error) throw error;
+
+  const activeCourtIds = new Set<string>();
+  for (const row of data ?? []) {
+    const courtId = (row as { court_id?: string }).court_id;
+    if (!courtId) continue;
+    const startM = toMinutesHms(String((row as { start_time?: string }).start_time ?? ''));
+    const endM = toMinutesHms(String((row as { end_time?: string }).end_time ?? ''));
+    if (nowM >= startM && nowM < endM) activeCourtIds.add(String(courtId));
+  }
+  return activeCourtIds.size;
+}
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -99,36 +139,27 @@ async function countActionableBookingRequests() {
 
 /** KPIs for Live Operations + raw staff_operations rows for Activity tab */
 staffRouter.get('/operations', async (c) => {
-  const date = c.req.query('date') || new Date().toISOString().split('T')[0];
+  const date = c.req.query('date') || manilaDateKey();
 
   try {
-    const [{ data: payRows }, { data: bookRows }, pendingRequests, ops] = await Promise.all([
-      supabase.from('payments').select('amount, created_at, completed_at').eq('status', 'completed').limit(800),
+    const [{ data: bookRows }, pendingRequests, activeCourts, ops, revenue] = await Promise.all([
       supabase
         .from('bookings')
         .select('id')
         .eq('booking_date', date)
         .not('status', 'eq', 'cancelled'),
       countActionableBookingRequests(),
+      countActiveCourtsForDate(date),
       listStaffOperationsRecent(100),
+      computeTodayRevenueForBookingDate(date),
     ]);
-
-    let revenue = 0;
-    for (const p of payRows ?? []) {
-      const ts =
-        (p as { completed_at?: string }).completed_at ||
-        (p as { created_at?: string }).created_at ||
-        '';
-      const day = ts.slice(0, 10);
-      if (day === date) revenue += Number((p as { amount?: number }).amount ?? 0);
-    }
 
     const bookingsCount = bookRows?.length ?? 0;
     return c.json({
       date,
       bookingsCount,
       revenue,
-      activeCourts: null,
+      activeCourts,
       pendingRequests,
       operations: ops,
     });
@@ -138,7 +169,7 @@ staffRouter.get('/operations', async (c) => {
       date,
       bookingsCount: 0,
       revenue: 0,
-      activeCourts: null,
+      activeCourts: 0,
       pendingRequests: 0,
       operations: [],
     });

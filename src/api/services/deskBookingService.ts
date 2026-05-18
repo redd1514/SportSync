@@ -364,6 +364,54 @@ export async function getAllBookingsFiltered(filters?: {
   );
 }
 
+/** Record remaining balance as a completed payment when guest checks in at the desk. */
+async function recordBalancePaymentOnCheckIn(bookingId: string, userId: string | null | undefined) {
+  const { data: booking, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, user_id, total_price, notes')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bErr || !booking) return;
+
+  const resolvedUserId = userId || (booking as { user_id?: string }).user_id;
+  if (!resolvedUserId) return;
+
+  const meta = parseBookingNotes((booking as { notes?: string }).notes);
+  const total = Number(meta.totalPrice ?? (booking as { total_price?: number }).total_price ?? 0);
+  if (total <= 0) return;
+
+  const { data: payments } = await supabase
+    .from('payments')
+    .select('id, amount, status, transaction_id')
+    .eq('booking_id', bookingId);
+
+  const balanceTxPrefix = `BAL-${bookingId}`;
+  const alreadyRecorded = (payments ?? []).some((p) =>
+    String((p as { transaction_id?: string }).transaction_id || '').startsWith(balanceTxPrefix),
+  );
+  if (alreadyRecorded) return;
+
+  const completedSum = (payments ?? [])
+    .filter((p) => (p as { status?: string }).status === 'completed')
+    .reduce((sum, p) => sum + Number((p as { amount?: number }).amount ?? 0), 0);
+
+  const balance = Math.round((total - completedSum) * 100) / 100;
+  if (balance < 0.01) return;
+
+  const { error: insErr } = await supabase.from('payments').insert({
+    user_id: resolvedUserId,
+    booking_id: bookingId,
+    amount: balance,
+    payment_method: 'cash',
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+    transaction_id: `${balanceTxPrefix}-${Date.now()}`,
+  });
+  if (insErr) {
+    console.error('[recordBalancePaymentOnCheckIn]', insErr.message);
+  }
+}
+
 export async function checkInBooking(bookingId: string, staffId?: string | null) {
   const { data: cur, error: curErr } = await supabase
     .from('bookings')
@@ -383,11 +431,14 @@ export async function checkInBooking(bookingId: string, staffId?: string | null)
 
   if (uErr) throw uErr;
 
+  const completedAt = new Date().toISOString();
   await supabase
     .from('payments')
-    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .update({ status: 'completed', completed_at: completedAt })
     .eq('booking_id', bookingId)
     .eq('status', 'pending');
+
+  await recordBalancePaymentOnCheckIn(bookingId, (cur as { user_id?: string }).user_id);
 
   if (isValidUuid(staffId)) {
     await supabase.from('staff_operations').insert({

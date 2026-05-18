@@ -123,6 +123,10 @@ export const useBookingAPI = () => {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error((data as { error?: string }).error || 'Check-in failed');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('sportsync:staff-operations-refresh'));
+        window.dispatchEvent(new Event('sportsync:bookings-refresh'));
+      }
       return data;
     } catch (err: any) {
       setError(err.message);
