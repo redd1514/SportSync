@@ -108,6 +108,12 @@ export const useStaffAPI = () => {
     });
   }, [handleRequest]);
 
+  const deleteStaffAccount = useCallback((staffId: string) => {
+    return handleRequest(`/api/admin/staff/${staffId}`, {
+      method: 'DELETE',
+    });
+  }, [handleRequest]);
+
   return {
     getStaffOperations,
     getPendingRequests,
@@ -121,6 +127,7 @@ export const useStaffAPI = () => {
     createStaffAccount,
     updateStaffAccount,
     deactivateStaffAccount,
+    deleteStaffAccount,
     loading,
     error
   };

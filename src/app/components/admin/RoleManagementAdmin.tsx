@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Plus, Edit2, X, Check, Eye, EyeOff, LayoutDashboard, CalendarDays,
-  Activity, GraduationCap, Users, Megaphone, ShieldCheck, UserCog,
-  Mail, KeyRound, AtSign, BadgeCheck,
+  Plus, Edit2, X, Check, Eye, EyeOff, ShieldCheck, UserCog,
+  Mail, KeyRound, AtSign, BadgeCheck, Trash2, AlertTriangle, Loader2,
 } from "lucide-react";
 import { StaffAccount } from "../../contexts/UserContext";
 import { SectionLoader } from "../shared/LoadingScreen";
@@ -17,15 +16,6 @@ const MODULES = [
   "Announcements",
 ];
 
-const MODULE_META: Record<string, { icon: any; color: string; desc: string }> = {
-  Dashboard: { icon: LayoutDashboard, color: "#F97316", desc: "Live overview and KPIs" },
-  "Booking Management": { icon: CalendarDays, color: "#38BDF8", desc: "Bookings, QR, and calendar work" },
-  "Court Status": { icon: Activity, color: "#22C55E", desc: "Check-in, check-out, and court flow" },
-  "Coaching Requests": { icon: GraduationCap, color: "#A855F7", desc: "Coach payments and requests" },
-  "User Account Management": { icon: Users, color: "#FBBF24", desc: "Customer records and access" },
-  Announcements: { icon: Megaphone, color: "#EC4899", desc: "Publish notices and alerts" },
-};
-
 function isStaffPayload(x: unknown): x is StaffAccount {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
@@ -33,13 +23,15 @@ function isStaffPayload(x: unknown): x is StaffAccount {
 }
 
 export function RoleManagementAdmin() {
-  const { getStaffAccounts, createStaffAccount, updateStaffAccount } = useStaffAPI();
+  const { getStaffAccounts, createStaffAccount, updateStaffAccount, deleteStaffAccount } = useStaffAPI();
   const [staffList, setStaffList] = useState<StaffAccount[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StaffAccount | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -49,7 +41,6 @@ export function RoleManagementAdmin() {
     password: "",
     role: "staff" as "staff" | "admin",
     status: "active" as "active" | "inactive",
-    permissions: [...MODULES],
   });
 
   const loadStaff = useCallback(async () => {
@@ -87,7 +78,6 @@ export function RoleManagementAdmin() {
       password: "",
       role: "staff",
       status: "active",
-      permissions: [...MODULES],
     });
     setIsModalOpen(true);
   };
@@ -101,7 +91,6 @@ export function RoleManagementAdmin() {
       password: "",
       role: staff.role,
       status: staff.status,
-      permissions: staff.permissions?.length ? [...staff.permissions] : [...MODULES],
     });
     setIsModalOpen(true);
   };
@@ -115,15 +104,6 @@ export function RoleManagementAdmin() {
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "Update failed");
     }
-  };
-
-  const handleTogglePermission = (mod: string) => {
-    setFormData((prev) => {
-      const perms = prev.permissions.includes(mod)
-        ? prev.permissions.filter((p) => p !== mod)
-        : [...prev.permissions, mod];
-      return { ...prev, permissions: perms };
-    });
   };
 
   const handleSave = async () => {
@@ -140,7 +120,6 @@ export function RoleManagementAdmin() {
           username: formData.username,
           role: formData.role,
           status: formData.status,
-          permissions: formData.permissions,
         };
         if (formData.password.length >= 6) body.password = formData.password;
         const updated = await updateStaffAccount(editingId, body);
@@ -151,7 +130,6 @@ export function RoleManagementAdmin() {
                 ? {
                     ...s,
                     ...updated,
-                    permissions: Array.isArray(updated.permissions) ? updated.permissions : formData.permissions,
                   }
                 : s,
             ),
@@ -165,7 +143,6 @@ export function RoleManagementAdmin() {
           password: formData.password,
           role: formData.role,
           status: formData.status,
-          permissions: formData.permissions,
         });
         await loadStaff();
       }
@@ -174,6 +151,21 @@ export function RoleManagementAdmin() {
       setLoadError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deleteTarget) return;
+    setLoadError(null);
+    setDeleting(true);
+    try {
+      await deleteStaffAccount(deleteTarget.id);
+      setStaffList((prev) => prev.filter((staff) => staff.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -268,6 +260,13 @@ export function RoleManagementAdmin() {
                       >
                         {staff.status === "active" ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                       </button>
+                      <button
+                        onClick={() => setDeleteTarget(staff)}
+                        className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/20 transition-colors"
+                        title="Delete Account"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -298,7 +297,7 @@ export function RoleManagementAdmin() {
                     {editingId ? "Edit Staff Account" : "Create Staff Account"}
                   </h3>
                   <p className="text-gray-500 mt-1" style={{ fontSize: 12 }}>
-                    Configure identity, role, and exact module access for JRC SportSync.
+                    Configure identity and role for JRC SportSync.
                   </p>
                 </div>
               </div>
@@ -358,7 +357,7 @@ export function RoleManagementAdmin() {
                 <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Role</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
-                    { value: "staff" as const, title: "Staff", desc: "Facility operations with selected modules", icon: ShieldCheck, color: "#38BDF8" },
+                    { value: "staff" as const, title: "Staff", desc: "Facility operations account", icon: ShieldCheck, color: "#38BDF8" },
                     { value: "admin" as const, title: "Admin", desc: "Full system access and configuration", icon: UserCog, color: "#FF8C00" },
                   ].map((role) => {
                     const active = formData.role === role.value;
@@ -386,53 +385,6 @@ export function RoleManagementAdmin() {
                 </div>
               </div>
 
-              {formData.role === "staff" && (
-                <div className="space-y-3">
-                  <div className="flex items-end justify-between gap-3">
-                    <div>
-                      <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Module Access</p>
-                      <p className="text-gray-600 mt-1" style={{ fontSize: 11 }}>Choose what this staff account can operate.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setFormData(f => ({ ...f, permissions: f.permissions.length === MODULES.length ? [] : [...MODULES] }))}
-                      className="px-3 py-1.5 rounded-xl border border-white/10 text-gray-300 hover:text-white hover:bg-white/5 font-black"
-                      style={{ fontSize: 11 }}
-                    >
-                      {formData.permissions.length === MODULES.length ? "Clear All" : "Select All"}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {MODULES.map((mod) => {
-                      const meta = MODULE_META[mod];
-                      const Icon = meta.icon;
-                      const checked = formData.permissions.includes(mod);
-                      return (
-                        <button
-                          key={mod}
-                          type="button"
-                          onClick={() => handleTogglePermission(mod)}
-                          className="rounded-2xl p-3 border text-left transition-all"
-                          style={{ background: checked ? `${meta.color}14` : "#101011", borderColor: checked ? `${meta.color}45` : "rgba(255,255,255,0.08)" }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${meta.color}18`, color: meta.color }}>
-                              <Icon className="w-5 h-5" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-white font-black truncate" style={{ fontSize: 13 }}>{mod}</p>
-                              <p className="text-gray-500 truncate" style={{ fontSize: 11 }}>{meta.desc}</p>
-                            </div>
-                            <span className="w-5 h-5 rounded-md flex items-center justify-center border" style={{ background: checked ? meta.color : "transparent", borderColor: checked ? meta.color : "rgba(255,255,255,0.18)" }}>
-                              {checked && <Check className="w-3.5 h-3.5 text-white" />}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="p-6 border-t border-white/5 flex gap-4 flex-shrink-0 bg-[#151516]">
@@ -449,6 +401,43 @@ export function RoleManagementAdmin() {
                 className="flex-1 py-3 rounded-xl font-bold text-white bg-[#FF8C00] hover:bg-[#e67e00] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingId ? "Save Changes" : "Create Account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl border border-red-500/25 bg-[#181819] p-6 shadow-2xl shadow-black/50">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(239,68,68,0.14)", border: "1px solid rgba(239,68,68,0.28)" }}>
+                <AlertTriangle className="w-6 h-6 text-red-400" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-white font-black" style={{ fontSize: 19 }}>Delete account?</h3>
+                <p className="text-gray-400 mt-2 leading-relaxed" style={{ fontSize: 13 }}>
+                  This will permanently remove <span className="text-white font-black">{deleteTarget.name}</span> and their login access.
+                </p>
+                <p className="text-gray-600 mt-2 break-all" style={{ fontSize: 12 }}>{deleteTarget.email}</p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="flex-1 py-3 rounded-xl font-bold text-white bg-white/5 hover:bg-white/10 transition-colors disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteAccount()}
+                disabled={deleting}
+                className="flex-1 py-3 rounded-xl font-bold text-white bg-red-600 hover:bg-red-500 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {deleting ? <><Loader2 className="w-4 h-4 animate-spin" /> Deleting...</> : <><Trash2 className="w-4 h-4" /> Delete</>}
               </button>
             </div>
           </div>

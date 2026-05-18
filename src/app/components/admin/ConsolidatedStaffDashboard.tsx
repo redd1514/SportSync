@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode';
 import {
   Activity, Calendar, Inbox, Shield, Menu, X, LogOut,
-  MapPin, AlertTriangle, AlertCircle, Check, Plus, Bell, Users,
+  MapPin, AlertTriangle, AlertCircle, Check, Bell, Users,
   DollarSign, Clock, UserCheck, Map, ChevronLeft, ChevronRight, CheckCircle,
   QrCode, Search, ShieldCheck, ScanLine, Building2, GraduationCap, Camera,
   Megaphone, XCircle, MessageSquare, User, Layers, Phone, Loader2,
@@ -560,7 +560,11 @@ function TicketVerification() {
         scannerRef.current = null;
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
-        if (/NotAllowed|Permission/i.test(msg)) {
+        if (/Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError/i.test(msg)) {
+          setCameraError(
+            'The scanner module is from an older app version. Refresh this page once, then open Scan QR again.'
+          );
+        } else if (/NotAllowed|Permission/i.test(msg)) {
           setCameraError('Camera access was blocked. Allow camera for this site in your browser, then open Scan again.');
         } else if (/NotFound|DevicesNotFound|no device/i.test(msg)) {
           setCameraError('No camera was found. Try another device or type the reference code manually.');
@@ -1171,8 +1175,18 @@ function TicketVerification() {
                   Align the <span className="text-blue-300 font-black">JRC SportSync</span> receipt QR inside the square. Other QR codes will show an error after scan.
                 </p>
                 {cameraError ? (
-                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 font-black" style={{ fontSize: 12 }}>
-                    {cameraError}
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-200 font-black space-y-3" style={{ fontSize: 12 }}>
+                    <p>{cameraError}</p>
+                    {/older app version|Refresh this page/i.test(cameraError) && (
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="w-full rounded-xl bg-amber-400 px-3 py-2 text-black font-black hover:bg-amber-300 transition-colors"
+                        style={{ fontSize: 12 }}
+                      >
+                        Refresh scanner
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div
@@ -2579,9 +2593,6 @@ function StaffCalendar() {
           <h2 className="text-white" style={{ fontSize: 26, fontWeight: 900 }}>Master Calendar</h2>
           <p className="text-gray-500" style={{ fontSize: 13 }}>View and manage bookings</p>
         </div>
-        <button onClick={() => setShowManualBooking(true)} className="flex items-center gap-2 bg-[#0047AB] text-white px-4 py-2 rounded-xl hover:bg-[#003a8c] transition-colors font-black" style={{ fontSize: 13 }}>
-          <Plus size={16} /> Manual Booking
-        </button>
       </div>
 
       <AnimatePresence>

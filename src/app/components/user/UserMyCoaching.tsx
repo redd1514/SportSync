@@ -926,7 +926,7 @@ function RescheduleResponseModal({
 
 export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?: any) => void }) {
   const { user, bookings } = useUser();
-  const { requests, coaches, updateRequestStatus, submitCoachReview, findCoachByEmail, refreshRequests, isLoading } = useCoaching();
+  const { requests, coaches, updateRequestStatus, submitCoachReview, findCoachByEmail, refreshRequests, refreshCoaches, isLoading } = useCoaching();
   const [activeTab, setActiveTab] = useState<"student" | "coach">("student");
   const [ticketReq, setTicketReq] = useState<CoachingRequest | null>(null);
   const [decision, setDecision] = useState<{ req: CoachingRequest; action: "reschedule_requested" } | null>(null);
@@ -934,6 +934,7 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
   const [reviewReq, setReviewReq] = useState<CoachingRequest | null>(null);
   const [reviewDetailsReq, setReviewDetailsReq] = useState<CoachingRequest | null>(null);
   const [showClearModal, setShowClearModal] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CoachingRequest["status"]>("all");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
@@ -1012,6 +1013,15 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
     setShowClearModal(false);
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([refreshRequests(), refreshCoaches()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto pb-24 md:pb-8" style={{ background: BG }}>
       <div className="max-w-6xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
@@ -1086,6 +1096,17 @@ export function UserMyCoaching({ onNavigate }: { onNavigate: (tab: any, params?:
               <h3 className="text-white font-black" style={{ fontSize: 17 }}>{activeTab === "coach" ? "Coach Inbox" : "My Sessions"}</h3>
               <div className="flex items-center gap-2">
                 <p style={{ color: TS, fontSize: 12 }}>{visibleList.length} item{visibleList.length === 1 ? "" : "s"}</p>
+                <button
+                  type="button"
+                  onClick={() => void handleRefresh()}
+                  disabled={isRefreshing || isLoading}
+                  className="px-3 py-1.5 rounded-xl font-black border flex items-center gap-1.5 disabled:opacity-60 transition-colors"
+                  style={{ color: "#cbd5e1", borderColor: BORDER, background: SURF2, fontSize: 11 }}
+                  title="Refresh coaching records"
+                >
+                  <RefreshCw size={12} className={isRefreshing || isLoading ? "animate-spin" : ""} />
+                  Refresh
+                </button>
                 {clearableSessionIds.length > 0 && (
                   <button onClick={() => setShowClearModal(true)} className="px-3 py-1.5 rounded-xl font-black border flex items-center gap-1.5"
                     style={{ color: "#cbd5e1", borderColor: BORDER, background: SURF2, fontSize: 11 }}>

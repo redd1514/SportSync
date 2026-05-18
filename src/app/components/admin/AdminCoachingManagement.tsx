@@ -151,7 +151,7 @@ export function AdminCoachingManagement() {
   const coaches = coachesRaw ?? [];
   const { updateBooking } = useUser();
   const { allSportNames } = useAddons();
-  const [activeTab, setActiveTab] = useState<Tab>("requests");
+  const [activeTab, setActiveTab] = useState<Tab>("coaches");
   const [showCoachModal, setShowCoachModal] = useState(false);
   const [editingCoach, setEditingCoach] = useState<Coach | null>(null);
   const [verifyingRequest, setVerifyingRequest] = useState<CoachingRequest | null>(null);
@@ -461,11 +461,11 @@ export function AdminCoachingManagement() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 bg-[#131314] p-1 rounded-xl border border-white/5 w-fit">
-        {(['requests', 'coaches', 'applications'] as Tab[]).map(t => (
+        {(['coaches', 'applications'] as Tab[]).map(t => (
           <button key={t} onClick={() => setActiveTab(t)}
             className="px-4 py-2 rounded-lg font-black transition-all capitalize"
             style={{ fontSize: 12, background: activeTab === t ? '#F97316' : 'transparent', color: activeTab === t ? 'white' : '#666' }}>
-            {t === 'requests' ? 'Coaching Requests' : t === 'coaches' ? 'Coach Directory' : 'Coach Applications'}
+            {t === 'coaches' ? 'Coach Directory' : 'Coach Applications'}
           </button>
         ))}
       </div>
