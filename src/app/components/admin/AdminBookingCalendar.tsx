@@ -63,6 +63,13 @@ function isBookingPayableAtDesk(booking: any) {
   return booking?.checkInStatus === 'checked_in' || booking?.status === 'checked_in' || booking?.status === 'completed';
 }
 
+function isLigaBooking(booking: any) {
+  const source = String(booking?.source || '').toLowerCase();
+  const addOns = String(booking?.addOns || booking?.add_ons || '').toLowerCase();
+  const customerName = String(booking?.customerName || booking?.customer_name || '').toLowerCase();
+  return source.includes('liga') || addOns.includes('liga') || customerName.includes('liga');
+}
+
 export function AdminBookingCalendar() {
   const { bookings: staticBookings, updateBooking, deleteBooking, cancellationRequests, updateCancellationRequest } = useUser();
   const { requests, updateRequestStatus } = useCoaching();
@@ -324,8 +331,9 @@ export function AdminBookingCalendar() {
                         const top = (startHour - 6) * 80;
                         const height = (booking.duration || 1) * 80;
                         const displayState = getCalendarBookingState(booking);
-                        const statusColor = STATUS_COLORS[displayState.key] || STATUS_COLORS.pending;
-                        const borderColor = STATUS_BORDER_COLORS[displayState.key] || STATUS_BORDER_COLORS.pending;
+                        const liga = isLigaBooking(booking);
+                        const statusColor = liga ? 'bg-orange-500' : (STATUS_COLORS[displayState.key] || STATUS_COLORS.pending);
+                        const borderColor = liga ? 'border-orange-300' : (STATUS_BORDER_COLORS[displayState.key] || STATUS_BORDER_COLORS.pending);
 
                         return (
                           <div
@@ -342,10 +350,11 @@ export function AdminBookingCalendar() {
                             <div className="flex flex-col h-full">
                               <p className="text-white font-bold text-xs truncate drop-shadow-md">{booking.customerName}</p>
                               <p className="text-white/80 text-[10px] font-medium mt-0.5">{booking.time} ({booking.duration}h)</p>
+                              {liga && <p className="text-white text-[9px] font-black mt-0.5 tracking-wider">LIGA</p>}
                               {booking.isCoaching && <p className="text-white text-[9px] font-black mt-0.5">COACHING</p>}
                               <div className="mt-auto pt-1">
                                 <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold bg-black/30 text-white uppercase tracking-wider">
-                                  {displayState.label}
+                                  {liga ? 'Liga' : displayState.label}
                                 </span>
                               </div>
                             </div>
@@ -436,7 +445,8 @@ export function AdminBookingCalendar() {
                         const top = (startHour - 6) * 80;
                         const height = (booking.duration || 1) * 80;
                         const displayState = getCalendarBookingState(booking);
-                        const statusColor = STATUS_COLORS[displayState.key] || STATUS_COLORS.pending;
+                        const liga = isLigaBooking(booking);
+                        const statusColor = liga ? 'bg-orange-500' : (STATUS_COLORS[displayState.key] || STATUS_COLORS.pending);
                         
                         // Prevent overlapping visually by offsetting if multiple bookings at same time
                         const overlapping = dayBookings.filter(b => timeToDecimal(b.time) === startHour);
@@ -457,7 +467,7 @@ export function AdminBookingCalendar() {
                             title={`${booking.customerName} - ${booking.court}`}
                           >
                             <p className="text-white font-bold text-[10px] leading-tight truncate">{booking.customerName}</p>
-                            <p className="text-white/80 text-[9px] truncate">{booking.court}</p>
+                            <p className="text-white/80 text-[9px] truncate">{liga ? 'LIGA' : booking.court}</p>
                           </div>
                         );
                       })}
@@ -529,9 +539,9 @@ export function AdminBookingCalendar() {
               {dayBookings.slice(0, 3).map(booking => (
                 <div 
                   key={booking.id} 
-                  className={`text-[10px] truncate px-1.5 py-0.5 rounded ${STATUS_COLORS[getCalendarBookingState(booking).key] || STATUS_COLORS.pending} text-white font-medium`}
+                  className={`text-[10px] truncate px-1.5 py-0.5 rounded ${isLigaBooking(booking) ? 'bg-orange-500' : (STATUS_COLORS[getCalendarBookingState(booking).key] || STATUS_COLORS.pending)} text-white font-medium`}
                 >
-                  {booking.time} - {booking.customerName}
+                  {booking.time} - {isLigaBooking(booking) ? 'Liga Booking' : booking.customerName}
                 </div>
               ))}
               {dayBookings.length > 3 && (
@@ -620,13 +630,14 @@ export function AdminBookingCalendar() {
           <div className="hidden lg:flex items-center gap-3 mr-4">
             {Object.entries({
               pending_payment: 'Reserved',
+              liga: 'Liga',
               checked_in: 'Checked in',
               pending_verification: 'Verification',
               cancelled: 'Cancelled',
               completed: 'Completed'
             }).map(([status, label]) => (
               <div key={status} className="flex items-center gap-1.5">
-                <div className={`w-3 h-3 rounded-full ${STATUS_COLORS[status]}`} />
+                <div className={`w-3 h-3 rounded-full ${status === 'liga' ? 'bg-orange-500' : STATUS_COLORS[status]}`} />
                 <span className="text-xs text-gray-400 font-bold">{label}</span>
               </div>
             ))}

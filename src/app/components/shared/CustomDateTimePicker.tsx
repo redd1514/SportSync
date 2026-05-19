@@ -13,6 +13,8 @@ interface CustomDateTimePickerProps {
   startHour?: number;
   endHour?: number;
   sessionDurationHours?: number;
+  timeLabel?: string;
+  timePickerTitle?: string;
 }
 
 const BG_CARD  = '#1C1E27';
@@ -34,6 +36,8 @@ export function CustomDateTimePicker({
   startHour = 7,
   endHour = 23,
   sessionDurationHours = 1,
+  timeLabel = 'Start Time',
+  timePickerTitle = 'Select Start Time',
 }: CustomDateTimePickerProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     if (selectedDate) return new Date(selectedDate + 'T00:00:00');
@@ -235,7 +239,7 @@ export function CustomDateTimePicker({
       {/* ── Time Picker ── */}
       <div className="relative">
         <label style={{ color: MUTED, fontSize: 11, fontWeight: 700, display: 'block', marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          Start Time
+          {timeLabel}
         </label>
         <button
           onClick={() => { setShowTimePicker(!showTimePicker); setShowDatePicker(false); }}
@@ -268,7 +272,7 @@ export function CustomDateTimePicker({
               style={{ background: BG_CARD, border: `1px solid ${BORDER_HL}`, boxShadow: `0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px ${BORDER_HL}` }}
             >
               <div className="p-3 border-b" style={{ borderColor: BORDER }}>
-                <p style={{ color: TEXT, fontSize: 12, fontWeight: 800 }}>Select Start Time</p>
+                <p style={{ color: TEXT, fontSize: 12, fontWeight: 800 }}>{timePickerTitle}</p>
                 <p style={{ color: MUTED, fontSize: 11 }}>
                   {sessionDurationHours > 1
                     ? `${sessionDurationHours}-hour booking. Latest start is ${latestStartHour % 12 || 12}:00 ${latestStartHour >= 12 ? 'PM' : 'AM'}`

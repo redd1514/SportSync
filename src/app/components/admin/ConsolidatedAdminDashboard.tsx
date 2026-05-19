@@ -989,7 +989,7 @@ function MasterCalendarTab() {
   const [showBulkBooking, setShowBulkBooking] = useState(false);
   const [manualForm, setManualForm] = useState({ customerName: '', contactNumber: '09', sport: 'Basketball', court: '', date: '', time: '', duration: 1 });
   const [bulkForm, setBulkForm] = useState({ sport: 'Basketball', court: '', time: '', startDate: '', endDate: '', recurringPattern: 'weekly', duration: 2 });
-  const [bulkEndTime, setBulkEndTime] = useState('00:00');
+  const [bulkEndTime, setBulkEndTime] = useState('');
   const [bulkSuccess, setBulkSuccess] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState('');
@@ -1015,6 +1015,13 @@ function MasterCalendarTab() {
   );
   const courtOptions = publishedCourtOptions.filter((court) => court.sport === bulkForm.sport);
   const selectedBulkCourt = courtOptions.find(court => court.name === bulkForm.court);
+  const timeToMinutes = (time: string) => {
+    const [h = '0', m = '0'] = String(time || '').slice(0, 5).split(':');
+    return Number(h) * 60 + Number(m);
+  };
+  const derivedBulkDuration = bulkForm.time && bulkEndTime
+    ? Math.max(0, (timeToMinutes(bulkEndTime) - timeToMinutes(bulkForm.time)) / 60)
+    : 0;
 
   useEffect(() => {
     if (!sportOptions.includes(bulkForm.sport) && sportOptions[0]) {
@@ -1037,14 +1044,18 @@ function MasterCalendarTab() {
   };
 
   const handleBulkBooking = async () => {
-    if (!bulkForm.startDate || !bulkForm.endDate || !bulkForm.time || !bulkForm.court) {
-      setBulkError('Choose a court, start date, end date, and start time.');
+    if (!bulkForm.startDate || !bulkForm.endDate || !bulkForm.time || !bulkEndTime || !bulkForm.court) {
+      setBulkError('Choose a court, start date, end date, start time, and end time.');
       return;
     }
     const start = new Date(`${bulkForm.startDate}T00:00:00`);
     const end = new Date(`${bulkForm.endDate}T00:00:00`);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
       setBulkError('Use a valid date range.');
+      return;
+    }
+    if (derivedBulkDuration <= 0) {
+      setBulkError('End time must be later than start time.');
       return;
     }
 
@@ -1062,19 +1073,19 @@ function MasterCalendarTab() {
       while (current <= end && attempts < 20) {
         attempts++;
         const date = current.toISOString().split('T')[0];
-        const amount = Math.round(calcCourtPrice(bulkForm.sport, date, bulkForm.time.slice(0, 5)) * bulkForm.duration);
+        const amount = Math.round(calcCourtPrice(bulkForm.sport, date, bulkForm.time.slice(0, 5)) * derivedBulkDuration);
         try {
           const out = await createDeskBooking({
             court: bulkForm.court,
             sport: bulkForm.sport,
             booking_date: date,
             start_time: bulkForm.time,
-            duration_hours: bulkForm.duration,
+            duration_hours: derivedBulkDuration,
             total_price: amount,
             customer_name: 'Liga Booking',
             payment_method: 'cash',
             source: 'bulk_liga',
-            add_ons: `Bulk/Liga booking (${bulkForm.recurringPattern})`,
+            add_ons: `Bulk/Liga booking (${bulkForm.recurringPattern}, ${bulkForm.time.slice(0, 5)}-${bulkEndTime.slice(0, 5)})`,
             staff_id: staffId,
             facility_map_id: selectedBulkCourt?.mapId,
           });
@@ -1121,6 +1132,29 @@ function MasterCalendarTab() {
         <div>
           <h2 className="text-white" style={{ fontSize: 26, fontWeight: 900 }}>Master Calendar</h2>
           <p className="text-gray-500" style={{ fontSize: 13 }}>Manage all bookings and schedules</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowManualBooking(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#1A1A1A] px-4 py-2.5 text-white font-black hover:bg-white/5 transition-colors"
+            style={{ fontSize: 13 }}
+          >
+            <Plus size={16} />
+            Manual Booking
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setBulkError('');
+              setShowBulkBooking(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-white font-black hover:brightness-110 transition-all"
+            style={{ fontSize: 13, background: 'linear-gradient(135deg,#FF8C00,#e67e00)' }}
+          >
+            <Calendar size={16} />
+            Liga Booking
+          </button>
         </div>
       </div>
 
@@ -1284,7 +1318,7 @@ function MasterCalendarTab() {
                     return (
                       <button key={s} type="button"
                         onClick={() => {
-                          const firstCourt = ALL_COURTS.find(court => court.sport === s)?.name || '';
+                          const firstCourt = publishedCourtOptions.find(court => court.sport === s)?.name || '';
                           setBulkForm(f => ({ ...f, sport: s, court: firstCourt }));
                         }}
                         className="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all"
@@ -1331,7 +1365,7 @@ function MasterCalendarTab() {
                   />
                 </div>
                 <div>
-                  <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>END DATE</p>
+                  <p className="text-gray-500 font-black mb-2" style={{ fontSize: 11, letterSpacing: 0.5 }}>END DATE & TIME</p>
                   <CustomDateTimePicker
                     selectedDate={bulkForm.endDate}
                     selectedTime={bulkEndTime}
@@ -1339,6 +1373,9 @@ function MasterCalendarTab() {
                     onTimeChange={setBulkEndTime}
                     minDate={bulkForm.startDate || new Date().toISOString().split('T')[0]}
                     accentColor="#FF8C00"
+                    timeLabel="End Time"
+                    timePickerTitle="Select End Time"
+                    sessionDurationHours={0}
                   />
                 </div>
               </div>
@@ -1364,13 +1401,11 @@ function MasterCalendarTab() {
               </div>
               <div>
                 <label className="text-gray-400 block mb-2" style={{ fontSize: 13 }}>Duration</label>
-                <div className="flex items-center gap-2 rounded-2xl bg-[#101010] border border-white/8 p-2">
-                  <button type="button" onClick={() => setBulkForm(f => ({ ...f, duration: Math.max(1, f.duration - 1) }))} className="w-9 h-9 rounded-xl bg-white/5 text-gray-300 hover:text-white font-black">-</button>
+                <div className="flex items-center gap-2 rounded-2xl bg-[#101010] border border-white/8 p-2 min-h-[57px]">
                   <div className="flex-1 text-center">
-                    <p className="text-white font-black" style={{ fontSize: 18 }}>{bulkForm.duration}h</p>
-                    <p className="text-gray-600" style={{ fontSize: 10 }}>per booking</p>
+                    <p className="text-white font-black" style={{ fontSize: 18 }}>{derivedBulkDuration > 0 ? `${derivedBulkDuration}h` : '--'}</p>
+                    <p className="text-gray-600" style={{ fontSize: 10 }}>from start/end time</p>
                   </div>
-                  <button type="button" onClick={() => setBulkForm(f => ({ ...f, duration: Math.min(8, f.duration + 1) }))} className="w-9 h-9 rounded-xl bg-white/5 text-gray-300 hover:text-white font-black">+</button>
                 </div>
               </div>
               </div>
@@ -1378,13 +1413,13 @@ function MasterCalendarTab() {
                 <p className="text-gray-500 font-black uppercase" style={{ fontSize: 10 }}>Preview</p>
                 <p className="text-white font-black mt-1" style={{ fontSize: 14 }}>{bulkForm.court || 'Choose a court'} · {bulkForm.sport}</p>
                 <p className="text-gray-400 mt-1" style={{ fontSize: 12 }}>
-                  {bulkForm.startDate || 'Start date'} to {bulkForm.endDate || 'End date'} · {bulkForm.time || 'Start time'} · {bulkForm.recurringPattern === 'weekly' ? 'Every week' : 'Every 2 weeks'}
+                  {bulkForm.startDate || 'Start date'} to {bulkForm.endDate || 'End date'} · {bulkForm.time || 'Start time'}-{bulkEndTime || 'End time'} · {bulkForm.recurringPattern === 'weekly' ? 'Every week' : 'Every 2 weeks'}
                 </p>
               </div>
               {bulkError && <p className="text-red-400 font-black" style={{ fontSize: 12 }}>{bulkError}</p>}
               <button
                 onClick={() => void handleBulkBooking()}
-                disabled={bulkBusy || !bulkForm.court}
+                disabled={bulkBusy || !bulkForm.court || !bulkForm.startDate || !bulkForm.endDate || !bulkForm.time || !bulkEndTime}
                 className="w-full bg-[#FF8C00] text-white py-3 rounded-xl font-black hover:bg-[#e67e00] transition-colors disabled:opacity-60 disabled:cursor-wait flex items-center justify-center gap-2"
                 style={{ fontSize: 14 }}
               >
